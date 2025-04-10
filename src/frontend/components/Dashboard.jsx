@@ -26,6 +26,11 @@ const Dashboard = () => {
           headers: { Authorization: `Bearer ${token}` },
         });
         setUser(response.data);
+
+        // Проверяем, если пользователь на Free плане и пытается зайти на /sheets
+        if (response.data.plan === 'free' && location.pathname === '/app/sheets') {
+          navigate('/app/profile'); // Перенаправляем на профиль
+        }
       } catch (err) {
         localStorage.removeItem('token');
         navigate('/login');
@@ -45,7 +50,7 @@ const Dashboard = () => {
 
     fetchUser();
     fetchLinks();
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
   const handleAddLinks = async (e) => {
     e.preventDefault();

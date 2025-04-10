@@ -289,7 +289,7 @@ const Profile = () => {
       return link.isIndexable && link.responseCode === '200' && link.rel !== 'not found' && isCanonicalMatch;
     }).length,
     problem: links.filter(link => {
-      const isCanonicalMatch = !link.canonicalUrl || link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '');
+      const isCanonicalMatch = !link.canonicalUrl || link.url.toLowerCase().replace(/\/$/, '') === link.canonialUrl.toLowerCase().replace(/\/$/, '');
       return !(link.isIndexable && link.responseCode === '200' && link.rel !== 'not found' && isCanonicalMatch);
     }).length,
   };
@@ -344,7 +344,21 @@ const Profile = () => {
     premium: 200000,
     enterprise: Infinity
   };
-  const linksRemaining = user?.isSuperAdmin ? 'Unlimited' : (planLimits[user?.plan] || 0) - (user?.linksCheckedThisMonth || 0);
+  const linksChecked = user?.linksCheckedThisMonth || 0;
+  const linkLimit = user?.isSuperAdmin ? Infinity : planLimits[user?.plan] || 0;
+  const linkPercentage = user?.isSuperAdmin ? 100 : linkLimit ? Math.min((linksChecked / linkLimit) * 100, 100) : 0;
+
+  // Лимиты таблиц Google Sheets
+  const planSpreadsheetLimits = {
+    free: 0,
+    basic: 1,
+    pro: 5,
+    premium: 20,
+    enterprise: Infinity
+  };
+  const maxSpreadsheets = user?.isSuperAdmin ? Infinity : planSpreadsheetLimits[user?.plan] || 0;
+  const spreadsheetCount = spreadsheets.length;
+  const spreadsheetPercentage = user?.isSuperAdmin ? 100 : maxSpreadsheets ? Math.min((spreadsheetCount / maxSpreadsheets) * 100, 100) : 0;
 
   return (
     <div className="relative">
@@ -527,9 +541,42 @@ const Profile = () => {
                       <p className="text-lg text-gray-800">{new Date(user.subscriptionEnd).toLocaleDateString()}</p>
                     </div>
                   )}
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Links Remaining</p>
-                    <p className="text-lg text-gray-800">{linksRemaining}</p>
+                  {/* Лимиты с прогресс-барами */}
+                  <div className="col-span-1 sm:col-span-2">
+                    <p className="text-sm font-medium text-gray-500">Link Analysis Limit</p>
+                    {user?.isSuperAdmin ? (
+                      <p className="text-lg text-gray-800">Unlimited</p>
+                    ) : (
+                      <>
+                        <div className="w-full bg-gray-200 rounded-full h-4 mt-1">
+                          <div
+                            className={`bg-green-500 h-4 rounded-full ${linkPercentage > 80 ? 'bg-red-500' : 'bg-green-500'}`}
+                            style={{ width: `${linkPercentage}%` }}
+                          ></div>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {linksChecked} / {linkLimit} links checked this month
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <div className="col-span-1 sm:col-span-2">
+                    <p className="text-sm font-medium text-gray-500">Google Sheets Limit</p>
+                    {user?.isSuperAdmin ? (
+                      <p className="text-lg text-gray-800">Unlimited</p>
+                    ) : (
+                      <>
+                        <div className="w-full bg-gray-200 rounded-full h-4 mt-1">
+                          <div
+                            className={`bg-green-500 h-4 rounded-full ${spreadsheetPercentage > 80 ? 'bg-red-500' : 'bg-green-500'}`}
+                            style={{ width: `${spreadsheetPercentage}%` }}
+                          ></div>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {spreadsheetCount} / {maxSpreadsheets} spreadsheets added
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               )}

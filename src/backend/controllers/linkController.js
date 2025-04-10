@@ -174,7 +174,6 @@ const cancelSubscription = async (req, res) => {
 // Удаление аккаунта
 const deleteAccount = async (req, res) => {
   try {
-    // Проверяем, что req.userId определён
     if (!req.userId) {
       console.error('deleteAccount: req.userId is undefined');
       return res.status(400).json({ error: 'User ID is missing' });
@@ -191,7 +190,6 @@ const deleteAccount = async (req, res) => {
       return res.status(403).json({ message: 'SuperAdmin cannot delete their account' });
     }
 
-    // Удаляем связанные данные
     console.log(`deleteAccount: Deleting FrontendLinks for user ${req.userId}`);
     const frontendLinksResult = await FrontendLink.deleteMany({ userId: req.userId });
     console.log(`deleteAccount: Deleted ${frontendLinksResult.deletedCount} FrontendLinks`);
@@ -200,7 +198,6 @@ const deleteAccount = async (req, res) => {
     const spreadsheetsResult = await Spreadsheet.deleteMany({ userId: req.userId });
     console.log(`deleteAccount: Deleted ${spreadsheetsResult.deletedCount} Spreadsheets`);
 
-    // Удаляем пользователя
     console.log(`deleteAccount: Deleting user ${req.userId}`);
     const userDeleteResult = await User.findByIdAndDelete(req.userId);
     if (!userDeleteResult) {
@@ -738,6 +735,11 @@ const addSpreadsheet = async (req, res) => {
 
 const getSpreadsheets = async (req, res) => {
   try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
     const spreadsheets = await Spreadsheet.find({ userId: req.userId });
     res.json(spreadsheets);
   } catch (error) {
@@ -761,11 +763,15 @@ const deleteSpreadsheet = async (req, res) => {
 const runSpreadsheetAnalysis = async (req, res) => {
   const { spreadsheetId } = req.params;
   try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
+
     const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, userId: req.userId });
     if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
 
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
     const planLinkLimits = {
       basic: 5000,
       pro: 20000,
