@@ -10,7 +10,7 @@ const Dashboard = () => {
   const [targetDomain, setTargetDomain] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Для десктопа
+  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 640);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -62,7 +62,7 @@ const Dashboard = () => {
       setUrlList('');
       setTargetDomain('');
     } catch (err) {
-      setError('Failed to add links');
+      setError(err.response?.data?.message || 'Failed to add links');
     } finally {
       setLoading(false);
     }
@@ -77,7 +77,7 @@ const Dashboard = () => {
       });
       setLinks(response.data);
     } catch (err) {
-      setError('Failed to check links');
+      setError(err.response?.data?.message || 'Failed to check links');
     } finally {
       setLoading(false);
     }
@@ -99,7 +99,6 @@ const Dashboard = () => {
   };
 
   const handleDeleteAllLinks = async () => {
-    if (!confirm('Are you sure you want to delete all links?')) return;
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
@@ -123,13 +122,22 @@ const Dashboard = () => {
 
   const isActive = (path) => location.pathname === path;
 
+  // Лимиты ссылок
+  const planLimits = {
+    free: 100,
+    basic: 10000,
+    pro: 50000,
+    premium: 200000,
+    enterprise: Infinity
+  };
+  const linksRemaining = user.isSuperAdmin ? 'Unlimited' : planLimits[user.plan] - (user.linksCheckedThisMonth || 0);
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-50 font-sans">
       <header className="bg-green-600 text-white py-4 shadow-lg sticky top-0 z-50">
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <motion.h1
-              onClick={() => navigate('/')}
               className="text-2xl sm:text-3xl font-bold tracking-tight"
               initial={{ opacity: 0, x: -50 }}
               animate={{ opacity: 1, x: 0 }}
@@ -162,7 +170,7 @@ const Dashboard = () => {
             </svg>
             Manual Links
           </button>
-          {user.isSuperAdmin && (
+          {user.plan !== 'free' && (
             <button
               onClick={() => navigate('/app/sheets')}
               className={`px-3 py-1 rounded flex items-center gap-2 text-sm ${isActive('/app/sheets') ? 'bg-green-700' : 'hover:bg-green-700'}`}
@@ -173,6 +181,15 @@ const Dashboard = () => {
               Google Sheets
             </button>
           )}
+          <button
+            onClick={() => navigate('/app/profile')}
+            className={`px-3 py-1 rounded flex items-center gap-2 text-sm ${isActive('/app/profile') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            Profile
+          </button>
           <button
             onClick={handleLogout}
             className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 flex items-center gap-2 text-sm"
@@ -221,7 +238,7 @@ const Dashboard = () => {
                   <span className={isSidebarOpen ? 'block' : 'hidden'}>Manual Links</span>
                 </button>
               </li>
-              {user.isSuperAdmin && (
+              {user.plan !== 'free' && (
                 <li className="mb-4">
                   <button
                     onClick={() => navigate('/app/sheets')}
@@ -234,6 +251,22 @@ const Dashboard = () => {
                   </button>
                 </li>
               )}
+              <li className="mb-4">
+                <button
+                  onClick={() => navigate('/app/profile')}
+                  className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/profile') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  <span className={isSidebarOpen ? 'block' : 'hidden'}>Profile</span>
+                </button>
+              </li>
+              <li className="mt-4">
+                <div className={`text-sm text-green-200 mb-2 ${isSidebarOpen ? 'block' : 'hidden'}`}>
+                  Links Remaining: {linksRemaining}
+                </div>
+              </li>
               <li className="mt-auto">
                 <div className={`text-sm text-green-200 mb-2 ${isSidebarOpen ? 'block' : 'hidden'}`}>
                   Logged in as: {user.username}

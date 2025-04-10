@@ -24,10 +24,18 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
 
 app.use(express.json());
 app.use(cors({
-  origin: `http://${process.env.FRONTEND_DOMAIN}:${process.env.FRONTEND_PORT}`
+  origin: `http://${process.env.FRONTEND_DOMAIN}:${process.env.FRONTEND_PORT}`,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use('/api/links', linkRoutes);
+
+// Логирование всех запросов для отладки
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
 
 app.listen(port, () => {
   console.log(`Backend running at http://localhost:${port}`);

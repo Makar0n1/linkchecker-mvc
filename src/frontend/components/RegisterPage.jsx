@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 
-const LoginPage = () => {
+const RegisterPage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -11,14 +11,14 @@ const LoginPage = () => {
 
   const apiBaseUrl = `http://${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
-  const handleLogin = async (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.post(`${apiBaseUrl}/login`, { username, password });
-      localStorage.setItem('token', response.data.token);
-      navigate('/app');
+      await axios.post(`${apiBaseUrl}/register`, { username, password });
+      alert('Registration successful! Please login.');
+      navigate('/login');
     } catch (err) {
-      setError('Invalid login or password');
+      setError(err.response?.data?.error || 'Registration failed');
     }
   };
 
@@ -58,8 +58,8 @@ const LoginPage = () => {
         animate="visible"
       >
         <div className="container max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
-          <h1 className="text-3xl font-semibold text-gray-800 text-center mb-6">Login</h1>
-          <form onSubmit={handleLogin} className="flex flex-col gap-4">
+          <h1 className="text-3xl font-semibold text-gray-800 text-center mb-6">Register</h1>
+          <form onSubmit={handleRegister} className="flex flex-col gap-4">
             <input
               type="text"
               value={username}
@@ -78,14 +78,14 @@ const LoginPage = () => {
               type="submit"
               className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
             >
-              Login
+              Register
             </button>
           </form>
           {error && <p className="text-red-500 mt-4 text-center text-sm">{error}</p>}
           <p className="text-gray-600 text-center mt-4 text-sm">
-            Don't have an account?{' '}
-            <Link to="/register" className="text-green-600 hover:underline">
-              Register here
+            Already have an account?{' '}
+            <Link to="/login" className="text-green-600 hover:underline">
+              Login here
             </Link>
           </p>
         </div>
@@ -106,4 +106,4 @@ const LoginPage = () => {
   );
 };
 
-export default LoginPage;
+export default RegisterPage;

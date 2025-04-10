@@ -1,4 +1,3 @@
-const Link = require('../models/Link');
 const FrontendLink = require('../models/FrontendLink');
 const Spreadsheet = require('../models/Spreadsheet');
 const User = require('../models/User');
@@ -29,59 +28,63 @@ let pLimit;
 
 const authMiddleware = async (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No token provided' });
+  if (!token) {
+    console.log('authMiddleware: No token provided');
+    return res.status(401).json({ error: 'No token provided' });
+  }
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    console.log(`authMiddleware: Token verified, userId: ${decoded.userId}`);
     req.userId = decoded.userId;
     next();
   } catch (error) {
+    console.error('authMiddleware: Invalid token', error);
     res.status(401).json({ error: 'Invalid token' });
   }
 };
 
 const superAdminMiddleware = async (req, res, next) => {
   const user = await User.findById(req.userId);
-  if (!user || !user.isSuperAdmin) return res.status(403).json({ error: 'SuperAdmin access required' });
+  if (!user || !user.isSuperAdmin) {
+    console.log(`superAdminMiddleware: Access denied for user ${req.userId}`);
+    return res.status(403).json({ error: 'SuperAdmin access required' });
+  }
   next();
 };
 
 const registerUser = async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, isSuperAdmin } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   try {
-    const user = new User({ username, password }); // Без isSuperAdmin, только через терминал
+    const user = new User({
+      username,
+      password,
+      isSuperAdmin: isSuperAdmin || false,
+      plan: isSuperAdmin ? 'enterprise' : 'free',
+      subscriptionStatus: isSuperAdmin ? 'active' : 'inactive'
+    });
     await user.save();
     res.status(201).json({ message: 'User registered', userId: user._id });
   } catch (error) {
+    console.error('registerUser: Error registering user', error);
     res.status(400).json({ error: 'Username taken or invalid data' });
   }
 };
 
 const loginUser = async (req, res) => {
   const { username, password } = req.body;
-  console.log('Login attempt:', { username, password });
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   try {
-    console.log('Searching for user:', username);
     const user = await User.findOne({ username });
-    if (!user) {
-      console.log('User not found:', username);
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    console.log('User found:', user._id);
-    console.log('Comparing password...');
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      console.log('Password mismatch');
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    console.log('Password match');
-    console.log('JWT_SECRET:', process.env.JWT_SECRET);
+    if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
+
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '1h' });
-    console.log('Token generated:', token);
-    res.json({ token, isSuperAdmin: user.isSuperAdmin });
+    res.json({ token, isSuperAdmin: user.isSuperAdmin, plan: user.plan });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('loginUser: Error logging in', error);
     res.status(500).json({ error: 'Login failed', details: error.message });
   }
 };
@@ -92,7 +95,138 @@ const getUserInfo = async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
   } catch (error) {
-    res.status(500).json({ error: 'Error fetching user info' });
+    console.error('getUserInfo: Error fetching user info', error);
+    res.status(500).json({ error: 'Error fetching user info', details: error.message });
+  }
+};
+
+// Выбор плана
+const selectPlan = async (req, res) => {
+  const { plan } = req.body;
+  const validPlans = ['free', 'basic', 'pro', 'premium', 'enterprise'];
+  if (!validPlans.includes(plan)) {
+    return res.status(400).json({ message: 'Invalid plan' });
+  }
+
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.isSuperAdmin) {
+      return res.status(403).json({ message: 'SuperAdmin cannot change plan' });
+    }
+    user.plan = plan;
+    user.subscriptionStatus = 'pending'; // Ожидает оплаты
+    await user.save();
+    res.json({ message: 'Plan selected, please proceed to payment' });
+  } catch (error) {
+    console.error('selectPlan: Error selecting plan', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// Имитация оплаты (для локальной разработки)
+const processPayment = async (req, res) => {
+  const { cardNumber, cardHolder, expiryDate, cvv, autoPay } = req.body;
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.isSuperAdmin) {
+      return res.status(403).json({ message: 'SuperAdmin does not need to pay' });
+    }
+
+    if (cardNumber && cardHolder && expiryDate && cvv) {
+      user.paymentDetails = { cardNumber, cardHolder, expiryDate, cvv };
+    }
+    user.autoPay = autoPay || false;
+    if (user.subscriptionStatus === 'pending') {
+      user.subscriptionStatus = 'active';
+      user.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 дней
+    }
+    await user.save();
+    res.json({ message: user.subscriptionStatus === 'pending' ? 'Payment successful, plan activated' : 'Payment details updated' });
+  } catch (error) {
+    console.error('processPayment: Error processing payment', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// Отмена подписки
+const cancelSubscription = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.isSuperAdmin) {
+      return res.status(403).json({ message: 'SuperAdmin cannot cancel subscription' });
+    }
+    user.plan = 'free';
+    user.subscriptionStatus = 'inactive';
+    user.subscriptionEnd = null;
+    user.autoPay = false;
+    await user.save();
+    res.json({ message: 'Subscription cancelled, reverted to Free plan' });
+  } catch (error) {
+    console.error('cancelSubscription: Error cancelling subscription', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// Удаление аккаунта
+const deleteAccount = async (req, res) => {
+  try {
+    // Проверяем, что req.userId определён
+    if (!req.userId) {
+      console.error('deleteAccount: req.userId is undefined');
+      return res.status(400).json({ error: 'User ID is missing' });
+    }
+
+    console.log(`deleteAccount: Starting account deletion for user ${req.userId}`);
+    const user = await User.findById(req.userId);
+    if (!user) {
+      console.error(`deleteAccount: User not found for ID ${req.userId}`);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (user.isSuperAdmin) {
+      console.log(`deleteAccount: Attempt to delete SuperAdmin account (ID: ${req.userId})`);
+      return res.status(403).json({ message: 'SuperAdmin cannot delete their account' });
+    }
+
+    // Удаляем связанные данные
+    console.log(`deleteAccount: Deleting FrontendLinks for user ${req.userId}`);
+    const frontendLinksResult = await FrontendLink.deleteMany({ userId: req.userId });
+    console.log(`deleteAccount: Deleted ${frontendLinksResult.deletedCount} FrontendLinks`);
+
+    console.log(`deleteAccount: Deleting Spreadsheets for user ${req.userId}`);
+    const spreadsheetsResult = await Spreadsheet.deleteMany({ userId: req.userId });
+    console.log(`deleteAccount: Deleted ${spreadsheetsResult.deletedCount} Spreadsheets`);
+
+    // Удаляем пользователя
+    console.log(`deleteAccount: Deleting user ${req.userId}`);
+    const userDeleteResult = await User.findByIdAndDelete(req.userId);
+    if (!userDeleteResult) {
+      console.error(`deleteAccount: Failed to delete user ${req.userId}, user not found`);
+      return res.status(404).json({ error: 'User not found during deletion' });
+    }
+
+    console.log(`deleteAccount: Account deleted successfully for user ${req.userId}`);
+    res.json({ message: 'Account deleted successfully' });
+  } catch (error) {
+    console.error(`deleteAccount: Error deleting account for user ${req.userId}:`, error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// Обновление профиля
+const updateProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.profile = req.body;
+    await user.save();
+    res.json({ message: 'Profile updated successfully' });
+  } catch (error) {
+    console.error('updateProfile: Error updating profile', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
@@ -101,7 +235,6 @@ const checkLinkStatus = async (link) => {
   try {
     console.log(`Checking URL: ${link.url} for domain: ${link.targetDomain}`);
 
-    // Массив User-Agent'ов и заголовков
     const userAgents = [
       {
         ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
@@ -373,7 +506,7 @@ const checkLinkStatus = async (link) => {
         const hasSvg = $(a).find('svg').length > 0;
         const hasImg = $(a).find('img').length > 0;
         const hasIcon = $(a).find('i').length > 0;
-        const hasChildren = $(a).children().length > 0;
+        const hasChildren = $(a).find('children').length > 0;
         linksFound = {
           href: href,
           rel: $(a).attr('rel') || '',
@@ -434,9 +567,9 @@ const checkLinkStatus = async (link) => {
   }
 };
 
-const processLinksInBatches = async (links, batchSize = 5) => {
+const processLinksInBatches = async (links, batchSize = 5, concurrency) => {
   if (!pLimit) await new Promise(resolve => setTimeout(resolve, 100));
-  const limit = pLimit(10);
+  const limit = pLimit(concurrency);
   const results = [];
   for (let i = 0; i < links.length; i += batchSize) {
     const batch = links.slice(i, i + batchSize);
@@ -454,16 +587,41 @@ const addLinks = async (req, res) => {
   if (!linksData.every(item => item.url && item.targetDomain)) {
     return res.status(400).json({ error: 'Each item must have url and targetDomain' });
   }
+
   try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const now = new Date();
+    if (now.getMonth() !== user.lastReset.getMonth()) {
+      user.linksCheckedThisMonth = 0;
+      user.lastReset = now;
+    }
+
+    const planLimits = {
+      free: 100,
+      basic: 10000,
+      pro: 50000,
+      premium: 200000,
+      enterprise: Infinity
+    };
+    const newLinksCount = linksData.length;
+    if (!user.isSuperAdmin && user.linksCheckedThisMonth + newLinksCount > planLimits[user.plan]) {
+      return res.status(403).json({ message: 'Link limit exceeded for your plan' });
+    }
+
     const newLinks = [];
     for (const { url, targetDomain } of linksData) {
       const newLink = new FrontendLink({ url, targetDomain, userId: req.userId });
       await newLink.save();
       newLinks.push(newLink);
     }
+    user.linksCheckedThisMonth += newLinksCount;
+    await user.save();
     res.status(201).json(newLinks);
   } catch (error) {
-    res.status(500).json({ error: 'Error adding links' });
+    console.error('addLinks: Error adding links', error);
+    res.status(500).json({ error: 'Error adding links', details: error.message });
   }
 };
 
@@ -472,7 +630,8 @@ const getLinks = async (req, res) => {
     const links = await FrontendLink.find({ userId: req.userId });
     res.json(links);
   } catch (error) {
-    res.status(500).json({ error: 'Error fetching links' });
+    console.error('getLinks: Error fetching links', error);
+    res.status(500).json({ error: 'Error fetching links', details: error.message });
   }
 };
 
@@ -483,7 +642,8 @@ const deleteLink = async (req, res) => {
     if (!deletedLink) return res.status(404).json({ error: 'Link not found' });
     res.json({ message: 'Link deleted' });
   } catch (error) {
-    res.status(500).json({ error: 'Error deleting link' });
+    console.error('deleteLink: Error deleting link', error);
+    res.status(500).json({ error: 'Error deleting link', details: error.message });
   }
 };
 
@@ -492,27 +652,71 @@ const deleteAllLinks = async (req, res) => {
     await FrontendLink.deleteMany({ userId: req.userId });
     res.json({ message: 'All links deleted' });
   } catch (error) {
-    res.status(500).json({ error: 'Error deleting all links' });
+    console.error('deleteAllLinks: Error deleting all links', error);
+    res.status(500).json({ error: 'Error deleting all links', details: error.message });
   }
 };
 
 const checkLinks = async (req, res) => {
   try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
     const links = await FrontendLink.find({ userId: req.userId });
-    const updatedLinks = await processLinksInBatches(links, 5);
+
+    const planConcurrency = {
+      free: 5,
+      basic: 20,
+      pro: 50,
+      premium: 100,
+      enterprise: 200
+    };
+    const concurrency = user.isSuperAdmin ? 200 : planConcurrency[user.plan];
+
+    const updatedLinks = await processLinksInBatches(links, 5, concurrency);
     await Promise.all(updatedLinks.map(link => link.save()));
     res.json(updatedLinks);
   } catch (error) {
-    res.status(500).json({ error: 'Error checking links' });
+    console.error('checkLinks: Error checking links', error);
+    res.status(500).json({ error: 'Error checking links', details: error.message });
   }
 };
 
 const addSpreadsheet = async (req, res) => {
-  const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = req.body;
-  if (!spreadsheetId || !gid || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
-    return res.status(400).json({ error: 'All fields required' });
-  }
   try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
+
+    const spreadsheets = await Spreadsheet.find({ userId: user.id });
+    const planLimits = {
+      basic: 1,
+      pro: 5,
+      premium: 20,
+      enterprise: Infinity
+    };
+    const maxSpreadsheets = user.isSuperAdmin ? Infinity : planLimits[user.plan];
+    if (spreadsheets.length >= maxSpreadsheets) {
+      return res.status(403).json({ message: 'Spreadsheet limit exceeded for your plan' });
+    }
+
+    const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = req.body;
+    if (!spreadsheetId || !gid || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
+      return res.status(400).json({ error: 'All fields required' });
+    }
+
+    const planIntervalLimits = {
+      basic: 24,
+      pro: 4,
+      premium: 1,
+      enterprise: 1
+    };
+    const minInterval = user.isSuperAdmin ? 1 : planIntervalLimits[user.plan];
+    if (parseInt(intervalHours) < minInterval) {
+      return res.status(403).json({ message: `Interval must be at least ${minInterval} hours for your plan` });
+    }
+
     const spreadsheet = new Spreadsheet({
       spreadsheetId,
       gid: parseInt(gid),
@@ -527,7 +731,8 @@ const addSpreadsheet = async (req, res) => {
     await spreadsheet.save();
     res.status(201).json(spreadsheet);
   } catch (error) {
-    res.status(500).json({ error: 'Error adding spreadsheet' });
+    console.error('addSpreadsheet: Error adding spreadsheet', error);
+    res.status(500).json({ error: 'Error adding spreadsheet', details: error.message });
   }
 };
 
@@ -536,7 +741,8 @@ const getSpreadsheets = async (req, res) => {
     const spreadsheets = await Spreadsheet.find({ userId: req.userId });
     res.json(spreadsheets);
   } catch (error) {
-    res.status(500).json({ error: 'Error fetching spreadsheets' });
+    console.error('getSpreadsheets: Error fetching spreadsheets', error);
+    res.status(500).json({ error: 'Error fetching spreadsheets', details: error.message });
   }
 };
 
@@ -547,7 +753,8 @@ const deleteSpreadsheet = async (req, res) => {
     if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
     res.json({ message: 'Spreadsheet deleted' });
   } catch (error) {
-    res.status(500).json({ error: 'Error deleting spreadsheet' });
+    console.error('deleteSpreadsheet: Error deleting spreadsheet', error);
+    res.status(500).json({ error: 'Error deleting spreadsheet', details: error.message });
   }
 };
 
@@ -556,10 +763,21 @@ const runSpreadsheetAnalysis = async (req, res) => {
   try {
     const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, userId: req.userId });
     if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const planLinkLimits = {
+      basic: 5000,
+      pro: 20000,
+      premium: 100000,
+      enterprise: 1000000
+    };
+    const maxLinks = user.isSuperAdmin ? 1000000 : planLinkLimits[user.plan];
+
     spreadsheet.status = 'running';
     await spreadsheet.save();
     try {
-      await analyzeSpreadsheet(spreadsheet);
+      await analyzeSpreadsheet(spreadsheet, maxLinks);
       spreadsheet.status = 'completed';
     } catch (error) {
       spreadsheet.status = 'error';
@@ -570,19 +788,49 @@ const runSpreadsheetAnalysis = async (req, res) => {
     await spreadsheet.save();
     res.json({ message: 'Analysis completed' });
   } catch (error) {
-    console.error('Error in runSpreadsheetAnalysis:', error);
-    res.status(500).json({ error: 'Error running analysis' });
+    console.error('runSpreadsheetAnalysis: Error running analysis', error);
+    res.status(500).json({ error: 'Error running analysis', details: error.message });
   }
 };
 
-const analyzeSpreadsheet = async (spreadsheet) => {
+const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
   const links = await importFromGoogleSheets(spreadsheet.spreadsheetId, spreadsheet.targetDomain, spreadsheet.urlColumn, spreadsheet.targetColumn);
-  await Link.deleteMany({ spreadsheetId: spreadsheet.spreadsheetId });
-  await Link.insertMany(links);
-  const dbLinks = await Link.find({ spreadsheetId: spreadsheet.spreadsheetId });
-  await analyzeLinksBatch(dbLinks, spreadsheet.spreadsheetId, 10, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd);
-  await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...dbLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid);
-  await Link.deleteMany({ spreadsheetId: spreadsheet.spreadsheetId });
+  if (links.length > maxLinks) {
+    throw new Error(`Link limit exceeded for your plan (${maxLinks} links)`);
+  }
+
+  const dbLinks = links.map(link => ({
+    ...link,
+    userId: spreadsheet.userId,
+    spreadsheetId: spreadsheet.spreadsheetId
+  }));
+
+  const user = await User.findById(spreadsheet.userId);
+  const planConcurrency = {
+    free: 5,
+    basic: 20,
+    pro: 50,
+    premium: 100,
+    enterprise: 200
+  };
+  const concurrency = user.isSuperAdmin ? 200 : planConcurrency[user.plan];
+
+  const updatedLinks = await processLinksInBatches(dbLinks, 10, concurrency);
+  spreadsheet.links = updatedLinks.map(link => ({
+    url: link.url,
+    targetDomain: link.targetDomain,
+    status: link.status,
+    responseCode: link.responseCode,
+    isIndexable: link.isIndexable,
+    canonicalUrl: link.canonicalUrl,
+    rel: link.rel,
+    linkType: link.linkType,
+    lastChecked: link.lastChecked
+  }));
+  await spreadsheet.save();
+
+  await Promise.all(updatedLinks.map(link => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd)));
+  await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid);
 };
 
 const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlColumn, targetColumn) => {
@@ -605,21 +853,6 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
     console.error(`Error importing from Google Sheets ${spreadsheetId}:`, error);
     return [];
   }
-};
-
-const analyzeLinksBatch = async (links, spreadsheetId, batchSize, resultRangeStart, resultRangeEnd) => {
-  if (!pLimit) await new Promise(resolve => setTimeout(resolve, 100));
-  const limit = pLimit(10);
-  const results = [];
-  for (let i = 0; i < links.length; i += batchSize) {
-    const batch = links.slice(i, i + batchSize);
-    console.log(`Processing batch of ${batch.length} links for ${spreadsheetId}`);
-    const batchResults = await Promise.all(batch.map(link => limit(() => checkLinkStatus(link))));
-    await Promise.all(batchResults.map(result => exportLinkToGoogleSheets(spreadsheetId, result, resultRangeStart, resultRangeEnd)));
-    results.push(...batchResults);
-    console.log(`Batch completed for ${spreadsheetId}, processed ${i + batch.length} of ${links.length} links`);
-  }
-  return results;
 };
 
 const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, resultRangeEnd) => {
@@ -759,9 +992,14 @@ module.exports = {
   deleteAllLinks: [authMiddleware, deleteAllLinks],
   checkLinks: [authMiddleware, checkLinks],
   addSpreadsheet: [authMiddleware, superAdminMiddleware, addSpreadsheet],
-  getSpreadsheets: [authMiddleware, superAdminMiddleware, getSpreadsheets],
-  runSpreadsheetAnalysis: [authMiddleware, superAdminMiddleware, runSpreadsheetAnalysis],
+  getSpreadsheets: [authMiddleware, getSpreadsheets],
+  runSpreadsheetAnalysis: [authMiddleware, runSpreadsheetAnalysis],
   deleteSpreadsheet: [authMiddleware, superAdminMiddleware, deleteSpreadsheet],
+  selectPlan: [authMiddleware, selectPlan],
+  processPayment: [authMiddleware, processPayment],
+  cancelSubscription: [authMiddleware, cancelSubscription],
+  deleteAccount: [authMiddleware, deleteAccount],
+  updateProfile: [authMiddleware, updateProfile],
   checkLinkStatus,
   analyzeSpreadsheet
 };

@@ -26,11 +26,14 @@ const GoogleSheets = () => {
         const response = await fetch(`${apiBaseUrl}/spreadsheets`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!response.ok) throw new Error('Failed to fetch spreadsheets');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to fetch spreadsheets');
+        }
         const data = await response.json();
         setSpreadsheets(data);
       } catch (err) {
-        setError('Failed to fetch spreadsheets');
+        setError(err.message);
       }
     };
     fetchSpreadsheets();
@@ -63,7 +66,7 @@ const GoogleSheets = () => {
         intervalHours: 4,
       });
     } catch (err) {
-      setError('Failed to add spreadsheet');
+      setError(err.message || 'Failed to add spreadsheet');
     }
   };
 
@@ -81,14 +84,13 @@ const GoogleSheets = () => {
       });
       setSpreadsheets(await updated.json());
     } catch (err) {
-      setError('Failed to run analysis');
+      setError(err.message || 'Failed to run analysis');
     } finally {
       setRunningIds(runningIds.filter(runningId => runningId !== id));
     }
   };
 
   const deleteSpreadsheet = async (id) => {
-    if (!confirm('Are you sure you want to delete this spreadsheet?')) return;
     const token = localStorage.getItem('token');
     try {
       const response = await fetch(`${apiBaseUrl}/spreadsheets/${id}`, {
