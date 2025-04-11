@@ -19,6 +19,7 @@ const Profile = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isAddingPayment, setIsAddingPayment] = useState(false);
   const [modal, setModal] = useState({ isOpen: false, message: '', onConfirm: null, isConfirm: false });
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
 
   const apiBaseUrl = `http://${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
@@ -68,14 +69,12 @@ const Profile = () => {
         const response = await axios.get(`${apiBaseUrl}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        setLinks(response.data);
+        // Фильтруем ссылки, чтобы исключить те, у которых url отсутствует
+        const validLinks = response.data.filter(link => link && typeof link.url === 'string');
+        setLinks(validLinks);
       } catch (err) {
-        setModal({
-          isOpen: true,
-          message: 'Failed to fetch links.',
-          onConfirm: null,
-          isConfirm: false,
-        });
+        setError('Failed to fetch links.');
+        setLinks([]); // Устанавливаем пустой массив в случае ошибки
       }
     };
 
@@ -87,12 +86,8 @@ const Profile = () => {
         });
         setSpreadsheets(response.data);
       } catch (err) {
-        setModal({
-          isOpen: true,
-          message: err.response?.data?.message || 'Failed to fetch spreadsheets.',
-          onConfirm: null,
-          isConfirm: false,
-        });
+        console.error('Failed to fetch spreadsheets:', err);
+        setSpreadsheets([]);
       }
     };
 
@@ -119,13 +114,9 @@ const Profile = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       setUser(response.data);
+      setError(null);
     } catch (err) {
-      setModal({
-        isOpen: true,
-        message: 'Failed to update profile.',
-        onConfirm: null,
-        isConfirm: false,
-      });
+      setError('Failed to update profile.');
     }
   };
 
@@ -140,7 +131,7 @@ const Profile = () => {
         setModal({
           isOpen: true,
           message: 'Payment details updated and plan activated',
-          onConfirm: null,
+          onConfirm: () => window.location.reload(),
           isConfirm: false,
         });
       } else {
@@ -161,13 +152,9 @@ const Profile = () => {
       });
       setUser(response.data);
       setAutoPay(response.data.autoPay);
+      setError(null);
     } catch (err) {
-      setModal({
-        isOpen: true,
-        message: 'Failed to update payment details.',
-        onConfirm: null,
-        isConfirm: false,
-      });
+      setError('Failed to update payment details.');
     }
   };
 
@@ -185,7 +172,7 @@ const Profile = () => {
         setModal({
           isOpen: true,
           message: 'Plan activated using saved payment method',
-          onConfirm: null,
+          onConfirm: () => window.location.reload(),
           isConfirm: false,
         });
         setSelectedPlan('');
@@ -203,13 +190,9 @@ const Profile = () => {
           isConfirm: false,
         });
       }
+      setError(null);
     } catch (err) {
-      setModal({
-        isOpen: true,
-        message: 'Failed to select plan.',
-        onConfirm: null,
-        isConfirm: false,
-      });
+      setError('Failed to select plan.');
     }
   };
 
@@ -226,7 +209,7 @@ const Profile = () => {
           setModal({
             isOpen: true,
             message: 'Subscription cancelled, reverted to Free plan',
-            onConfirm: null,
+            onConfirm: () => window.location.reload(),
             isConfirm: false,
           });
           const response = await axios.get(`${apiBaseUrl}/user`, {
@@ -234,13 +217,9 @@ const Profile = () => {
           });
           setUser(response.data);
           setAutoPay(false);
+          setError(null);
         } catch (err) {
-          setModal({
-            isOpen: true,
-            message: 'Failed to cancel subscription.',
-            onConfirm: null,
-            isConfirm: false,
-          });
+          setError('Failed to cancel subscription.');
         }
       },
       isConfirm: true,
@@ -269,13 +248,9 @@ const Profile = () => {
             },
             isConfirm: false,
           });
+          setError(null);
         } catch (err) {
-          setModal({
-            isOpen: true,
-            message: err.response?.data?.message || 'Failed to delete account. Please try again.',
-            onConfirm: null,
-            isConfirm: false,
-          });
+          setError(err.response?.data?.message || 'Failed to delete account. Please try again.');
         }
       },
       isConfirm: true,
@@ -285,11 +260,19 @@ const Profile = () => {
   // Аналитика для Manual Links
   const manualStats = {
     ok: links.filter(link => {
-      const isCanonicalMatch = !link.canonicalUrl || link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '');
+      const isCanonicalMatch = !link.canonicalUrl || (
+        typeof link.url === 'string' &&
+        typeof link.canonicalUrl === 'string' &&
+        link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '')
+      );
       return link.isIndexable && link.responseCode === '200' && link.rel !== 'not found' && isCanonicalMatch;
     }).length,
     problem: links.filter(link => {
-      const isCanonicalMatch = !link.canonicalUrl || link.url.toLowerCase().replace(/\/$/, '') === link.canonialUrl.toLowerCase().replace(/\/$/, '');
+      const isCanonicalMatch = !link.canonicalUrl || (
+        typeof link.url === 'string' &&
+        typeof link.canonicalUrl === 'string' &&
+        link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '')
+      );
       return !(link.isIndexable && link.responseCode === '200' && link.rel !== 'not found' && isCanonicalMatch);
     }).length,
   };
@@ -297,11 +280,19 @@ const Profile = () => {
   // Аналитика для Google Sheets
   const sheetStats = {
     ok: spreadsheets.reduce((acc, sheet) => acc + (sheet.links?.filter(link => {
-      const isCanonicalMatch = !link.canonicalUrl || link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '');
+      const isCanonicalMatch = !link.canonicalUrl || (
+        typeof link.url === 'string' &&
+        typeof link.canonicalUrl === 'string' &&
+        link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '')
+      );
       return link.isIndexable && link.responseCode === '200' && link.rel !== 'not found' && isCanonicalMatch;
     })?.length || 0), 0),
     problem: spreadsheets.reduce((acc, sheet) => acc + (sheet.links?.filter(link => {
-      const isCanonicalMatch = !link.canonicalUrl || link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '');
+      const isCanonicalMatch = !link.canonicalUrl || (
+        typeof link.url === 'string' &&
+        typeof link.canonicalUrl === 'string' &&
+        link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '')
+      );
       return !(link.isIndexable && link.responseCode === '200' && link.rel !== 'not found' && isCanonicalMatch);
     })?.length || 0), 0),
   };
@@ -362,7 +353,7 @@ const Profile = () => {
 
   return (
     <div className="relative">
-      {/* Модальное окно */}
+      {/* Модальное окно для сообщений */}
       {modal.isOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full shadow-lg">
@@ -399,6 +390,19 @@ const Profile = () => {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Сообщение об ошибке в профиле */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+          {error}
+          <button
+            onClick={() => setError(null)}
+            className="ml-2 text-red-900 underline"
+          >
+            Close
+          </button>
         </div>
       )}
 
@@ -560,24 +564,27 @@ const Profile = () => {
                       </>
                     )}
                   </div>
-                  <div className="col-span-1 sm:col-span-2">
-                    <p className="text-sm font-medium text-gray-500">Google Sheets Limit</p>
-                    {user?.isSuperAdmin ? (
-                      <p className="text-lg text-gray-800">Unlimited</p>
-                    ) : (
-                      <>
-                        <div className="w-full bg-gray-200 rounded-full h-4 mt-1">
-                          <div
-                            className={`bg-green-500 h-4 rounded-full ${spreadsheetPercentage > 80 ? 'bg-red-500' : 'bg-green-500'}`}
-                            style={{ width: `${spreadsheetPercentage}%` }}
-                          ></div>
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1">
-                          {spreadsheetCount} / {maxSpreadsheets} spreadsheets added
-                        </p>
-                      </>
-                    )}
-                  </div>
+                  {/* Показываем шкалу Google Sheets только для пользователей с планами Basic и выше */}
+                  {user?.plan !== 'free' && (
+                    <div className="col-span-1 sm:col-span-2">
+                      <p className="text-sm font-medium text-gray-500">Google Sheets Limit</p>
+                      {user?.isSuperAdmin ? (
+                        <p className="text-lg text-gray-800">Unlimited</p>
+                      ) : (
+                        <>
+                          <div className="w-full bg-gray-200 rounded-full h-4 mt-1">
+                            <div
+                              className={`bg-green-500 h-4 rounded-full ${spreadsheetPercentage > 80 ? 'bg-red-500' : 'bg-green-500'}`}
+                              style={{ width: `${spreadsheetPercentage}%` }}
+                            ></div>
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">
+                            {spreadsheetCount} / {maxSpreadsheets} spreadsheets added
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               <div className="mt-6">

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import axios from 'axios';
 
 const GoogleSheets = () => {
-  const { setError } = useOutletContext();
+  const { setLoading } = useOutletContext();
   const [spreadsheets, setSpreadsheets] = useState([]);
   const [form, setForm] = useState({
     spreadsheetId: '',
@@ -16,28 +17,44 @@ const GoogleSheets = () => {
     intervalHours: 4,
   });
   const [runningIds, setRunningIds] = useState([]);
+  const [error, setError] = useState(null);
+  const [userPlan, setUserPlan] = useState(null);
+  const navigate = useNavigate();
 
   const apiBaseUrl = `http://${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
-    const fetchSpreadsheets = async () => {
-      const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token');
+    const fetchUser = async () => {
       try {
-        const response = await fetch(`${apiBaseUrl}/spreadsheets`, {
+        const response = await axios.get(`${apiBaseUrl}/user`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!response.ok) {
-          const errorData = await response.json();
+        const user = response.data;
+        setUserPlan(user.plan);
+        if (user.plan === 'free' && !user.isSuperAdmin) {
+          setError('Google Sheets integration is not available on Free plan');
+          navigate('/app/profile');
+          return;
+        }
+
+        // Загружаем таблицы
+        const spreadsheetsResponse = await fetch(`${apiBaseUrl}/spreadsheets`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!spreadsheetsResponse.ok) {
+          const errorData = await spreadsheetsResponse.json();
           throw new Error(errorData.message || 'Failed to fetch spreadsheets');
         }
-        const data = await response.json();
+        const data = await spreadsheetsResponse.json();
         setSpreadsheets(data);
       } catch (err) {
         setError(err.message);
       }
     };
-    fetchSpreadsheets();
-  }, [setError]);
+
+    fetchUser();
+  }, [navigate]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -46,13 +63,17 @@ const GoogleSheets = () => {
   const addSpreadsheet = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem('token');
+    setLoading(true);
     try {
       const response = await fetch(`${apiBaseUrl}/spreadsheets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ ...form, gid: parseInt(form.gid), intervalHours: parseInt(form.intervalHours) }),
       });
-      if (!response.ok) throw new Error('Failed to add spreadsheet');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to add spreadsheet');
+      }
       const data = await response.json();
       setSpreadsheets([...spreadsheets, { ...data, status: 'inactive' }]);
       setForm({
@@ -65,42 +86,63 @@ const GoogleSheets = () => {
         resultRangeEnd: '',
         intervalHours: 4,
       });
+      setError(null);
     } catch (err) {
       setError(err.message || 'Failed to add spreadsheet');
+    } finally {
+      setLoading(false);
     }
   };
 
   const runAnalysis = async (id) => {
+    if (userPlan === 'free') {
+      setError('Google Sheets integration is not available on Free plan');
+      return;
+    }
+
     const token = localStorage.getItem('token');
     setRunningIds([...runningIds, id]);
+    setLoading(true);
     try {
       const response = await fetch(`${apiBaseUrl}/spreadsheets/${id}/run`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error('Failed to run analysis');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to run analysis');
+      }
       const updated = await fetch(`${apiBaseUrl}/spreadsheets`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setSpreadsheets(await updated.json());
+      setError(null);
     } catch (err) {
       setError(err.message || 'Failed to run analysis');
     } finally {
       setRunningIds(runningIds.filter(runningId => runningId !== id));
+      setLoading(false);
     }
   };
 
   const deleteSpreadsheet = async (id) => {
     const token = localStorage.getItem('token');
+    setLoading(true);
     try {
       const response = await fetch(`${apiBaseUrl}/spreadsheets/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error('Failed to delete spreadsheet');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete spreadsheet');
+      }
       setSpreadsheets(spreadsheets.filter(s => s._id !== id));
+      setError(null);
     } catch (err) {
-      setError('Failed to delete spreadsheet');
+      setError(err.message || 'Failed to delete spreadsheet');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -127,6 +169,17 @@ const GoogleSheets = () => {
       variants={fadeInUp}
     >
       <h2 className="text-2xl font-semibold text-gray-800 mb-6">Google Sheets Analysis</h2>
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+          {error}
+          <button
+            onClick={() => setError(null)}
+            className="ml-2 text-red-900 underline"
+          >
+            Close
+          </button>
+        </div>
+      )}
       <form onSubmit={addSpreadsheet} className="mb-6 grid grid-cols-2 gap-4">
         {[
           { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },

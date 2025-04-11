@@ -9,7 +9,6 @@ const Dashboard = () => {
   const [urlList, setUrlList] = useState('');
   const [targetDomain, setTargetDomain] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 640);
   const navigate = useNavigate();
   const location = useLocation();
@@ -29,7 +28,7 @@ const Dashboard = () => {
 
         // Проверяем, если пользователь на Free плане и пытается зайти на /sheets
         if (response.data.plan === 'free' && location.pathname === '/app/sheets') {
-          navigate('/app/profile'); // Перенаправляем на профиль
+          navigate('/app/profile');
         }
       } catch (err) {
         localStorage.removeItem('token');
@@ -44,7 +43,7 @@ const Dashboard = () => {
         });
         setLinks(response.data);
       } catch (err) {
-        setError('Failed to fetch links');
+        console.error('Failed to fetch links:', err);
       }
     };
 
@@ -67,7 +66,7 @@ const Dashboard = () => {
       setUrlList('');
       setTargetDomain('');
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to add links');
+      console.error('Failed to add links:', err);
     } finally {
       setLoading(false);
     }
@@ -82,7 +81,7 @@ const Dashboard = () => {
       });
       setLinks(response.data);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to check links');
+      console.error('Failed to check links:', err);
     } finally {
       setLoading(false);
     }
@@ -97,7 +96,7 @@ const Dashboard = () => {
       });
       setLinks(links.filter(link => link._id !== id));
     } catch (err) {
-      setError('Failed to delete link');
+      console.error('Failed to delete link:', err);
     } finally {
       setLoading(false);
     }
@@ -112,7 +111,7 @@ const Dashboard = () => {
       });
       setLinks([]);
     } catch (err) {
-      setError('Failed to delete all links');
+      console.error('Failed to delete all links:', err);
     } finally {
       setLoading(false);
     }
@@ -290,7 +289,7 @@ const Dashboard = () => {
           </nav>
         </motion.aside>
         <main className="flex-grow p-4 sm:p-6 w-full">
-          <Outlet context={{ links, setLinks, urlList, setUrlList, targetDomain, setTargetDomain, loading, setLoading, error, setError, handleAddLinks, handleCheckLinks, handleDeleteLink, handleDeleteAllLinks }} />
+          <Outlet context={{ links, setLinks, urlList, setUrlList, targetDomain, setTargetDomain, loading, setLoading, handleAddLinks, handleCheckLinks, handleDeleteLink, handleDeleteAllLinks }} />
         </main>
       </div>
       <footer className="bg-gray-800 text-white py-4 sm:py-6 z-10 relative">

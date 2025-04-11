@@ -159,6 +159,15 @@ const cancelSubscription = async (req, res) => {
     if (user.isSuperAdmin) {
       return res.status(403).json({ message: 'SuperAdmin cannot cancel subscription' });
     }
+
+    // Останавливаем все запущенные анализы и удаляем таблицы
+    const spreadsheets = await Spreadsheet.find({ userId: req.userId });
+    for (const spreadsheet of spreadsheets) {
+      spreadsheet.status = 'inactive'; // Останавливаем анализ
+      await spreadsheet.save();
+    }
+    await Spreadsheet.deleteMany({ userId: req.userId }); // Удаляем все таблицы
+
     user.plan = 'free';
     user.subscriptionStatus = 'inactive';
     user.subscriptionEnd = null;
@@ -449,7 +458,7 @@ const checkLinkStatus = async (link) => {
 
     const randomDelay = Math.floor(Math.random() * 5000) + 5000;
     await new Promise(resolve => setTimeout(resolve, randomDelay));
-    const content = await page.evaluate(() => document.documentElement.outerHTML);
+    let content = await page.evaluate(() => document.documentElement.outerHTML);
 
     const $ = cheerio.load(content);
     console.log(`Total links found in HTML: ${$('a').length}`);
@@ -495,7 +504,253 @@ const checkLinkStatus = async (link) => {
     console.log(`Cleaned targetDomain: ${cleanTargetDomain}`);
 
     let linksFound = null;
+    let captchaType = 'none';
+    let captchaToken = null;
 
+    // Определяем тип капчи
+    if ($('.cf-turnstile').length > 0) captchaType = 'Cloudflare Turnstile';
+    else if ($('.g-recaptcha').length > 0) captchaType = 'Google reCAPTCHA';
+    else if ($('.h-captcha').length > 0) captchaType = 'hCaptcha';
+    else if ($('form[action*="/cdn-cgi/"]').length > 0) captchaType = 'Cloudflare Challenge Page';
+    else if ($('div[id*="arkose"]').length > 0 || $('script[src*="arkoselabs"]').length > 0) captchaType = 'FunCaptcha';
+    else if ($('div[class*="geetest"]').length > 0) captchaType = 'GeeTest';
+    else if ($('img[src*="captcha"]').length > 0 || $('input[placeholder*="enter code"]').length > 0) captchaType = 'Image CAPTCHA';
+    else if ($('body').text().toLowerCase().includes('verify you are not a robot')) captchaType = 'Custom CAPTCHA';
+
+    if (captchaType !== 'none') console.log(`CAPTCHA detected: ${captchaType}`);
+
+    // Обрабатываем капчу, если она обнаружена
+    if (captchaType !== 'none') {
+      try {
+        // Получаем текущий URL страницы после всех редиректов
+        const currentPageUrl = await page.url();
+        console.log(`Current page URL after redirects: ${currentPageUrl}`);
+
+        // Общие параметры для всех типов капч
+        const captchaParams = {
+          pageurl: currentPageUrl // Используем актуальный URL после редиректов
+        };
+
+        // Извлекаем sitekey или другие параметры в зависимости от типа капчи
+        if (captchaType === 'Google reCAPTCHA') {
+          const sitekey = await page.$eval('.g-recaptcha', el => el.getAttribute('data-sitekey'));
+          if (!sitekey) throw new Error('Could not extract sitekey for Google reCAPTCHA');
+          captchaParams.sitekey = sitekey;
+          console.log(`Extracted sitekey for Google reCAPTCHA: ${sitekey}`);
+
+          const captchaResponse = await solver.recaptcha(captchaParams);
+          captchaToken = captchaResponse.code;
+          console.log(`Google reCAPTCHA solved: ${captchaToken}`);
+
+          // Вставляем токен
+          await page.evaluate(token => {
+            const textarea = document.querySelector('#g-recaptcha-response');
+            if (textarea) textarea.innerHTML = token;
+          }, captchaToken);
+
+          // Отправляем форму
+          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+          if (submitButton) {
+            await submitButton.click();
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+            content = await page.evaluate(() => document.documentElement.outerHTML);
+          }
+        } else if (captchaType === 'Cloudflare Turnstile') {
+          const sitekey = await page.$eval('.cf-turnstile', el => el.getAttribute('data-sitekey'));
+          if (!sitekey) throw new Error('Could not extract sitekey for Cloudflare Turnstile');
+          captchaParams.sitekey = sitekey;
+          console.log(`Extracted sitekey for Cloudflare Turnstile: ${sitekey}`);
+
+          const captchaResponse = await solver.turnstile(captchaParams);
+          captchaToken = captchaResponse.code;
+          console.log(`Cloudflare Turnstile solved: ${captchaToken}`);
+
+          // Вставляем токен
+          await page.evaluate(token => {
+            const input = document.querySelector('input[name="cf-turnstile-response"]');
+            if (input) input.value = token;
+          }, captchaToken);
+
+          // Отправляем форму
+          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+          if (submitButton) {
+            await submitButton.click();
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+            content = await page.evaluate(() => document.documentElement.outerHTML);
+          }
+        } else if (captchaType === 'hCaptcha') {
+          const sitekey = await page.$eval('.h-captcha', el => el.getAttribute('data-sitekey'));
+          if (!sitekey) throw new Error('Could not extract sitekey for hCaptcha');
+          captchaParams.sitekey = sitekey;
+          console.log(`Extracted sitekey for hCaptcha: ${sitekey}`);
+
+          // Добавляем дополнительные параметры для hCaptcha
+          captchaParams.invisible = await page.evaluate(() => !document.querySelector('.h-captcha').classList.contains('visible'));
+
+          const captchaResponse = await solver.hcaptcha(captchaParams);
+          captchaToken = captchaResponse.code;
+          console.log(`hCaptcha solved: ${captchaToken}`);
+
+          // Вставляем токен
+          await page.evaluate(token => {
+            const textarea = document.querySelector('#h-captcha-response');
+            if (textarea) textarea.innerHTML = token;
+          }, captchaToken);
+
+          // Отправляем форму
+          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+          if (submitButton) {
+            await submitButton.click();
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+            content = await page.evaluate(() => document.documentElement.outerHTML);
+          }
+        } else if (captchaType === 'FunCaptcha') {
+          const sitekey = await page.evaluate(() => {
+            const script = document.querySelector('script[src*="arkoselabs"]');
+            return script ? new URL(script.src).searchParams.get('pk') : null;
+          });
+          if (!sitekey) throw new Error('Could not extract sitekey for FunCaptcha');
+          captchaParams.publickey = sitekey;
+          console.log(`Extracted publickey for FunCaptcha: ${sitekey}`);
+
+          const captchaResponse = await solver.funcaptcha(captchaParams);
+          captchaToken = captchaResponse.code;
+          console.log(`FunCaptcha solved: ${captchaToken}`);
+
+          // Вставляем токен
+          await page.evaluate(token => {
+            const input = document.querySelector('input[name="fc-token"]');
+            if (input) input.value = token;
+          }, captchaToken);
+
+          // Отправляем форму
+          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+          if (submitButton) {
+            await submitButton.click();
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+            content = await page.evaluate(() => document.documentElement.outerHTML);
+          }
+        } else if (captchaType === 'GeeTest') {
+          const geeTestParams = await page.evaluate(() => {
+            const gt = document.querySelector('script[src*="geetest"]')?.src.match(/gt=([^&]+)/)?.[1];
+            const challenge = document.querySelector('script[src*="geetest"]')?.src.match(/challenge=([^&]+)/)?.[1];
+            return { gt, challenge };
+          });
+          if (!geeTestParams.gt || !geeTestParams.challenge) throw new Error('Could not extract parameters for GeeTest');
+          captchaParams.gt = geeTestParams.gt;
+          captchaParams.challenge = geeTestParams.challenge;
+          console.log(`Extracted parameters for GeeTest: gt=${geeTestParams.gt}, challenge=${geeTestParams.challenge}`);
+
+          const captchaResponse = await solver.geetest(captchaParams);
+          captchaToken = captchaResponse;
+          console.log(`GeeTest solved: ${JSON.stringify(captchaToken)}`);
+
+          await page.evaluate(params => {
+            Object.keys(params).forEach(key => {
+              const input = document.createElement('input');
+              input.type = 'hidden';
+              input.name = key;
+              input.value = params[key];
+              document.forms[0]?.appendChild(input);
+            });
+          }, captchaToken);
+
+          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+          if (submitButton) {
+            await submitButton.click();
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+            content = await page.evaluate(() => document.documentElement.outerHTML);
+          }
+        } else if (captchaType === 'Image CAPTCHA') {
+          const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src);
+          if (!captchaImageUrl) throw new Error('Could not extract CAPTCHA image URL');
+          console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
+
+          const captchaResponse = await solver.imageCaptcha({
+            body: captchaImageUrl,
+            numeric: false,
+            min_len: 4,
+            max_len: 6
+          });
+          captchaToken = captchaResponse.code;
+          console.log(`Image CAPTCHA solved: ${captchaToken}`);
+
+          await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
+
+          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+          if (submitButton) {
+            await submitButton.click();
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+            content = await page.evaluate(() => document.documentElement.outerHTML);
+          }
+        } else if (captchaType === 'Cloudflare Challenge Page') {
+          await page.waitForSelector('input[name="cf_captcha_kind"]', { timeout: 10000 });
+          const sitekey = await page.$eval('input[name="cf_captcha_kind"]', el => el.getAttribute('data-sitekey'));
+          if (sitekey) {
+            captchaParams.sitekey = sitekey;
+            console.log(`Extracted sitekey for Cloudflare Challenge Page: ${sitekey}`);
+
+            const captchaResponse = await solver.turnstile(captchaParams);
+            captchaToken = captchaResponse.code;
+            console.log(`Cloudflare Challenge Page solved: ${captchaToken}`);
+
+            await page.evaluate(token => {
+              const input = document.querySelector('input[name="cf-turnstile-response"]');
+              if (input) input.value = token;
+            }, captchaToken);
+
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              await submitButton.click();
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else {
+            console.log('Cloudflare Challenge Page does not require CAPTCHA solving, waiting for redirect...');
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+            content = await page.evaluate(() => document.documentElement.outerHTML);
+          }
+        } else if (captchaType === 'Custom CAPTCHA') {
+          console.log('Custom CAPTCHA detected, attempting to solve as Image CAPTCHA if possible...');
+          const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src, { timeout: 5000 }).catch(() => null);
+          if (captchaImageUrl) {
+            console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
+            const captchaResponse = await solver.imageCaptcha({
+              body: captchaImageUrl,
+              numeric: false,
+              min_len: 4,
+              max_len: 6
+            });
+            captchaToken = captchaResponse.code;
+            console.log(`Custom CAPTCHA (Image) solved: ${captchaToken}`);
+
+            await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
+
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              await submitButton.click();
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else {
+            throw new Error('Custom CAPTCHA not supported for automated solving');
+          }
+        }
+
+        // Перезагружаем Cheerio с новым содержимым
+        $ = cheerio.load(content);
+      } catch (error) {
+        console.error(`Error solving CAPTCHA for ${link.url}:`, error.message);
+        link.status = 'suspected-captcha';
+        link.rel = 'blocked';
+        link.linkType = 'unknown';
+        link.anchorText = 'captcha suspected';
+        link.errorDetails = `CAPTCHA solving failed: ${error.message}`;
+        return link;
+      }
+    }
+
+    // Ищем ссылки после решения капчи
     $('a').each((i, a) => {
       const href = $(a).attr('href')?.toLowerCase().trim();
       if (href && href.includes(cleanTargetDomain)) {
@@ -516,28 +771,20 @@ const checkLinkStatus = async (link) => {
 
     console.log('Links found:', linksFound ? JSON.stringify(linksFound) : 'None');
 
-    let captchaType = 'none';
-    if ($('.cf-turnstile').length > 0) captchaType = 'Cloudflare Turnstile';
-    else if ($('.g-recaptcha').length > 0) captchaType = 'Google reCAPTCHA';
-    else if ($('.h-captcha').length > 0) captchaType = 'hCaptcha';
-    else if ($('form[action*="/cdn-cgi/"]').length > 0) captchaType = 'Cloudflare Challenge Page';
-    else if ($('body').text().toLowerCase().includes('verify you are not a robot')) captchaType = 'Unknown CAPTCHA';
-
-    if (captchaType !== 'none') console.log(`CAPTCHA detected: ${captchaType}`);
-
+    // Обновляем статус ссылки
     if (linksFound) {
       link.status = 'active';
       link.rel = linksFound.rel;
       link.anchorText = linksFound.anchorText;
       const relValues = linksFound.rel ? linksFound.rel.toLowerCase().split(' ') : [];
       link.linkType = relValues.some(value => ['nofollow', 'ugc', 'sponsored'].includes(value)) ? 'nofollow' : 'dofollow';
-      link.errorDetails = captchaType !== 'none' ? `${captchaType} detected but link found` : link.errorDetails || '';
+      link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
     } else if (captchaType !== 'none') {
       link.status = 'suspected-captcha';
       link.rel = 'blocked';
       link.linkType = 'unknown';
       link.anchorText = 'captcha suspected';
-      link.errorDetails = `CAPTCHA detected: ${captchaType}`;
+      link.errorDetails = captchaToken ? `${captchaType} solved but no links found, token: ${captchaToken}` : `CAPTCHA detected: ${captchaType}`;
     } else if (!link.status || link.status === 'pending') {
       link.status = 'active';
       link.rel = 'not found';
@@ -581,8 +828,8 @@ const processLinksInBatches = async (links, batchSize = 5, concurrency) => {
 
 const addLinks = async (req, res) => {
   const linksData = Array.isArray(req.body) ? req.body : [req.body];
-  if (!linksData.every(item => item.url && item.targetDomain)) {
-    return res.status(400).json({ error: 'Each item must have url and targetDomain' });
+  if (!linksData.every(item => item && typeof item.url === 'string' && item.url.trim() && item.targetDomain)) {
+    return res.status(400).json({ error: 'Each item must have a valid url (non-empty string) and targetDomain' });
   }
 
   try {
@@ -737,9 +984,6 @@ const getSpreadsheets = async (req, res) => {
   try {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (!user.isSuperAdmin && user.plan === 'free') {
-      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
-    }
     const spreadsheets = await Spreadsheet.find({ userId: req.userId });
     res.json(spreadsheets);
   } catch (error) {
@@ -751,6 +995,12 @@ const getSpreadsheets = async (req, res) => {
 const deleteSpreadsheet = async (req, res) => {
   const { spreadsheetId } = req.params;
   try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
+
     const spreadsheet = await Spreadsheet.findOneAndDelete({ _id: spreadsheetId, userId: req.userId });
     if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
     res.json({ message: 'Spreadsheet deleted' });
@@ -997,10 +1247,10 @@ module.exports = {
   deleteLink: [authMiddleware, deleteLink],
   deleteAllLinks: [authMiddleware, deleteAllLinks],
   checkLinks: [authMiddleware, checkLinks],
-  addSpreadsheet: [authMiddleware, superAdminMiddleware, addSpreadsheet],
+  addSpreadsheet: [authMiddleware, addSpreadsheet],
   getSpreadsheets: [authMiddleware, getSpreadsheets],
   runSpreadsheetAnalysis: [authMiddleware, runSpreadsheetAnalysis],
-  deleteSpreadsheet: [authMiddleware, superAdminMiddleware, deleteSpreadsheet],
+  deleteSpreadsheet: [authMiddleware, deleteSpreadsheet],
   selectPlan: [authMiddleware, selectPlan],
   processPayment: [authMiddleware, processPayment],
   cancelSubscription: [authMiddleware, cancelSubscription],
