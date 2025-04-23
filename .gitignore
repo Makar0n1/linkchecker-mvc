@@ -1,8 +1,5 @@
 node_modules/
 .DS_Store
-.env
-.env.prod
 package-lock.json
 dist/
-service-account.json
 registerSuperAdmin.js
