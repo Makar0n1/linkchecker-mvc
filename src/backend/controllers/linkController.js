@@ -1050,7 +1050,13 @@ const runSpreadsheetAnalysis = async (req, res) => {
 };
 
 const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
-  const links = await importFromGoogleSheets(spreadsheet.spreadsheetId, spreadsheet.targetDomain, spreadsheet.urlColumn, spreadsheet.targetColumn);
+  const links = await importFromGoogleSheets(
+    spreadsheet.spreadsheetId,
+    spreadsheet.targetDomain,
+    spreadsheet.urlColumn,
+    spreadsheet.targetColumn,
+    spreadsheet.gid // Передаём GID
+  );
   if (links.length > maxLinks) {
     throw new Error(`Link limit exceeded for your plan (${maxLinks} links)`);
   }
@@ -1089,14 +1095,30 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
   await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid);
 };
 
-const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlColumn, targetColumn) => {
+const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlColumn, targetColumn, gid) => {
   try {
+    // Шаг 1: Получаем метаданные таблицы, чтобы найти название листа по GID
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId,
+    });
+
+    // Находим лист с нужным GID
+    const sheet = spreadsheet.data.sheets.find(sheet => sheet.properties.sheetId === parseInt(gid));
+    if (!sheet) {
+      console.error(`Sheet with GID ${gid} not found in spreadsheet ${spreadsheetId}`);
+      return [];
+    }
+
+    const sheetName = sheet.properties.title;
+
+    // Шаг 2: Запрашиваем данные из листа, используя его название
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `All links!${urlColumn}2:${targetColumn}`,
+      range: `${sheetName}!${urlColumn}2:${targetColumn}`,
     });
+
     const rows = response.data.values || [];
-    console.log(`Imported rows from "All links" (${spreadsheetId}): ${rows.length}`);
+    console.log(`Imported rows from "${sheetName}" (${spreadsheetId}, GID: ${gid}): ${rows.length}`);
     return rows
       .map((row, index) => ({
         url: row[0],
