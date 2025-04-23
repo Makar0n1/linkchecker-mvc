@@ -2,5 +2,10 @@ node_modules/
 .DS_Store
 package-lock.json
 dist/
+.env
+.env.prod
+.env.example
+.env.prod.example
+X
 service-account.json
 registerSuperAdmin.js
