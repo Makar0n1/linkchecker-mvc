@@ -30,10 +30,24 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
 
 // Настройка CORS
 const corsOptions = {
-  origin: process.env.FRONTEND_DOMAIN, // Используем напрямую, без добавления http://
+  origin: (origin, callback) => {
+    // Разрешённые origins
+    const allowedOrigins = [
+      process.env.FRONTEND_DOMAIN, // Для продакшена (https://link-check-pro.top)
+      'http://localhost:3001',    // Для разработки (Vite)
+      'http://localhost:3000',    // Для случаев, если фронтенд и бэкенд на одном порту
+    ];
+
+    // Разрешаем запросы без origin (например, от Postman) или если origin в списке разрешённых
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  credentials: true,
 };
 app.use(cors(corsOptions));
 
