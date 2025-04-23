@@ -5,15 +5,21 @@ const dotenv = require('dotenv');
 const path = require('path');
 const linkRoutes = require('./routes/linkRoutes');
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Загружаем .env в зависимости от окружения
+const envPath = process.env.NODE_ENV === 'production'
+  ? path.resolve(__dirname, '../../.env.prod')
+  : path.resolve(__dirname, '../../.env');
+dotenv.config({ path: envPath });
 
+console.log('Server.js - NODE_ENV:', process.env.NODE_ENV);
 console.log('Server.js - MONGODB_URI:', process.env.MONGODB_URI);
 console.log('Server.js - JWT_SECRET:', process.env.JWT_SECRET);
-console.log('Server.js - CORS origin:', `http://${process.env.FRONTEND_DOMAIN}:${process.env.FRONTEND_PORT}`);
+console.log('Server.js - CORS origin:', process.env.FRONTEND_DOMAIN);
 
 const app = express();
 const port = process.env.BACKEND_PORT || 3000;
 
+// Настройка подключения к MongoDB
 mongoose.set('strictQuery', true);
 mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
   .then(() => console.log('Connected to MongoDB'))
@@ -22,21 +28,31 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
     process.exit(1);
   });
 
-app.use(express.json());
-app.use(cors({
-  origin: `http://${process.env.FRONTEND_DOMAIN}:${process.env.FRONTEND_PORT}`,
+// Настройка CORS
+const corsOptions = {
+  origin: process.env.FRONTEND_DOMAIN, // Используем напрямую, без добавления http://
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+};
+app.use(cors(corsOptions));
 
+// Middleware для парсинга JSON
+app.use(express.json());
+
+// Маршруты API
 app.use('/api/links', linkRoutes);
 
 // Логирование всех запросов для отладки
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} (Origin: ${req.headers.origin})`);
   next();
 });
 
+// Запуск сервера
 app.listen(port, () => {
-  console.log(`Backend running at http://localhost:${port}`);
+  const baseUrl = process.env.NODE_ENV === 'production'
+    ? `https://api.link-check-pro.top`
+    : `http://localhost:${port}`;
+  console.log(`Backend running at ${baseUrl}`);
 });
