@@ -147,7 +147,7 @@ const Dashboard = () => {
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.6 }}
             >
-              LinkChecker Pro
+              LinkSentry
             </motion.h1>
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
@@ -294,7 +294,7 @@ const Dashboard = () => {
       </div>
       <footer className="bg-gray-800 text-white py-4 sm:py-6 z-10 relative">
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 text-center">
-          <p className="text-sm sm:text-base">© 2025 LinkChecker Pro. All rights reserved.</p>
+          <p className="text-sm sm:text-base">© 2025 Link-Check-Pro.Top | All rights reserved.</p>
           <p className="mt-2 text-sm sm:text-base">
             Created by Kirill Shtepa{' '}
             <a href="https://github.com/Makar0n1/" className="underline hover:text-green-400">
