@@ -3,11 +3,19 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 
+import LinkAnalysisIllustration from '../../assets/images/link-analysis-illustration.jpg';
+import WorkflowIllustration from '../../assets/images/workflow-illustration.png';
+import AccurateAnalysis from '../../assets/images/accurate-analysis.png';
+import MultiUserSupport from '../../assets/images/multi-user-support.png';
+import AutomatedSupport from '../../assets/images/automated-support.png';
+
 const StartPage = () => {
   const [user, setUser] = useState(null);
   const navigate = useNavigate();
 
-  const apiBaseUrl = `http://${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
+  const apiBaseUrl = import.meta.env.MODE === 'production'
+    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links` // В продакшене без порта
+    : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -78,7 +86,7 @@ const StartPage = () => {
       <section className="relative bg-gradient-to-b from-green-500 to-green-700 text-white py-12 sm:py-20 overflow-hidden">
         <div className="absolute inset-0">
           <motion.img
-            src="../../public/link-analysis-illustration.jpg"
+            src={LinkAnalysisIllustration}
             alt="Link Analysis Background"
             className="w-full h-full object-cover opacity-40"
             initial={{ scale: 1.2 }}
@@ -134,21 +142,21 @@ const StartPage = () => {
           >
             <motion.div className="bg-green-50 p-4 sm:p-6 rounded-lg shadow-md hover:shadow-xl transition-shadow flex flex-col items-center text-center" variants={fadeInUp}>
               <div className="w-20 sm:w-24 h-20 sm:h-24 mb-4 flex items-center justify-center">
-                <img src="../../public/accurate-analysis.png" alt="Accurate Analysis" className="max-w-full max-h-full object-contain" />
+                <img src={AccurateAnalysis} alt="Accurate Analysis" className="max-w-full max-h-full object-contain" />
               </div>
               <h4 className="text-lg sm:text-xl font-semibold text-green-600 mb-2">Accurate Analysis</h4>
               <p className="text-gray-600 text-sm sm:text-base">Leverage Puppeteer and 2Captcha to get precise backlink data, even from protected sites.</p>
             </motion.div>
             <motion.div className="bg-green-50 p-4 sm:p-6 rounded-lg shadow-md hover:shadow-xl transition-shadow flex flex-col items-center text-center" variants={fadeInUp}>
               <div className="w-20 sm:w-24 h-20 sm:h-24 mb-4 flex items-center justify-center">
-                <img src="../../public/multi-user-support.png" alt="Multi-User Support" className="max-w-full max-h-full object-contain" />
+                <img src={MultiUserSupport} alt="Multi-User Support" className="max-w-full max-h-full object-contain" />
               </div>
               <h4 className="text-lg sm:text-xl font-semibold text-green-600 mb-2">Multi-User Support</h4>
               <p className="text-gray-600 text-sm sm:text-base">Up to 5 users can work independently, with separate data storage for each.</p>
             </motion.div>
             <motion.div className="bg-green-50 p-4 sm:p-6 rounded-lg shadow-md hover:shadow-xl transition-shadow flex flex-col items-center text-center" variants={fadeInUp}>
               <div className="w-20 sm:w-24 h-20 sm:h-24 mb-4 flex items-center justify-center">
-                <img src="../../public/automated-support.png" alt="Automated Reports" className="max-w-full max-h-full object-contain" />
+                <img src={AutomatedSupport} alt="Automated Reports" className="max-w-full max-h-full object-contain" />
               </div>
               <h4 className="text-lg sm:text-xl font-semibold text-green-600 mb-2">Automated Reports</h4>
               <p className="text-gray-600 text-sm sm:text-base">Get detailed reports synced with Google Sheets, updated every 6 hours.</p>
@@ -169,7 +177,7 @@ const StartPage = () => {
           </motion.h3>
           <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-12">
             <motion.div className="w-full sm:w-1/2" variants={fadeInUp} initial="hidden" animate="visible">
-              <img src="../../public/workflow-illustration.png" alt="Workflow Illustration" className="w-full rounded-lg shadow-lg" />
+              <img src={WorkflowIllustration} alt="Workflow Illustration" className="w-full rounded-lg shadow-lg" />
             </motion.div>
             <motion.ul className="w-full sm:w-1/2 space-y-4 sm:space-y-6 text-base sm:text-lg text-gray-600" variants={staggerContainer} initial="hidden" animate="visible">
               <motion.li variants={fadeInUp}><strong className="text-green-600">Step 1:</strong> Add your URLs manually or via Google Sheets.</motion.li>

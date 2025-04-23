@@ -13,7 +13,9 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const apiBaseUrl = `http://${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
+  const apiBaseUrl = import.meta.env.MODE === 'production'
+    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links` // В продакшене без порта
+    : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
     const token = localStorage.getItem('token');

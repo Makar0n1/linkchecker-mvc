@@ -22,7 +22,9 @@ const Profile = () => {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  const apiBaseUrl = `http://${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
+  const apiBaseUrl = import.meta.env.MODE === 'production'
+    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links` // В продакшене без порта
+    : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
     const fetchUser = async () => {
