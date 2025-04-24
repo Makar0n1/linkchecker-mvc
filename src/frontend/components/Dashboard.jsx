@@ -9,6 +9,7 @@ const Dashboard = () => {
   const [urlList, setUrlList] = useState('');
   const [targetDomain, setTargetDomain] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 640);
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,22 +38,10 @@ const Dashboard = () => {
       }
     };
 
-    const fetchLinks = async () => {
-      try {
-        const response = await axios.get(apiBaseUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setLinks(response.data);
-      } catch (err) {
-        console.error('Failed to fetch links:', err);
-      }
-    };
-
     fetchUser();
-    fetchLinks();
   }, [navigate, location.pathname]);
 
-  const handleAddLinks = async (e) => {
+  const handleAddLinks = async (e, projectId) => {
     e.preventDefault();
     if (!urlList || !targetDomain) return;
     setLoading(true);
@@ -60,59 +49,63 @@ const Dashboard = () => {
       const token = localStorage.getItem('token');
       const urls = urlList.split('\n').map(url => url.trim()).filter(url => url);
       const linksData = urls.map(url => ({ url, targetDomain }));
-      const response = await axios.post(apiBaseUrl, linksData, {
+      const response = await axios.post(`${apiBaseUrl}/${projectId}/links`, linksData, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setLinks([...links, ...response.data]);
       setUrlList('');
       setTargetDomain('');
+      setError(null);
     } catch (err) {
-      console.error('Failed to add links:', err);
+      setError(err.response?.data?.error || 'Failed to add links');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCheckLinks = async () => {
+  const handleCheckLinks = async (projectId) => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.post(`${apiBaseUrl}/check`, {}, {
+      const response = await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setLinks(response.data);
+      setError(null);
     } catch (err) {
-      console.error('Failed to check links:', err);
+      setError(err.response?.data?.error || 'Failed to check links');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteLink = async (id) => {
+  const handleDeleteLink = async (id, projectId) => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.delete(`${apiBaseUrl}/${id}`, {
+      await axios.delete(`${apiBaseUrl}/${projectId}/links/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setLinks(links.filter(link => link._id !== id));
+      setError(null);
     } catch (err) {
-      console.error('Failed to delete link:', err);
+      setError(err.response?.data?.error || 'Failed to delete link');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteAllLinks = async () => {
+  const handleDeleteAllLinks = async (projectId) => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.delete(apiBaseUrl, {
+      await axios.delete(`${apiBaseUrl}/${projectId}/links`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setLinks([]);
+      setError(null);
     } catch (err) {
-      console.error('Failed to delete all links:', err);
+      setError(err.response?.data?.error || 'Failed to delete all links');
     } finally {
       setLoading(false);
     }
@@ -125,7 +118,7 @@ const Dashboard = () => {
 
   if (!user) return null;
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) => location.pathname === path || location.pathname.startsWith(path);
 
   const planLimits = {
     free: 100,
@@ -153,12 +146,12 @@ const Dashboard = () => {
           <div className="flex items-center gap-2 sm:gap-4">
             <span className="text-green-100 text-sm sm:text-base hidden sm:inline">Logged in as: {user.username}</span>
             <motion.button
-              onClick={() => navigate('/app/manual')}
+              onClick={() => navigate('/app/projects')}
               className="bg-white text-green-600 px-3 sm:px-5 py-1 sm:py-2 rounded-full font-semibold hover:bg-green-100 transition-all shadow-md text-sm sm:text-base"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              Start Analyse
+              Projects
             </motion.button>
           </div>
         </div>
@@ -166,13 +159,13 @@ const Dashboard = () => {
       <nav className="bg-green-600 text-white py-2 sm:hidden sticky top-16 z-40">
         <div className="container max-w-7xl mx-auto px-4 flex gap-3 overflow-x-auto">
           <button
-            onClick={() => navigate('/app/manual')}
-            className={`px-3 py-1 rounded flex items-center gap-2 text-sm ${isActive('/app/manual') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+            onClick={() => navigate('/app/projects')}
+            className={`px-3 py-1 rounded flex items-center gap-2 text-sm ${isActive('/app/projects') ? 'bg-green-700' : 'hover:bg-green-700'}`}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18m-7 5h7" />
             </svg>
-            Manual Links
+            Projects
           </button>
           {user.plan !== 'free' && (
             <button
@@ -233,13 +226,13 @@ const Dashboard = () => {
             <ul>
               <li className="mb-4">
                 <button
-                  onClick={() => navigate('/app/manual')}
-                  className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/manual') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+                  onClick={() => navigate('/app/projects')}
+                  className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/projects') ? 'bg-green-700' : 'hover:bg-green-700'}`}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18m-7 5h7" />
                   </svg>
-                  <span className={isSidebarOpen ? 'block' : 'hidden'}>Manual Links</span>
+                  <span className={isSidebarOpen ? 'block' : 'hidden'}>Projects</span>
                 </button>
               </li>
               {user.plan !== 'free' && (
@@ -289,7 +282,7 @@ const Dashboard = () => {
           </nav>
         </motion.aside>
         <main className="flex-grow p-4 sm:p-6 w-full overflow-x-hidden">
-          <Outlet context={{ links, setLinks, urlList, setUrlList, targetDomain, setTargetDomain, loading, setLoading, handleAddLinks, handleCheckLinks, handleDeleteLink, handleDeleteAllLinks }} />
+          <Outlet context={{ links, setLinks, urlList, setUrlList, targetDomain, setTargetDomain, loading, setLoading, error, setError, handleAddLinks, handleCheckLinks, handleDeleteLink, handleDeleteAllLinks }} />
         </main>
       </div>
       <footer className="bg-gray-800 text-white py-4 sm:py-6 z-10 relative">

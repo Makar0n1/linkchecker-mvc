@@ -7,6 +7,7 @@ import Dashboard from './components/Dashboard';
 import ManualLinks from './components/ManualLinks';
 import GoogleSheets from './components/GoogleSheets';
 import Profile from './components/Profile';
+import Projects from './components/Projects';
 import './styles.css';
 
 console.log('main.jsx loaded');
@@ -23,10 +24,11 @@ root.render(
       <Route path="/" element={<StartPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/app" element={<ProtectedRoute><Dashboard /></ProtectedRoute>}>
-        <Route path="manual" element={<ManualLinks />} />
+        <Route path="projects" element={<Projects />} />
+        <Route path="manual/:projectId" element={<ManualLinks />} />
         <Route path="sheets" element={<GoogleSheets />} />
         <Route path="profile" element={<Profile />} />
-        <Route path="" element={<Navigate to="manual" />} />
+        <Route path="" element={<Navigate to="projects" />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

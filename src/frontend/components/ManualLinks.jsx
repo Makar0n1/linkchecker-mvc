@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useOutletContext, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import axios from 'axios';
 
 const ManualLinks = () => {
+  const { projectId } = useParams(); // Получаем projectId из URL
   const {
     links,
     setLinks,
@@ -20,7 +22,45 @@ const ManualLinks = () => {
     handleDeleteAllLinks,
   } = useOutletContext();
 
+  const [projectName, setProjectName] = useState('');
   const [copiedField, setCopiedField] = useState(null);
+
+  const apiBaseUrl = import.meta.env.MODE === 'production'
+    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
+    : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const fetchProject = async () => {
+      try {
+        const response = await axios.get(`${apiBaseUrl}/projects`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const project = response.data.find((proj) => proj._id === projectId);
+        if (project) {
+          setProjectName(project.name);
+        } else {
+          setError('Project not found');
+        }
+      } catch (err) {
+        setError(err.response?.data?.error || 'Failed to fetch project');
+      }
+    };
+
+    const fetchLinks = async () => {
+      try {
+        const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setLinks(response.data);
+      } catch (err) {
+        setError(err.response?.data?.error || 'Failed to fetch links');
+      }
+    };
+
+    fetchProject();
+    fetchLinks();
+  }, [projectId, setLinks, setError]);
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
@@ -47,8 +87,10 @@ const ManualLinks = () => {
       animate="visible"
       variants={fadeInUp}
     >
-      <h2 className="text-xl sm:text-2xl font-semibold text-gray-800 mb-6">Manual Links</h2>
-      <form onSubmit={handleAddLinks} className="mb-6 flex flex-col gap-4">
+      <h2 className="text-xl sm:text-2xl font-semibold text-gray-800 mb-6">
+        Manual Links - {projectName || 'Loading...'}
+      </h2>
+      <form onSubmit={(e) => handleAddLinks(e, projectId)} className="mb-6 flex flex-col gap-4">
         <textarea
           value={urlList}
           onChange={(e) => setUrlList(e.target.value)}
@@ -72,14 +114,14 @@ const ManualLinks = () => {
       </form>
       <div className="mb-6 flex flex-col sm:flex-row gap-3 sm:gap-4">
         <button
-          onClick={handleCheckLinks}
+          onClick={() => handleCheckLinks(projectId)}
           disabled={loading}
           className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
         >
           {loading ? 'Checking...' : 'Check All Links'}
         </button>
         <button
-          onClick={handleDeleteAllLinks}
+          onClick={() => handleDeleteAllLinks(projectId)}
           disabled={loading || links.length === 0}
           className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm sm:text-base"
         >
@@ -178,7 +220,7 @@ const ManualLinks = () => {
                     </td>
                     <td className="p-2 sm:p-3 whitespace-nowrap">
                       <button
-                        onClick={() => handleDeleteLink(link._id)}
+                        onClick={() => handleDeleteLink(link._id, projectId)}
                         disabled={loading}
                         className="bg-red-500 text-white px-2 sm:px-3 py-1 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors text-sm sm:text-base"
                       >

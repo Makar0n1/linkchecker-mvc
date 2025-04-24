@@ -9,6 +9,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 const Profile = () => {
   const [user, setUser] = useState(null);
+  const [projects, setProjects] = useState([]);
   const [links, setLinks] = useState([]);
   const [spreadsheets, setSpreadsheets] = useState([]);
   const [profile, setProfile] = useState({ firstName: '', lastName: '', email: '', phone: '' });
@@ -23,7 +24,7 @@ const Profile = () => {
   const navigate = useNavigate();
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
-    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links` // В продакшене без порта
+    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
@@ -65,18 +66,25 @@ const Profile = () => {
       }
     };
 
-    const fetchLinks = async () => {
+    const fetchProjectsAndLinks = async () => {
       const token = localStorage.getItem('token');
       try {
-        const response = await axios.get(`${apiBaseUrl}`, {
+        const projectsResponse = await axios.get(`${apiBaseUrl}/projects`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        // Фильтруем ссылки, чтобы исключить те, у которых url отсутствует
-        const validLinks = response.data.filter(link => link && typeof link.url === 'string');
-        setLinks(validLinks);
+        setProjects(projectsResponse.data);
+
+        const allLinks = [];
+        for (const project of projectsResponse.data) {
+          const linksResponse = await axios.get(`${apiBaseUrl}/${project._id}/links`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          allLinks.push(...linksResponse.data);
+        }
+        setLinks(allLinks);
       } catch (err) {
-        setError('Failed to fetch links.');
-        setLinks([]); // Устанавливаем пустой массив в случае ошибки
+        setError('Failed to fetch projects or links.');
+        setLinks([]);
       }
     };
 
@@ -94,7 +102,7 @@ const Profile = () => {
     };
 
     fetchUser();
-    fetchLinks();
+    fetchProjectsAndLinks();
     fetchSpreadsheets();
   }, [navigate]);
 
@@ -259,7 +267,7 @@ const Profile = () => {
     });
   };
 
-  // Аналитика для Manual Links
+  // Аналитика для Manual Links (с учётом проектов)
   const manualStats = {
     ok: links.filter(link => {
       const isCanonicalMatch = !link.canonicalUrl || (
@@ -355,7 +363,6 @@ const Profile = () => {
 
   return (
     <div className="relative">
-      {/* Модальное окно для сообщений */}
       {modal.isOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full shadow-lg">
@@ -395,7 +402,6 @@ const Profile = () => {
         </div>
       )}
 
-      {/* Сообщение об ошибке в профиле */}
       {error && (
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
           {error}
@@ -416,7 +422,6 @@ const Profile = () => {
       >
         <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6">Your Profile</h2>
 
-        {/* Вкладки */}
         <div className="border-b border-gray-200 mb-6">
           <nav className="flex space-x-4">
             {['profile', 'payment', 'analytics'].map((tab) => (
@@ -437,9 +442,7 @@ const Profile = () => {
           </nav>
         </div>
 
-        {/* Содержимое вкладок */}
         <div className="mt-4">
-          {/* Вкладка Profile Info */}
           {activeTab === 'profile' && (
             <div className="bg-gray-50 p-4 sm:p-6 rounded-lg shadow-sm">
               <div className="flex justify-between items-center mb-4">
@@ -547,7 +550,6 @@ const Profile = () => {
                       <p className="text-lg text-gray-800">{new Date(user.subscriptionEnd).toLocaleDateString()}</p>
                     </div>
                   )}
-                  {/* Лимиты с прогресс-барами */}
                   <div className="col-span-1 sm:col-span-2">
                     <p className="text-sm font-medium text-gray-500">Link Analysis Limit</p>
                     {user?.isSuperAdmin ? (
@@ -566,7 +568,6 @@ const Profile = () => {
                       </>
                     )}
                   </div>
-                  {/* Показываем шкалу Google Sheets только для пользователей с планами Basic и выше */}
                   {user?.plan !== 'free' && (
                     <div className="col-span-1 sm:col-span-2">
                       <p className="text-sm font-medium text-gray-500">Google Sheets Limit</p>
@@ -600,13 +601,11 @@ const Profile = () => {
             </div>
           )}
 
-          {/* Вкладка Payment Methods */}
           {activeTab === 'payment' && (
             <div className="bg-gray-50 p-4 sm:p-6 rounded-lg shadow-sm">
               <h3 className="text-lg font-semibold text-gray-700 mb-4">Payment Methods</h3>
               {!user?.isSuperAdmin && (
                 <>
-                  {/* Текущий метод оплаты (сниппет) */}
                   {user?.paymentDetails?.cardNumber && !isAddingPayment ? (
                     <div className="mb-6">
                       <h4 className="text-md font-semibold text-gray-600 mb-2">Current Payment Method</h4>
@@ -640,7 +639,6 @@ const Profile = () => {
                     </div>
                   )}
 
-                  {/* Выбор плана */}
                   <div className="mb-6">
                     <h4 className="text-md font-semibold text-gray-600 mb-2">Select a Plan</h4>
                     <div className="flex flex-wrap gap-3">
@@ -660,7 +658,6 @@ const Profile = () => {
                     </div>
                   </div>
 
-                  {/* Форма оплаты */}
                   {isAddingPayment && (
                     <div>
                       <h4 className="text-md font-semibold text-gray-600 mb-2">Add Payment Method</h4>
@@ -735,7 +732,6 @@ const Profile = () => {
                     </div>
                   )}
 
-                  {/* Кнопка отмены подписки */}
                   {user?.subscriptionStatus === 'active' && (
                     <div className="mt-6">
                       <button
@@ -754,7 +750,6 @@ const Profile = () => {
             </div>
           )}
 
-          {/* Вкладка Analytics */}
           {activeTab === 'analytics' && (
             <div className="bg-gray-50 p-4 sm:p-6 rounded-lg shadow-sm">
               <h3 className="text-lg font-semibold text-gray-700 mb-4">Link Analysis Statistics</h3>

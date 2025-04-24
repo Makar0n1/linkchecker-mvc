@@ -1,6 +1,7 @@
 const FrontendLink = require('../models/FrontendLink');
 const Spreadsheet = require('../models/Spreadsheet');
 const User = require('../models/User');
+const Project = require('../models/Project'); // Добавляем модель Project
 const puppeteer = require('puppeteer');
 const cheerio = require('cheerio');
 const { Solver } = require('2captcha');
@@ -100,7 +101,183 @@ const getUserInfo = async (req, res) => {
   }
 };
 
-// Выбор плана
+// Функции для работы с проектами
+const createProject = async (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'Project name is required' });
+
+  try {
+    const project = new Project({
+      name,
+      userId: req.userId,
+      links: [],
+    });
+    await project.save();
+    res.status(201).json(project);
+  } catch (error) {
+    console.error('createProject: Error creating project', error);
+    res.status(500).json({ error: 'Error creating project', details: error.message });
+  }
+};
+
+const getProjects = async (req, res) => {
+  try {
+    const projects = await Project.find({ userId: req.userId });
+    res.json(projects);
+  } catch (error) {
+    console.error('getProjects: Error fetching projects', error);
+    res.status(500).json({ error: 'Error fetching projects', details: error.message });
+  }
+};
+
+const deleteProject = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // Удаляем все ссылки, связанные с проектом
+    await FrontendLink.deleteMany({ projectId });
+    await Project.deleteOne({ _id: projectId, userId: req.userId });
+    res.json({ message: 'Project deleted' });
+  } catch (error) {
+    console.error('deleteProject: Error deleting project', error);
+    res.status(500).json({ error: 'Error deleting project', details: error.message });
+  }
+};
+
+// Функции для работы с ссылками (в рамках проекта)
+const addLinks = async (req, res) => {
+  const { projectId } = req.params;
+  const linksData = Array.isArray(req.body) ? req.body : [req.body];
+  if (!linksData.every(item => item && typeof item.url === 'string' && item.url.trim() && item.targetDomain)) {
+    return res.status(400).json({ error: 'Each item must have a valid url (non-empty string) and targetDomain' });
+  }
+
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const now = new Date();
+    if (now.getMonth() !== user.lastReset.getMonth()) {
+      user.linksCheckedThisMonth = 0;
+      user.lastReset = now;
+    }
+
+    const planLimits = {
+      free: 100,
+      basic: 10000,
+      pro: 50000,
+      premium: 200000,
+      enterprise: Infinity
+    };
+    const newLinksCount = linksData.length;
+    if (!user.isSuperAdmin && user.linksCheckedThisMonth + newLinksCount > planLimits[user.plan]) {
+      return res.status(403).json({ message: 'Link limit exceeded for your plan' });
+    }
+
+    const newLinks = [];
+    for (const { url, targetDomain } of linksData) {
+      const newLink = new FrontendLink({ url, targetDomain, projectId });
+      await newLink.save();
+      newLinks.push(newLink);
+    }
+
+    project.links.push(...newLinks.map(link => link._id));
+    await project.save();
+
+    user.linksCheckedThisMonth += newLinksCount;
+    await user.save();
+    res.status(201).json(newLinks);
+  } catch (error) {
+    console.error('addLinks: Error adding links', error);
+    res.status(500).json({ error: 'Error adding links', details: error.message });
+  }
+};
+
+const getLinks = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const links = await FrontendLink.find({ projectId });
+    res.json(links);
+  } catch (error) {
+    console.error('getLinks: Error fetching links', error);
+    res.status(500).json({ error: 'Error fetching links', details: error.message });
+  }
+};
+
+const deleteLink = async (req, res) => {
+  const { projectId, id } = req.params;
+  try {
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const deletedLink = await FrontendLink.findOneAndDelete({ _id: id, projectId });
+    if (!deletedLink) return res.status(404).json({ error: 'Link not found' });
+
+    project.links = project.links.filter(linkId => linkId.toString() !== id);
+    await project.save();
+
+    res.json({ message: 'Link deleted' });
+  } catch (error) {
+    console.error('deleteLink: Error deleting link', error);
+    res.status(500).json({ error: 'Error deleting link', details: error.message });
+  }
+};
+
+const deleteAllLinks = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    await FrontendLink.deleteMany({ projectId });
+    project.links = [];
+    await project.save();
+
+    res.json({ message: 'All links deleted' });
+  } catch (error) {
+    console.error('deleteAllLinks: Error deleting all links', error);
+    res.status(500).json({ error: 'Error deleting all links', details: error.message });
+  }
+};
+
+const checkLinks = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const links = await FrontendLink.find({ projectId });
+
+    const planConcurrency = {
+      free: 5,
+      basic: 20,
+      pro: 50,
+      premium: 100,
+      enterprise: 200
+    };
+    const concurrency = user.isSuperAdmin ? 200 : planConcurrency[user.plan];
+
+    const updatedLinks = await processLinksInBatches(links, 5, concurrency);
+    await Promise.all(updatedLinks.map(link => link.save()));
+    res.json(updatedLinks);
+  } catch (error) {
+    console.error('checkLinks: Error checking links', error);
+    res.status(500).json({ error: 'Error checking links', details: error.message });
+  }
+};
+
+// Остальные функции (без изменений)
 const selectPlan = async (req, res) => {
   const { plan } = req.body;
   const validPlans = ['free', 'basic', 'pro', 'premium', 'enterprise'];
@@ -115,7 +292,7 @@ const selectPlan = async (req, res) => {
       return res.status(403).json({ message: 'SuperAdmin cannot change plan' });
     }
     user.plan = plan;
-    user.subscriptionStatus = 'pending'; // Ожидает оплаты
+    user.subscriptionStatus = 'pending';
     await user.save();
     res.json({ message: 'Plan selected, please proceed to payment' });
   } catch (error) {
@@ -124,7 +301,6 @@ const selectPlan = async (req, res) => {
   }
 };
 
-// Имитация оплаты (для локальной разработки)
 const processPayment = async (req, res) => {
   const { cardNumber, cardHolder, expiryDate, cvv, autoPay } = req.body;
   try {
@@ -141,7 +317,7 @@ const processPayment = async (req, res) => {
     user.autoPay = autoPay || false;
     if (user.subscriptionStatus === 'pending') {
       user.subscriptionStatus = 'active';
-      user.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 дней
+      user.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     }
     await user.save();
     res.json({ message: user.subscriptionStatus === 'pending' ? 'Payment successful, plan activated' : 'Payment details updated' });
@@ -151,7 +327,6 @@ const processPayment = async (req, res) => {
   }
 };
 
-// Отмена подписки
 const cancelSubscription = async (req, res) => {
   try {
     const user = await User.findById(req.userId);
@@ -160,13 +335,12 @@ const cancelSubscription = async (req, res) => {
       return res.status(403).json({ message: 'SuperAdmin cannot cancel subscription' });
     }
 
-    // Останавливаем все запущенные анализы и удаляем таблицы
     const spreadsheets = await Spreadsheet.find({ userId: req.userId });
     for (const spreadsheet of spreadsheets) {
-      spreadsheet.status = 'inactive'; // Останавливаем анализ
+      spreadsheet.status = 'inactive';
       await spreadsheet.save();
     }
-    await Spreadsheet.deleteMany({ userId: req.userId }); // Удаляем все таблицы
+    await Spreadsheet.deleteMany({ userId: req.userId });
 
     user.plan = 'free';
     user.subscriptionStatus = 'inactive';
@@ -180,7 +354,6 @@ const cancelSubscription = async (req, res) => {
   }
 };
 
-// Удаление аккаунта
 const deleteAccount = async (req, res) => {
   try {
     if (!req.userId) {
@@ -199,9 +372,11 @@ const deleteAccount = async (req, res) => {
       return res.status(403).json({ message: 'SuperAdmin cannot delete their account' });
     }
 
-    console.log(`deleteAccount: Deleting FrontendLinks for user ${req.userId}`);
-    const frontendLinksResult = await FrontendLink.deleteMany({ userId: req.userId });
-    console.log(`deleteAccount: Deleted ${frontendLinksResult.deletedCount} FrontendLinks`);
+    console.log(`deleteAccount: Deleting Projects and FrontendLinks for user ${req.userId}`);
+    const projects = await Project.find({ userId: req.userId });
+    const projectIds = projects.map(project => project._id);
+    await FrontendLink.deleteMany({ projectId: { $in: projectIds } });
+    await Project.deleteMany({ userId: req.userId });
 
     console.log(`deleteAccount: Deleting Spreadsheets for user ${req.userId}`);
     const spreadsheetsResult = await Spreadsheet.deleteMany({ userId: req.userId });
@@ -222,7 +397,6 @@ const deleteAccount = async (req, res) => {
   }
 };
 
-// Обновление профиля
 const updateProfile = async (req, res) => {
   try {
     const user = await User.findById(req.userId);
@@ -507,7 +681,6 @@ const checkLinkStatus = async (link) => {
     let captchaType = 'none';
     let captchaToken = null;
 
-    // Определяем тип капчи
     if ($('.cf-turnstile').length > 0) captchaType = 'Cloudflare Turnstile';
     else if ($('.g-recaptcha').length > 0) captchaType = 'Google reCAPTCHA';
     else if ($('.h-captcha').length > 0) captchaType = 'hCaptcha';
@@ -519,19 +692,15 @@ const checkLinkStatus = async (link) => {
 
     if (captchaType !== 'none') console.log(`CAPTCHA detected: ${captchaType}`);
 
-    // Обрабатываем капчу, если она обнаружена
     if (captchaType !== 'none') {
       try {
-        // Получаем текущий URL страницы после всех редиректов
         const currentPageUrl = await page.url();
         console.log(`Current page URL after redirects: ${currentPageUrl}`);
 
-        // Общие параметры для всех типов капч
         const captchaParams = {
-          pageurl: currentPageUrl // Используем актуальный URL после редиректов
+          pageurl: currentPageUrl
         };
 
-        // Извлекаем sitekey или другие параметры в зависимости от типа капчи
         if (captchaType === 'Google reCAPTCHA') {
           const sitekey = await page.$eval('.g-recaptcha', el => el.getAttribute('data-sitekey'));
           if (!sitekey) throw new Error('Could not extract sitekey for Google reCAPTCHA');
@@ -542,13 +711,11 @@ const checkLinkStatus = async (link) => {
           captchaToken = captchaResponse.code;
           console.log(`Google reCAPTCHA solved: ${captchaToken}`);
 
-          // Вставляем токен
           await page.evaluate(token => {
             const textarea = document.querySelector('#g-recaptcha-response');
             if (textarea) textarea.innerHTML = token;
           }, captchaToken);
 
-          // Отправляем форму
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
@@ -565,13 +732,11 @@ const checkLinkStatus = async (link) => {
           captchaToken = captchaResponse.code;
           console.log(`Cloudflare Turnstile solved: ${captchaToken}`);
 
-          // Вставляем токен
           await page.evaluate(token => {
             const input = document.querySelector('input[name="cf-turnstile-response"]');
             if (input) input.value = token;
           }, captchaToken);
 
-          // Отправляем форму
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
@@ -584,20 +749,17 @@ const checkLinkStatus = async (link) => {
           captchaParams.sitekey = sitekey;
           console.log(`Extracted sitekey for hCaptcha: ${sitekey}`);
 
-          // Добавляем дополнительные параметры для hCaptcha
           captchaParams.invisible = await page.evaluate(() => !document.querySelector('.h-captcha').classList.contains('visible'));
 
           const captchaResponse = await solver.hcaptcha(captchaParams);
           captchaToken = captchaResponse.code;
           console.log(`hCaptcha solved: ${captchaToken}`);
 
-          // Вставляем токен
           await page.evaluate(token => {
             const textarea = document.querySelector('#h-captcha-response');
             if (textarea) textarea.innerHTML = token;
           }, captchaToken);
 
-          // Отправляем форму
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
@@ -617,13 +779,11 @@ const checkLinkStatus = async (link) => {
           captchaToken = captchaResponse.code;
           console.log(`FunCaptcha solved: ${captchaToken}`);
 
-          // Вставляем токен
           await page.evaluate(token => {
             const input = document.querySelector('input[name="fc-token"]');
             if (input) input.value = token;
           }, captchaToken);
 
-          // Отправляем форму
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
@@ -737,7 +897,6 @@ const checkLinkStatus = async (link) => {
           }
         }
 
-        // Перезагружаем Cheerio с новым содержимым
         $ = cheerio.load(content);
       } catch (error) {
         console.error(`Error solving CAPTCHA for ${link.url}:`, error.message);
@@ -750,7 +909,6 @@ const checkLinkStatus = async (link) => {
       }
     }
 
-    // Ищем ссылки после решения капчи
     $('a').each((i, a) => {
       const href = $(a).attr('href')?.toLowerCase().trim();
       if (href && href.includes(cleanTargetDomain)) {
@@ -771,7 +929,6 @@ const checkLinkStatus = async (link) => {
 
     console.log('Links found:', linksFound ? JSON.stringify(linksFound) : 'None');
 
-    // Обновляем статус ссылки
     if (linksFound) {
       link.status = 'active';
       link.rel = linksFound.rel;
@@ -824,105 +981,6 @@ const processLinksInBatches = async (links, batchSize = 5, concurrency) => {
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
   return results;
-};
-
-const addLinks = async (req, res) => {
-  const linksData = Array.isArray(req.body) ? req.body : [req.body];
-  if (!linksData.every(item => item && typeof item.url === 'string' && item.url.trim() && item.targetDomain)) {
-    return res.status(400).json({ error: 'Each item must have a valid url (non-empty string) and targetDomain' });
-  }
-
-  try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const now = new Date();
-    if (now.getMonth() !== user.lastReset.getMonth()) {
-      user.linksCheckedThisMonth = 0;
-      user.lastReset = now;
-    }
-
-    const planLimits = {
-      free: 100,
-      basic: 10000,
-      pro: 50000,
-      premium: 200000,
-      enterprise: Infinity
-    };
-    const newLinksCount = linksData.length;
-    if (!user.isSuperAdmin && user.linksCheckedThisMonth + newLinksCount > planLimits[user.plan]) {
-      return res.status(403).json({ message: 'Link limit exceeded for your plan' });
-    }
-
-    const newLinks = [];
-    for (const { url, targetDomain } of linksData) {
-      const newLink = new FrontendLink({ url, targetDomain, userId: req.userId });
-      await newLink.save();
-      newLinks.push(newLink);
-    }
-    user.linksCheckedThisMonth += newLinksCount;
-    await user.save();
-    res.status(201).json(newLinks);
-  } catch (error) {
-    console.error('addLinks: Error adding links', error);
-    res.status(500).json({ error: 'Error adding links', details: error.message });
-  }
-};
-
-const getLinks = async (req, res) => {
-  try {
-    const links = await FrontendLink.find({ userId: req.userId });
-    res.json(links);
-  } catch (error) {
-    console.error('getLinks: Error fetching links', error);
-    res.status(500).json({ error: 'Error fetching links', details: error.message });
-  }
-};
-
-const deleteLink = async (req, res) => {
-  const { id } = req.params;
-  try {
-    const deletedLink = await FrontendLink.findOneAndDelete({ _id: id, userId: req.userId });
-    if (!deletedLink) return res.status(404).json({ error: 'Link not found' });
-    res.json({ message: 'Link deleted' });
-  } catch (error) {
-    console.error('deleteLink: Error deleting link', error);
-    res.status(500).json({ error: 'Error deleting link', details: error.message });
-  }
-};
-
-const deleteAllLinks = async (req, res) => {
-  try {
-    await FrontendLink.deleteMany({ userId: req.userId });
-    res.json({ message: 'All links deleted' });
-  } catch (error) {
-    console.error('deleteAllLinks: Error deleting all links', error);
-    res.status(500).json({ error: 'Error deleting all links', details: error.message });
-  }
-};
-
-const checkLinks = async (req, res) => {
-  try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    const links = await FrontendLink.find({ userId: req.userId });
-
-    const planConcurrency = {
-      free: 5,
-      basic: 20,
-      pro: 50,
-      premium: 100,
-      enterprise: 200
-    };
-    const concurrency = user.isSuperAdmin ? 200 : planConcurrency[user.plan];
-
-    const updatedLinks = await processLinksInBatches(links, 5, concurrency);
-    await Promise.all(updatedLinks.map(link => link.save()));
-    res.json(updatedLinks);
-  } catch (error) {
-    console.error('checkLinks: Error checking links', error);
-    res.status(500).json({ error: 'Error checking links', details: error.message });
-  }
 };
 
 const addSpreadsheet = async (req, res) => {
@@ -1051,13 +1109,11 @@ const runSpreadsheetAnalysis = async (req, res) => {
 };
 
 const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
-  // Проверяем существование документа
   const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId });
   if (!existingSpreadsheet) {
     throw new Error('Spreadsheet not found');
   }
 
-  // Импортируем данные из Google Sheets
   const { links, sheetName } = await importFromGoogleSheets(
     spreadsheet.spreadsheetId,
     spreadsheet.targetDomain,
@@ -1088,7 +1144,6 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
 
   const updatedLinks = await processLinksInBatches(dbLinks, 10, concurrency);
 
-  // Атомарно обновляем документ
   const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
     { _id: spreadsheet._id, userId: spreadsheet.userId },
     {
@@ -1114,19 +1169,16 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
     throw new Error('Spreadsheet not found during update');
   }
 
-  // Форматируем таблицу
   await Promise.all(updatedLinks.map(link => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName)));
   await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid);
 };
 
 const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlColumn, targetColumn, gid) => {
   try {
-    // Шаг 1: Получаем метаданные таблицы, чтобы найти название листа по GID
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId,
     });
 
-    // Находим лист с нужным GID
     const sheet = spreadsheet.data.sheets.find(sheet => sheet.properties.sheetId === parseInt(gid));
     if (!sheet) {
       console.error(`Sheet with GID ${gid} not found in spreadsheet ${spreadsheetId}`);
@@ -1135,7 +1187,6 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
 
     const sheetName = sheet.properties.title;
 
-    // Шаг 2: Запрашиваем данные из листа, используя его название
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${sheetName}!${urlColumn}2:${targetColumn}`,
@@ -1168,7 +1219,7 @@ const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, r
     link.isIndexable === false ? link.indexabilityStatus : '',
     isLinkFound ? 'True' : 'False'
   ];
-  const range = `${sheetName}!${resultRangeStart}${link.rowIndex}:${resultRangeEnd}${link.rowIndex}`; // Используем правильное имя листа
+  const range = `${sheetName}!${resultRangeStart}${link.rowIndex}:${resultRangeEnd}${link.rowIndex}`;
   console.log(`Exporting to ${range} (${spreadsheetId}): ${value}`);
   try {
     const response = await sheets.spreadsheets.values.update({
@@ -1180,7 +1231,7 @@ const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, r
     console.log(`Successfully exported to ${range}: ${JSON.stringify(response.data)}`);
   } catch (error) {
     console.error(`Error exporting to ${range} (${spreadsheetId}):`, error.response ? error.response.data : error.message);
-    throw error; // Пробрасываем ошибку, чтобы увидеть её в логах
+    throw error;
   }
 };
 
@@ -1291,6 +1342,9 @@ module.exports = {
   registerUser,
   loginUser,
   getUserInfo: [authMiddleware, getUserInfo],
+  createProject: [authMiddleware, createProject],
+  getProjects: [authMiddleware, getProjects],
+  deleteProject: [authMiddleware, deleteProject],
   addLinks: [authMiddleware, addLinks],
   getLinks: [authMiddleware, getLinks],
   deleteLink: [authMiddleware, deleteLink],
