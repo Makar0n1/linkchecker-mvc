@@ -87,8 +87,8 @@ const ManualLinks = () => {
         </button>
       </div>
       {error && <p className="text-red-500 mb-6 text-sm">{error}</p>}
-      <div className="rounded-lg shadow-sm">
-        <table className="w-full bg-white border border-gray-200 table-auto">
+      <div className="overflow-x-auto rounded-lg shadow-sm">
+        <table className="w-full bg-white border border-gray-200">
           <thead>
             <tr className="bg-green-50 text-gray-700 text-xs sm:text-sm">
               <th className="p-2 sm:p-3 text-left w-10">#</th>
@@ -114,8 +114,8 @@ const ManualLinks = () => {
                 const status = getStatus(link);
                 return (
                   <tr key={link._id} className="border-t border-gray-200 hover:bg-gray-50 transition-colors">
-                    <td className="p-2 sm:p-3 text-gray-700 text-center text-sm sm:text-base">{index + 1}</td>
-                    <td className="p-2 sm:p-3 text-gray-700 min-w-0 truncate transition-all duration-300 text-sm sm:text-base">
+                    <td className="p-2 sm:p-3 text-gray-700 text-center text-sm sm:text-base whitespace-nowrap">{index + 1}</td>
+                    <td className="p-2 sm:p-3 text-gray-700 min-w-[150px] truncate text-sm sm:text-base">
                       <div>{link.url}</div>
                       <button
                         onClick={() => copyToClipboard({ id: `url-${link._id}`, value: link.url })}
@@ -124,18 +124,18 @@ const ManualLinks = () => {
                         {copiedField === `url-${link._id}` ? 'Copied!' : 'Copy'}
                       </button>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 min-w-0 truncate transition-all duration-300 text-sm sm:text-base">
+                    <td className="p-2 sm:p-3 text-gray-700 min-w-[150px] truncate text-sm sm:text-base">
                       {link.targetDomain}
                     </td>
-                    <td className="p-2 sm:p-3">
+                    <td className="p-2 sm:p-3 whitespace-nowrap">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                         status === 'OK' ? (isCanonicalMismatch ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800') : 'bg-red-100 text-red-800'
                       }`}>
                         {status}
                       </span>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base">{link.responseCode || 'N/A'}</td>
-                    <td className="p-2 sm:p-3">
+                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base whitespace-nowrap">{link.responseCode || 'N/A'}</td>
+                    <td className="p-2 sm:p-3 whitespace-nowrap">
                       <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                           link.isIndexable === null ? 'bg-gray-100 text-gray-800' :
@@ -157,15 +157,15 @@ const ManualLinks = () => {
                       </span>
                     </td>
                     <td className="p-2 sm:p-3 text-gray-700 whitespace-nowrap text-sm sm:text-base">{link.rel || 'none'}</td>
-                    <td className="p-2 sm:p-3 text-center w-24 sm:w-32">
+                    <td className="p-2 sm:p-3 text-center w-24 sm:w-32 whitespace-nowrap">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        link.rel === 'not found' ? 'bg-red-100 text-red-800 whitespace-nowrap' :
+                        link.rel === 'not found' ? 'bg-red-100 text-red-800' :
                         link.linkType === 'dofollow' ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'
                       }`}>
                         {link.rel === 'not found' ? 'not found' : link.linkType || 'not found'}
                       </span>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 min-w-0 truncate text-sm sm:text-base">
+                    <td className="p-2 sm:p-3 text-gray-700 min-w-[150px] truncate text-sm sm:text-base">
                       <div>{link.canonicalUrl || 'None'}</div>
                       {link.canonicalUrl && (
                         <button
@@ -176,7 +176,7 @@ const ManualLinks = () => {
                         </button>
                       )}
                     </td>
-                    <td className="p-2 sm:p-3">
+                    <td className="p-2 sm:p-3 whitespace-nowrap">
                       <button
                         onClick={() => handleDeleteLink(link._id)}
                         disabled={loading}

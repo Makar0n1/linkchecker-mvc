@@ -14,7 +14,7 @@ const Dashboard = () => {
   const location = useLocation();
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
-    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links` // В продакшене без порта
+    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
@@ -28,7 +28,6 @@ const Dashboard = () => {
         });
         setUser(response.data);
 
-        // Проверяем, если пользователь на Free плане и пытается зайти на /sheets
         if (response.data.plan === 'free' && location.pathname === '/app/sheets') {
           navigate('/app/profile');
         }
@@ -128,7 +127,6 @@ const Dashboard = () => {
 
   const isActive = (path) => location.pathname === path;
 
-  // Лимиты ссылок
   const planLimits = {
     free: 100,
     basic: 10000,
@@ -207,7 +205,7 @@ const Dashboard = () => {
           </button>
         </div>
       </nav>
-      <div className="flex flex-1 relative">
+      <div className="flex flex-1 overflow-hidden">
         <motion.aside
           initial={{ width: isSidebarOpen ? 256 : 64 }}
           animate={{ width: isSidebarOpen ? 256 : 64 }}
@@ -290,7 +288,7 @@ const Dashboard = () => {
             </ul>
           </nav>
         </motion.aside>
-        <main className="flex-grow p-4 sm:p-6 w-full">
+        <main className="flex-grow p-4 sm:p-6 w-full overflow-x-hidden">
           <Outlet context={{ links, setLinks, urlList, setUrlList, targetDomain, setTargetDomain, loading, setLoading, handleAddLinks, handleCheckLinks, handleDeleteLink, handleDeleteAllLinks }} />
         </main>
       </div>
