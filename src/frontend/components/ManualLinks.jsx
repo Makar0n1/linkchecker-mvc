@@ -118,7 +118,7 @@ const ManualLinks = ({
 
   return (
     <motion.div
-      className="max-w-full mx-auto overflow-hidden"
+      className="max-w-full mx-auto"
       initial="hidden"
       animate="visible"
       variants={fadeInUp}
@@ -164,8 +164,8 @@ const ManualLinks = ({
         </button>
       </div>
       {error && <p className="text-red-500 mb-6 text-sm">{error}</p>}
-      <div className="rounded-lg shadow-sm">
-        <table className="w-full bg-white border border-gray-200 table-fixed">
+      <div className="rounded-lg shadow-sm overflow-x-auto">
+        <table className="w-full bg-white border border-gray-200 table-fixed min-w-[1200px]">
           <thead>
             <tr className="bg-green-50 text-gray-700 text-xs sm:text-sm">
               <th className="p-2 sm:p-3 text-left w-10">#</th>

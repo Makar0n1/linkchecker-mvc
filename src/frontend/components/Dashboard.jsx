@@ -28,7 +28,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    console.log('Dashboard: Token in useEffect:', token);
+    
     if (!token) {
       console.log('Dashboard: No token, redirecting to /login');
       navigate('/login');
@@ -42,7 +42,7 @@ const Dashboard = () => {
             headers: { Authorization: `Bearer ${token}` },
           })
         );
-        console.log('Dashboard: User fetched:', response.data);
+        
         setUser(response.data);
       } catch (err) {
         console.error('Dashboard: Error fetching user:', err);

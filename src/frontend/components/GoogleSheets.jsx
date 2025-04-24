@@ -212,16 +212,18 @@ const GoogleSheets = ({
           return (
             <motion.li
               key={s._id}
-              className="mb-4 flex items-center justify-between p-3 bg-gray-50 rounded-lg shadow-sm hover:bg-gray-100 transition-colors"
+              className="mb-4 p-3 bg-gray-50 rounded-lg shadow-sm hover:bg-gray-100 transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.3 }}
             >
               <div className="flex items-center gap-2">
-                <span className={`w-4 h-4 rounded-full ${statusColor(s.status, isRunning)}`}></span>
-                <span className="text-gray-700">{s.spreadsheetId} - {s.targetDomain} - Every {s.intervalHours} hours</span>
+                <span className={`w-4 h-4 rounded-full ${statusColor(s.status, isRunning)} flex-shrink-0`}></span>
+                <span className="text-gray-700 break-all">
+                  {s.spreadsheetId} - {s.targetDomain} - Every {s.intervalHours} hours
+                </span>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 sm:ml-auto">
                 {s.status === 'checking' ? (
                   <>
                     <button
