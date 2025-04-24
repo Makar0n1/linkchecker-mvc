@@ -62,7 +62,8 @@ const Dashboard = () => {
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <motion.h1
-              className="text-2xl sm:text-3xl font-bold tracking-tight"
+              onClick={() => navigate('/')}
+              className="text-2xl sm:text-3xl font-bold tracking-tight cursor-pointer"
               initial={{ opacity: 0, x: -50 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.6 }}

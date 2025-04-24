@@ -50,7 +50,7 @@ const StartPage = () => {
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 flex justify-between items-center">
           <motion.h1
             onClick={() => navigate('/')}
-            className="text-2xl sm:text-3xl font-bold tracking-tight"
+            className="text-2xl sm:text-3xl font-bold tracking-tight cursor-pointer"
             initial={{ opacity: 0, x: -50 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6 }}
@@ -59,7 +59,7 @@ const StartPage = () => {
           </motion.h1>
           <div className="flex items-center gap-2 sm:gap-4">
             {user && <span className="text-green-100 text-sm sm:text-base hidden sm:inline">Logged in as: {user.username}</span>}
-            <Link to={user ? '/app/manual' : '/login'}> {/* Убрали путь /register */}
+            <Link to={user ? '/app/projects' : '/login'}> {/* Убрали путь /register */}
               <motion.button
                 className="bg-white text-green-600 px-3 sm:px-5 py-1 sm:py-2 rounded-full font-semibold hover:bg-green-100 transition-all shadow-md text-sm sm:text-base"
                 whileHover={{ scale: 1.05 }}
@@ -101,7 +101,7 @@ const StartPage = () => {
           >
             Discover where your site is linked, check indexability, and boost your SEO with LinkSentry.
           </motion.p>
-          <Link to={user ? '/app/manual' : '/login'}> {/* Убрали путь /register */}
+          <Link to={user ? '/app/projects' : '/login'}> {/* Убрали путь /register */}
             <motion.button
               className="bg-white text-green-600 px-6 sm:px-8 py-2 sm:py-3 rounded-full font-semibold text-base sm:text-lg hover:bg-green-100 transition-all shadow-lg"
               whileHover={{ scale: 1.1 }}
@@ -196,7 +196,7 @@ const StartPage = () => {
           >
             Join thousands of users who trust LinkSentry to monitor their backlinks effortlessly.
           </motion.p>
-          <Link to={user ? '/app/manual' : '/login'}> {/* Убрали путь /register */}
+          <Link to={user ? '/app/projects' : '/login'}> {/* Убрали путь /register */}
             <motion.button
               className="bg-white text-green-600 px-6 sm:px-8 py-2 sm:py-3 rounded-full font-semibold text-base sm:text-lg hover:bg-green-100 transition-all shadow-lg"
               whileHover={{ scale: 1.1 }}

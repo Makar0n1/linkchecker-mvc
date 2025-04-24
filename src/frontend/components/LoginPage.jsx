@@ -43,7 +43,7 @@ const LoginPage = () => {
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 flex justify-between items-center">
           <motion.h1
             onClick={() => navigate('/')}
-            className="text-2xl sm:text-3xl font-bold tracking-tight"
+            className="text-2xl sm:text-3xl font-bold tracking-tight cursor-pointer"
             initial={{ opacity: 0, x: -50 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6 }}
