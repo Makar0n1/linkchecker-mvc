@@ -9,8 +9,6 @@ import ProjectDetails from './components/ProjectDetails';
 import Profile from './components/Profile';
 import './styles.css';
 
-console.log('main.jsx loaded');
-
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token');
   if (!token) {
