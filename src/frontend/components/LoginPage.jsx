@@ -17,14 +17,14 @@ const LoginPage = () => {
     e.preventDefault();
     try {
       const response = await axios.post(`${apiBaseUrl}/login`, { username, password });
-      console.log('Login response:', response.data);
+      
       const token = response.data.token;
       localStorage.setItem('token', token);
-      console.log('Token saved to localStorage:', localStorage.getItem('token')); // Отладочный лог
+     
       // Добавляем небольшую задержку для синхронизации localStorage
       setTimeout(() => {
         navigate('/app');
-        console.log('Navigating to /app'); // Отладочный лог
+       
       }, 100);
     } catch (err) {
       console.error('Login error:', err.response?.data);

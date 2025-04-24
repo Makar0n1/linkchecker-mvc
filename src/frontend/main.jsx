@@ -13,7 +13,6 @@ console.log('main.jsx loaded');
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token');
-  console.log('ProtectedRoute: Token found:', token); // Отладочный лог
   if (!token) {
     console.log('ProtectedRoute: No token, redirecting to /login');
     return <Navigate to="/login" />;
