@@ -17,10 +17,18 @@ const LoginPage = () => {
     e.preventDefault();
     try {
       const response = await axios.post(`${apiBaseUrl}/login`, { username, password });
-      localStorage.setItem('token', response.data.token);
-      navigate('/app');
+      console.log('Login response:', response.data);
+      const token = response.data.token;
+      localStorage.setItem('token', token);
+      console.log('Token saved to localStorage:', localStorage.getItem('token')); // Отладочный лог
+      // Добавляем небольшую задержку для синхронизации localStorage
+      setTimeout(() => {
+        navigate('/app');
+        console.log('Navigating to /app'); // Отладочный лог
+      }, 100);
     } catch (err) {
-      setError('Invalid login or password');
+      console.error('Login error:', err.response?.data);
+      setError(err.response?.data?.error || 'An error occurred during login');
     }
   };
 
@@ -84,7 +92,6 @@ const LoginPage = () => {
             </button>
           </form>
           {error && <p className="text-red-500 mt-4 text-center text-sm">{error}</p>}
-          {/* Убрали ссылку на регистрацию */}
         </div>
       </motion.div>
       <footer className="bg-gray-800 text-white py-4 sm:py-6">

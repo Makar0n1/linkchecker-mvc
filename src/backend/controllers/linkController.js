@@ -77,12 +77,15 @@ const loginUser = async (req, res) => {
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   try {
     const user = await User.findOne({ username });
+    console.log('User found:', user); // Добавляем отладочный лог
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const isMatch = await bcrypt.compare(password, user.password);
+    console.log('Password match:', isMatch); // Добавляем отладочный лог
     if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '1h' });
+    console.log('Generated token:', token); // Добавляем отладочный лог
     res.json({ token, isSuperAdmin: user.isSuperAdmin, plan: user.plan });
   } catch (error) {
     console.error('loginUser: Error logging in', error);

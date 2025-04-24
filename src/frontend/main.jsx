@@ -13,7 +13,12 @@ console.log('main.jsx loaded');
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token');
-  return token ? children : <Navigate to="/login" />;
+  console.log('ProtectedRoute: Token found:', token); // Отладочный лог
+  if (!token) {
+    console.log('ProtectedRoute: No token, redirecting to /login');
+    return <Navigate to="/login" />;
+  }
+  return children;
 };
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
@@ -26,7 +31,7 @@ root.render(
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:projectId" element={<ProjectDetails />} />
         <Route path="profile" element={<Profile />} />
-        <Route path="" element={<Navigate to="projects" />} />
+        <Route path="" element={<Navigate to="projects" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

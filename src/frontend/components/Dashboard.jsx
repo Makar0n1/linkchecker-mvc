@@ -14,23 +14,30 @@ const Dashboard = () => {
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
-    const token = localStorage.getItem(' where token ?');
-    if (!token) return navigate('/login');
+    const token = localStorage.getItem('token');
+    console.log('Dashboard: Token in useEffect:', token); // Отладочный лог
+    if (!token) {
+      console.log('Dashboard: No token, redirecting to /login');
+      navigate('/login');
+      return;
+    }
 
     const fetchUser = async () => {
       try {
         const response = await axios.get(`${apiBaseUrl}/user`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        console.log('Dashboard: User fetched:', response.data); // Отладочный лог
         setUser(response.data);
       } catch (err) {
+        console.error('Dashboard: Error fetching user:', err);
         localStorage.removeItem('token');
         navigate('/login');
       }
     };
 
     fetchUser();
-  }, [navigate, location.pathname]);
+  }, [navigate]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
