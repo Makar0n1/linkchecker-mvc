@@ -10,8 +10,8 @@ const spreadsheetSchema = new mongoose.Schema({
   resultRangeEnd: { type: String, required: true },
   intervalHours: { type: Number, required: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true }, // Добавляем projectId
-  status: { type: String, default: 'inactive' },
+  projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true },
+  status: { type: String, enum: ['pending', 'checking', 'completed', 'error', 'inactive'], default: 'pending' }, // Обновляем статус
   links: [{
     url: String,
     targetDomain: String,

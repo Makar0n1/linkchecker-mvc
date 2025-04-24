@@ -23,6 +23,7 @@ router.post('/:projectId/spreadsheets', linkController.addSpreadsheet);
 router.get('/:projectId/spreadsheets', linkController.getSpreadsheets);
 router.post('/:projectId/spreadsheets/:spreadsheetId/run', linkController.runSpreadsheetAnalysis);
 router.delete('/:projectId/spreadsheets/:spreadsheetId', linkController.deleteSpreadsheet);
+router.post('/:projectId/spreadsheets/:spreadsheetId/cancel', linkController.cancelSpreadsheetAnalysis); // Новый эндпоинт
 
 // Профиль и подписка
 router.post('/select-plan', linkController.selectPlan);

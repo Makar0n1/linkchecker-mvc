@@ -9,8 +9,10 @@ const ProjectDetails = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState('');
-  const [activeTab, setActiveTab] = useState('manual'); // По умолчанию открываем Manual Links
+  const [activeTab, setActiveTab] = useState('manual');
   const [error, setError] = useState(null);
+  const [isServerBusy, setIsServerBusy] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false); // Новое состояние для анализа
 
   // Состояния для Manual Links
   const [links, setLinks] = useState([]);
@@ -36,6 +38,7 @@ const ProjectDetails = () => {
         const project = response.data.find((proj) => proj._id === projectId);
         if (project) {
           setProjectName(project.name);
+          setIsAnalyzing(project.isAnalyzing); // Устанавливаем статус анализа
         } else {
           setError('Project not found');
           navigate('/app/projects');
@@ -63,8 +66,12 @@ const ProjectDetails = () => {
       setUrlList('');
       setTargetDomain('');
       setError(null);
+      setIsServerBusy(false);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to add links');
+      if (err.response?.status === 429 || err.message.includes('Network Error')) {
+        setIsServerBusy(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -79,8 +86,14 @@ const ProjectDetails = () => {
       });
       setLinks(response.data);
       setError(null);
+      setIsServerBusy(false);
+      setIsAnalyzing(false); // Сбрасываем после успешного анализа
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to check links');
+      if (err.response?.status === 429 || err.response?.status === 409 || err.message.includes('Network Error')) {
+        setIsServerBusy(true);
+        setIsAnalyzing(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -95,8 +108,12 @@ const ProjectDetails = () => {
       });
       setLinks(links.filter(link => link._id !== id));
       setError(null);
+      setIsServerBusy(false);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to delete link');
+      if (err.response?.status === 429 || err.message.includes('Network Error')) {
+        setIsServerBusy(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -111,8 +128,12 @@ const ProjectDetails = () => {
       });
       setLinks([]);
       setError(null);
+      setIsServerBusy(false);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to delete all links');
+      if (err.response?.status === 429 || err.message.includes('Network Error')) {
+        setIsServerBusy(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -139,6 +160,17 @@ const ProjectDetails = () => {
           <button
             onClick={() => setError(null)}
             className="ml-2 text-red-900 underline"
+          >
+            Close
+          </button>
+        </div>
+      )}
+      {isServerBusy && (
+        <div className="mb-4 p-3 bg-yellow-100 text-yellow-700 rounded-lg">
+          Server is currently busy with another analysis. Please try again in a few minutes.
+          <button
+            onClick={() => setIsServerBusy(false)}
+            className="ml-2 text-yellow-900 underline"
           >
             Close
           </button>
@@ -178,7 +210,7 @@ const ProjectDetails = () => {
           setUrlList={setUrlList}
           targetDomain={targetDomain}
           setTargetDomain={setTargetDomain}
-          loading={loading}
+          loading={loading || isAnalyzing} // Учитываем isAnalyzing
           setLoading={setLoading}
           error={error}
           setError={setError}
@@ -198,6 +230,7 @@ const ProjectDetails = () => {
           setRunningIds={setRunningIds}
           setLoading={setLoading}
           setError={setError}
+          isAnalyzing={isAnalyzing} // Передаём статус анализа
         />
       )}
     </motion.div>

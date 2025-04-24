@@ -11,6 +11,12 @@ const axios = require('axios');
 const { google } = require('googleapis');
 const path = require('path');
 
+let pLimit;
+(async () => {
+  const { default: pLimitModule } = await import('p-limit');
+  pLimit = pLimitModule;
+})();
+
 const solver = new Solver(process.env.TWOCAPTCHA_API_KEY);
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -22,10 +28,47 @@ const sheets = google.sheets({
   }),
 });
 
-let pLimit;
-(async () => {
-  pLimit = (await import('p-limit')).default;
-})();
+// Глобальный браузер для переиспользования
+let globalBrowser = null;
+
+const initializeBrowser = async () => {
+  if (!globalBrowser) {
+    console.log('Initializing global browser...');
+    globalBrowser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--window-size=1920,1080',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--no-zygote',
+        '--disable-accelerated-2d-canvas',
+      ],
+      timeout: 60000,
+    });
+    console.log('Global browser initialized');
+  }
+  return globalBrowser;
+};
+
+const closeBrowser = async () => {
+  if (globalBrowser) {
+    await globalBrowser.close();
+    globalBrowser = null;
+    console.log('Global browser closed');
+  }
+};
+
+// Перезапускаем браузер при ошибках
+const restartBrowser = async () => {
+  console.log('Restarting global browser due to error...');
+  await closeBrowser();
+  return await initializeBrowser();
+};
 
 const authMiddleware = async (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
@@ -62,7 +105,7 @@ const registerUser = async (req, res) => {
       password,
       isSuperAdmin: isSuperAdmin || false,
       plan: isSuperAdmin ? 'enterprise' : 'free',
-      subscriptionStatus: isSuperAdmin ? 'active' : 'inactive'
+      subscriptionStatus: isSuperAdmin ? 'active' : 'inactive',
     });
     await user.save();
     res.status(201).json({ message: 'User registered', userId: user._id });
@@ -77,15 +120,12 @@ const loginUser = async (req, res) => {
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   try {
     const user = await User.findOne({ username });
-   
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const isMatch = await bcrypt.compare(password, user.password);
-   
     if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '1h' });
-  
     res.json({ token, isSuperAdmin: user.isSuperAdmin, plan: user.plan });
   } catch (error) {
     console.error('loginUser: Error logging in', error);
@@ -175,7 +215,7 @@ const addLinks = async (req, res) => {
       basic: 10000,
       pro: 50000,
       premium: 200000,
-      enterprise: Infinity
+      enterprise: Infinity,
     };
     const newLinksCount = linksData.length;
     if (!user.isSuperAdmin && user.linksCheckedThisMonth + newLinksCount > planLimits[user.plan]) {
@@ -184,7 +224,7 @@ const addLinks = async (req, res) => {
 
     const newLinks = [];
     for (const { url, targetDomain } of linksData) {
-      const newLink = new FrontendLink({ url, targetDomain, projectId });
+      const newLink = new FrontendLink({ url, targetDomain, projectId, status: 'pending' });
       await newLink.save();
       newLinks.push(newLink);
     }
@@ -260,22 +300,45 @@ const checkLinks = async (req, res) => {
     const project = await Project.findOne({ _id: projectId, userId: req.userId });
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
+    if (project.isAnalyzing) {
+      return res.status(409).json({ error: 'Analysis is already in progress for this project' });
+    }
+
     const links = await FrontendLink.find({ projectId });
 
-    const planConcurrency = {
-      free: 5,
-      basic: 20,
-      pro: 50,
-      premium: 100,
-      enterprise: 200
+    const planLinkCheckLimits = {
+      free: 20,
+      basic: 50,
+      pro: 100,
+      premium: 200,
+      enterprise: 500,
     };
-    const concurrency = user.isSuperAdmin ? 200 : planConcurrency[user.plan];
+    const maxLinksToCheck = user.isSuperAdmin ? planLinkCheckLimits.enterprise : planLinkCheckLimits[user.plan];
+    if (links.length > maxLinksToCheck) {
+      return res.status(403).json({ error: `Too many links to check at once. Your plan allows checking up to ${maxLinksToCheck} links at a time.` });
+    }
 
-    const updatedLinks = await processLinksInBatches(links, 5, concurrency);
-    await Promise.all(updatedLinks.map(link => link.save()));
-    res.json(updatedLinks);
+    console.log(`Starting link check for project ${projectId} with ${links.length} links`);
+
+    // Устанавливаем флаг анализа
+    project.isAnalyzing = true;
+    await project.save();
+
+    try {
+      // Обновляем статус всех ссылок на "checking"
+      await FrontendLink.updateMany({ projectId }, { $set: { status: 'checking' } });
+
+      const updatedLinks = await processLinksInBatches(links, 20); // Последовательная обработка, батч по 20 ссылок
+      await Promise.all(updatedLinks.map(link => link.save()));
+      console.log(`Finished link check for project ${projectId}`);
+      res.json(updatedLinks);
+    } finally {
+      // Сбрасываем флаг анализа
+      project.isAnalyzing = false;
+      await project.save();
+    }
   } catch (error) {
-    console.error('checkLinks: Error checking links', error);
+    console.error(`checkLinks: Error checking links for project ${projectId}:`, error);
     res.status(500).json({ error: 'Error checking links', details: error.message });
   }
 };
@@ -298,7 +361,7 @@ const addSpreadsheet = async (req, res) => {
       basic: 1,
       pro: 5,
       premium: 20,
-      enterprise: Infinity
+      enterprise: Infinity,
     };
     const maxSpreadsheets = user.isSuperAdmin ? Infinity : planLimits[user.plan];
     if (spreadsheets.length >= maxSpreadsheets) {
@@ -314,7 +377,7 @@ const addSpreadsheet = async (req, res) => {
       basic: 24,
       pro: 4,
       premium: 1,
-      enterprise: 1
+      enterprise: 1,
     };
     const minInterval = user.isSuperAdmin ? 1 : planIntervalLimits[user.plan];
     if (parseInt(intervalHours) < minInterval) {
@@ -331,7 +394,8 @@ const addSpreadsheet = async (req, res) => {
       resultRangeEnd,
       intervalHours: parseInt(intervalHours),
       userId: req.userId,
-      projectId
+      projectId,
+      status: 'pending',
     });
     await spreadsheet.save();
     res.status(201).json(spreadsheet);
@@ -379,7 +443,78 @@ const deleteSpreadsheet = async (req, res) => {
   }
 };
 
+let cancelAnalysis = false;
+
 const runSpreadsheetAnalysis = async (req, res) => {
+  const { projectId, spreadsheetId } = req.params;
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
+
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    if (project.isAnalyzing) {
+      return res.status(409).json({ error: 'Analysis is already in progress for this project' });
+    }
+
+    const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId: req.userId });
+    if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
+
+    const planLinkLimits = {
+      basic: 1000,
+      pro: 5000,
+      premium: 10000,
+      enterprise: 50000,
+    };
+    const maxLinks = user.isSuperAdmin ? 50000 : planLinkLimits[user.plan];
+
+    console.log(`Starting spreadsheet analysis for spreadsheet ${spreadsheetId} in project ${projectId}`);
+
+    // Устанавливаем флаг анализа
+    project.isAnalyzing = true;
+    await project.save();
+
+    // Обновляем статус таблицы на "checking"
+    spreadsheet.status = 'checking';
+    await spreadsheet.save();
+
+    try {
+      // Сбрасываем флаг отмены перед началом анализа
+      cancelAnalysis = false;
+      await analyzeSpreadsheet(spreadsheet, maxLinks);
+      if (cancelAnalysis) {
+        throw new Error('Analysis cancelled');
+      }
+      // Устанавливаем статус "completed" после успешного анализа
+      spreadsheet.status = 'completed';
+      spreadsheet.lastRun = new Date();
+      await spreadsheet.save();
+      console.log(`Finished spreadsheet analysis for spreadsheet ${spreadsheetId}`);
+      res.json({ message: 'Analysis completed' });
+    } catch (error) {
+      console.error(`Error analyzing spreadsheet ${spreadsheetId} in project ${projectId}:`, error);
+      spreadsheet.status = error.message === 'Analysis cancelled' ? 'pending' : 'error';
+      await spreadsheet.save();
+      if (error.message !== 'Analysis cancelled') {
+        throw error;
+      }
+      res.json({ message: 'Analysis cancelled' });
+    } finally {
+      // Сбрасываем флаг анализа
+      project.isAnalyzing = false;
+      await project.save();
+    }
+  } catch (error) {
+    console.error('runSpreadsheetAnalysis: Error running analysis', error);
+    res.status(500).json({ error: 'Error running analysis', details: error.message });
+  }
+};
+
+const cancelSpreadsheetAnalysis = async (req, res) => {
   const { projectId, spreadsheetId } = req.params;
   try {
     const user = await User.findById(req.userId);
@@ -394,31 +529,26 @@ const runSpreadsheetAnalysis = async (req, res) => {
     const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId: req.userId });
     if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
 
-    const planLinkLimits = {
-      basic: 5000,
-      pro: 20000,
-      premium: 100000,
-      enterprise: 1000000
-    };
-    const maxLinks = user.isSuperAdmin ? 1000000 : planLinkLimits[user.plan];
-
-    spreadsheet.status = 'running';
-    await spreadsheet.save();
-    try {
-      await analyzeSpreadsheet(spreadsheet, maxLinks);
-      spreadsheet.status = 'completed';
-    } catch (error) {
-      console.error(`Error analyzing ${spreadsheet.spreadsheetId}:`, error);
-      spreadsheet.status = 'error';
-      await spreadsheet.save();
-      throw error;
+    if (spreadsheet.status !== 'checking') {
+      return res.status(400).json({ error: 'No analysis in progress to cancel' });
     }
-    spreadsheet.lastRun = new Date();
+
+    // Устанавливаем флаг отмены
+    cancelAnalysis = true;
+
+    // Сбрасываем статус таблицы
+    spreadsheet.status = 'pending';
+    spreadsheet.links = []; // Очищаем результаты анализа
     await spreadsheet.save();
-    res.json({ message: 'Analysis completed' });
+
+    // Сбрасываем флаг анализа проекта
+    project.isAnalyzing = false;
+    await project.save();
+
+    res.json({ message: 'Analysis cancelled and data cleared' });
   } catch (error) {
-    console.error('runSpreadsheetAnalysis: Error running analysis', error);
-    res.status(500).json({ error: 'Error running analysis', details: error.message });
+    console.error('cancelSpreadsheetAnalysis: Error cancelling analysis', error);
+    res.status(500).json({ error: 'Error cancelling analysis', details: error.message });
   }
 };
 
@@ -555,7 +685,7 @@ const updateProfile = async (req, res) => {
 };
 
 const checkLinkStatus = async (link) => {
-  let browser;
+  let page;
   try {
     console.log(`Checking URL: ${link.url} for domain: ${link.targetDomain}`);
 
@@ -575,9 +705,10 @@ const checkLinkStatus = async (link) => {
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1'
-        }
+          'Sec-Fetch-User': '?1',
+        },
       },
+      // Оставляем остальные user agents без изменений
       {
         ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
         headers: {
@@ -593,8 +724,8 @@ const checkLinkStatus = async (link) => {
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'cross-site',
-          'Sec-Fetch-User': '?1'
-        }
+          'Sec-Fetch-User': '?1',
+        },
       },
       {
         ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0',
@@ -608,8 +739,8 @@ const checkLinkStatus = async (link) => {
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1'
-        }
+          'Sec-Fetch-User': '?1',
+        },
       },
       {
         ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.2792.52',
@@ -626,8 +757,8 @@ const checkLinkStatus = async (link) => {
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1'
-        }
+          'Sec-Fetch-User': '?1',
+        },
       },
       {
         ua: 'Mozilla/5.0 (Linux; Android 14; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
@@ -644,8 +775,8 @@ const checkLinkStatus = async (link) => {
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1'
-        }
+          'Sec-Fetch-User': '?1',
+        },
       },
       {
         ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
@@ -655,8 +786,8 @@ const checkLinkStatus = async (link) => {
           'Accept-Encoding': 'gzip, deflate, br',
           'Connection': 'keep-alive',
           'Referer': 'https://www.apple.com/',
-          'Upgrade-Insecure-Requests': '1'
-        }
+          'Upgrade-Insecure-Requests': '1',
+        },
       },
       {
         ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -673,8 +804,8 @@ const checkLinkStatus = async (link) => {
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'cross-site',
-          'Sec-Fetch-User': '?1'
-        }
+          'Sec-Fetch-User': '?1',
+        },
       },
       {
         ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:130.0) Gecko/20100101 Firefox/130.0',
@@ -684,8 +815,8 @@ const checkLinkStatus = async (link) => {
           'Accept-Encoding': 'gzip, deflate',
           'Connection': 'keep-alive',
           'Referer': 'https://www.mozilla.org/',
-          'Upgrade-Insecure-Requests': '1'
-        }
+          'Upgrade-Insecure-Requests': '1',
+        },
       },
       {
         ua: 'Mozilla/5.0 (Windows Phone 10.0; Android 6.0.1; Microsoft; Lumia 950) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36 Edge/129.0.2792.52',
@@ -702,8 +833,8 @@ const checkLinkStatus = async (link) => {
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1'
-        }
+          'Sec-Fetch-User': '?1',
+        },
       },
       {
         ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
@@ -720,283 +851,194 @@ const checkLinkStatus = async (link) => {
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1'
-        }
-      }
+          'Sec-Fetch-User': '?1',
+        },
+      },
     ];
 
-    browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--window-size=1920,1080'
-      ],
-      timeout: 60000
-    });
-    const page = await browser.newPage();
-    await page.setDefaultNavigationTimeout(60000);
-
-    const randomAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
-    await page.setUserAgent(randomAgent.ua);
-    await page.setExtraHTTPHeaders(randomAgent.headers);
-
-    await page.setViewport({ width: 1920, height: 1080 });
-
-    const startTime = Date.now();
-    let response;
+    // Получаем или инициализируем глобальный браузер
+    const browser = await initializeBrowser();
     try {
-      response = await page.goto(link.url, { waitUntil: 'networkidle0', timeout: 60000 });
-      console.log(`Page loaded with status: ${response.status()}`);
-      link.responseCode = response.status().toString();
-    } catch (error) {
-      console.error(`Navigation failed for ${link.url}:`, error.message);
-      link.status = 'timeout';
-      link.errorDetails = error.message;
-      link.isIndexable = false;
-      link.indexabilityStatus = 'timeout';
-      link.responseCode = 'Timeout';
-    }
-    const loadTime = Date.now() - startTime;
-    link.loadTime = loadTime;
+      page = await browser.newPage();
+      await page.setDefaultNavigationTimeout(60000); // Таймаут 60 секунд
 
-    if (response && response.status() !== 200) {
-      link.isIndexable = false;
-      link.indexabilityStatus = `HTTP ${response.status()}`;
-      link.status = response.status() >= 400 ? 'broken' : 'redirect';
-    }
+      const randomAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+      await page.setUserAgent(randomAgent.ua);
+      await page.setExtraHTTPHeaders(randomAgent.headers);
 
-    console.log('Waiting for meta robots or links (5 seconds)...');
-    await page.waitForFunction(
-      () => document.querySelector('meta[name="robots"]') || document.querySelector(`a[href*="${link.targetDomain}"]`),
-      { timeout: 5000 }
-    ).catch(() => console.log('Timeout waiting for meta or links, proceeding with evaluate...'));
+      await page.setViewport({ width: 1920, height: 1080 });
 
-    const randomDelay = Math.floor(Math.random() * 5000) + 5000;
-    await new Promise(resolve => setTimeout(resolve, randomDelay));
-    let content = await page.evaluate(() => document.documentElement.outerHTML);
+      // Отключаем загрузку ненужных ресурсов
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
 
-    const $ = cheerio.load(content);
-    console.log(`Total links found in HTML: ${$('a').length}`);
-
-    let metaRobots = '';
-    try {
-      metaRobots = await page.$eval('meta[name="robots"]', el => el?.content) || '';
-      const robotsValues = metaRobots.toLowerCase().split(',').map(val => val.trim());
-      if (robotsValues.includes('noindex')) {
-        link.isIndexable = false;
-        link.indexabilityStatus = 'noindex';
-      } else {
-        link.isIndexable = link.responseCode === '200';
-        link.indexabilityStatus = link.isIndexable ? 'indexable' : `HTTP ${link.responseCode}`;
-      }
-    } catch (error) {
-      console.log('No meta robots tag found, assuming indexable if 200');
-      link.isIndexable = link.responseCode === '200';
-      link.indexabilityStatus = link.isIndexable ? 'indexable' : link.responseCode === 'Timeout' ? 'timeout' : `HTTP ${link.responseCode}`;
-    }
-
-    if (link.isIndexable) {
+      const startTime = Date.now();
+      let response;
       try {
-        const canonical = await page.$eval('link[rel="canonical"]', el => el?.href);
-        if (canonical) {
-          link.canonicalUrl = canonical;
-          const currentUrl = link.url.toLowerCase().replace(/\/$/, '');
-          const canonicalNormalized = canonical.toLowerCase().replace(/\/$/, '');
-          if (currentUrl !== canonicalNormalized) {
-            link.indexabilityStatus = 'canonical mismatch';
-          }
+        response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 }); // Убираем networkidle0, используем domcontentloaded
+        console.log(`Page loaded with status: ${response ? response.status() : 'No response'}`);
+        link.responseCode = response ? response.status().toString() : 'Timeout';
+      } catch (error) {
+        console.error(`Navigation failed for ${link.url}:`, error.message);
+        link.status = 'timeout';
+        link.errorDetails = error.message;
+        link.isIndexable = false;
+        link.indexabilityStatus = 'timeout';
+        link.responseCode = 'Timeout';
+        // Продолжаем анализ, даже если таймаут
+      }
+      const loadTime = Date.now() - startTime;
+      link.loadTime = loadTime;
+
+      if (response && !response.ok()) {
+        link.isIndexable = false;
+        link.indexabilityStatus = `HTTP ${response.status()}`;
+        link.status = response.status() >= 400 ? 'broken' : 'redirect';
+        // Продолжаем анализ
+      }
+
+      console.log('Waiting for meta robots or links (5 seconds)...');
+      await page.waitForFunction(
+        () => document.querySelector('meta[name="robots"]') || document.querySelector(`a[href*="${link.targetDomain}"]`),
+        { timeout: 5000 },
+      ).catch(() => console.log('Timeout waiting for meta or links, proceeding with evaluate...'));
+
+      const randomDelay = Math.floor(Math.random() * 5000) + 5000;
+      await new Promise(resolve => setTimeout(resolve, randomDelay));
+      let content;
+      try {
+        content = await page.evaluate(() => document.documentElement.outerHTML);
+      } catch (error) {
+        console.error(`Failed to extract HTML for ${link.url}:`, error.message);
+        link.status = 'broken';
+        link.errorDetails = `Failed to extract HTML: ${error.message}`;
+        link.isIndexable = false;
+        link.indexabilityStatus = `check failed: ${error.message}`;
+        link.responseCode = 'Error';
+        link.overallStatus = 'Problem';
+        return link; // Прерываем, если не удалось даже извлечь HTML
+      }
+
+      const $ = cheerio.load(content);
+      console.log(`Total links found in HTML: ${$('a').length}`);
+
+      let metaRobots = '';
+      let isMetaRobotsFound = false;
+      let isIndexableBasedOnRobots = false;
+      try {
+        metaRobots = (await page.$eval('meta[name="robots"]', el => el?.content)) || '';
+        isMetaRobotsFound = true;
+        const robotsValues = metaRobots.toLowerCase().split(',').map(val => val.trim());
+        if (robotsValues.includes('noindex') || robotsValues.includes('nofollow')) {
+          link.isIndexable = false;
+          link.indexabilityStatus = robotsValues.includes('noindex') ? 'noindex' : 'nofollow';
+        } else {
+          link.isIndexable = true;
+          link.indexabilityStatus = 'indexable';
+          isIndexableBasedOnRobots = true;
         }
       } catch (error) {
-        console.log('No canonical tag found');
-        link.canonicalUrl = null;
+        console.log('No meta robots tag found, assuming indexable');
+        link.isIndexable = true;
+        link.indexabilityStatus = 'indexable';
+        isIndexableBasedOnRobots = true;
       }
-    }
 
-    const cleanTargetDomain = link.targetDomain
-      .replace(/^https?:\/\//, '')
-      .replace(/^\/+/, '')
-      .replace(/\/+$/, '');
-    console.log(`Cleaned targetDomain: ${cleanTargetDomain}`);
-
-    let linksFound = null;
-    let captchaType = 'none';
-    let captchaToken = null;
-
-    if ($('.cf-turnstile').length > 0) captchaType = 'Cloudflare Turnstile';
-    else if ($('.g-recaptcha').length > 0) captchaType = 'Google reCAPTCHA';
-    else if ($('.h-captcha').length > 0) captchaType = 'hCaptcha';
-    else if ($('form[action*="/cdn-cgi/"]').length > 0) captchaType = 'Cloudflare Challenge Page';
-    else if ($('div[id*="arkose"]').length > 0 || $('script[src*="arkoselabs"]').length > 0) captchaType = 'FunCaptcha';
-    else if ($('div[class*="geetest"]').length > 0) captchaType = 'GeeTest';
-    else if ($('img[src*="captcha"]').length > 0 || $('input[placeholder*="enter code"]').length > 0) captchaType = 'Image CAPTCHA';
-    else if ($('body').text().toLowerCase().includes('verify you are not a robot')) captchaType = 'Custom CAPTCHA';
-
-    if (captchaType !== 'none') console.log(`CAPTCHA detected: ${captchaType}`);
-
-    if (captchaType !== 'none') {
-      try {
-        const currentPageUrl = await page.url();
-        console.log(`Current page URL after redirects: ${currentPageUrl}`);
-
-        const captchaParams = {
-          pageurl: currentPageUrl
-        };
-
-        if (captchaType === 'Google reCAPTCHA') {
-          const sitekey = await page.$eval('.g-recaptcha', el => el.getAttribute('data-sitekey'));
-          if (!sitekey) throw new Error('Could not extract sitekey for Google reCAPTCHA');
-          captchaParams.sitekey = sitekey;
-          console.log(`Extracted sitekey for Google reCAPTCHA: ${sitekey}`);
-
-          const captchaResponse = await solver.recaptcha(captchaParams);
-          captchaToken = captchaResponse.code;
-          console.log(`Google reCAPTCHA solved: ${captchaToken}`);
-
-          await page.evaluate(token => {
-            const textarea = document.querySelector('#g-recaptcha-response');
-            if (textarea) textarea.innerHTML = token;
-          }, captchaToken);
-
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
+      if (link.isIndexable && (link.responseCode === '200' || link.responseCode === 'Timeout')) {
+        try {
+          const canonical = await page.$eval('link[rel="canonical"]', el => el?.href);
+          if (canonical) {
+            link.canonicalUrl = canonical;
+            const currentUrl = link.url.toLowerCase().replace(/\/$/, '');
+            const canonicalNormalized = canonical.toLowerCase().replace(/\/$/, '');
+            if (currentUrl !== canonicalNormalized) {
+              link.indexabilityStatus = 'canonical mismatch';
+            }
           }
-        } else if (captchaType === 'Cloudflare Turnstile') {
-          const sitekey = await page.$eval('.cf-turnstile', el => el.getAttribute('data-sitekey'));
-          if (!sitekey) throw new Error('Could not extract sitekey for Cloudflare Turnstile');
-          captchaParams.sitekey = sitekey;
-          console.log(`Extracted sitekey for Cloudflare Turnstile: ${sitekey}`);
+        } catch (error) {
+          console.log('No canonical tag found');
+          link.canonicalUrl = null;
+        }
+      }
 
-          const captchaResponse = await solver.turnstile(captchaParams);
-          captchaToken = captchaResponse.code;
-          console.log(`Cloudflare Turnstile solved: ${captchaToken}`);
+      const cleanTargetDomain = link.targetDomain
+        .replace(/^https?:\/\//, '')
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '');
+      console.log(`Cleaned targetDomain: ${cleanTargetDomain}`);
 
-          await page.evaluate(token => {
-            const input = document.querySelector('input[name="cf-turnstile-response"]');
-            if (input) input.value = token;
-          }, captchaToken);
+      let linksFound = null;
+      let captchaType = 'none';
+      let captchaToken = null;
 
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'hCaptcha') {
-          const sitekey = await page.$eval('.h-captcha', el => el.getAttribute('data-sitekey'));
-          if (!sitekey) throw new Error('Could not extract sitekey for hCaptcha');
-          captchaParams.sitekey = sitekey;
-          console.log(`Extracted sitekey for hCaptcha: ${sitekey}`);
+      if ($('.cf-turnstile').length > 0) captchaType = 'Cloudflare Turnstile';
+      else if ($('.g-recaptcha').length > 0) captchaType = 'Google reCAPTCHA';
+      else if ($('.h-captcha').length > 0) captchaType = 'hCaptcha';
+      else if ($('form[action*="/cdn-cgi/"]').length > 0) captchaType = 'Cloudflare Challenge Page';
+      else if ($('div[id*="arkose"]').length > 0 || $('script[src*="arkoselabs"]').length > 0) captchaType = 'FunCaptcha';
+      else if ($('div[class*="geetest"]').length > 0) captchaType = 'GeeTest';
+      else if ($('img[src*="captcha"]').length > 0 || $('input[placeholder*="enter code"]').length > 0) captchaType = 'Image CAPTCHA';
+      else if ($('body').text().toLowerCase().includes('verify you are not a robot')) captchaType = 'Custom CAPTCHA';
 
-          captchaParams.invisible = await page.evaluate(() => !document.querySelector('.h-captcha').classList.contains('visible'));
+      if (captchaType !== 'none') console.log(`CAPTCHA detected: ${captchaType}`);
 
-          const captchaResponse = await solver.hcaptcha(captchaParams);
-          captchaToken = captchaResponse.code;
-          console.log(`hCaptcha solved: ${captchaToken}`);
+      if (captchaType !== 'none') {
+        try {
+          const currentPageUrl = await page.url();
+          console.log(`Current page URL after redirects: ${currentPageUrl}`);
 
-          await page.evaluate(token => {
-            const textarea = document.querySelector('#h-captcha-response');
-            if (textarea) textarea.innerHTML = token;
-          }, captchaToken);
+          const captchaParams = {
+            pageurl: currentPageUrl,
+          };
 
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'FunCaptcha') {
-          const sitekey = await page.evaluate(() => {
-            const script = document.querySelector('script[src*="arkoselabs"]');
-            return script ? new URL(script.src).searchParams.get('pk') : null;
-          });
-          if (!sitekey) throw new Error('Could not extract sitekey for FunCaptcha');
-          captchaParams.publickey = sitekey;
-          console.log(`Extracted publickey for FunCaptcha: ${sitekey}`);
+          if (captchaType === 'Google reCAPTCHA') {
+            const sitekey = await page.$eval('.g-recaptcha', el => el.getAttribute('data-sitekey'));
+            if (!sitekey) throw new Error('Could not extract sitekey for Google reCAPTCHA');
+            console.log(`Extracted googlekey for Google reCAPTCHA: ${sitekey}`);
 
-          const captchaResponse = await solver.funcaptcha(captchaParams);
-          captchaToken = captchaResponse.code;
-          console.log(`FunCaptcha solved: ${captchaToken}`);
+            const captchaParams = {
+              key: process.env.TWOCAPTCHA_API_KEY, // Явно передаём API-ключ
+              googlekey: sitekey,
+              pageurl: currentPageUrl,
+              version: 'v2', // Указываем версию reCAPTCHA
+            };
 
-          await page.evaluate(token => {
-            const input = document.querySelector('input[name="fc-token"]');
-            if (input) input.value = token;
-          }, captchaToken);
+            let captchaResponse;
+            try {
+              captchaResponse = await solver.recaptcha(captchaParams);
+              captchaToken = captchaResponse.data;
+              console.log(`Google reCAPTCHA solved: ${captchaToken}`);
+            } catch (error) {
+              console.error(`Detailed CAPTCHA error for ${link.url}:`, error);
+              throw new Error(`CAPTCHA solving failed: ${error.message}`);
+            }
 
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'GeeTest') {
-          const geeTestParams = await page.evaluate(() => {
-            const gt = document.querySelector('script[src*="geetest"]')?.src.match(/gt=([^&]+)/)?.[1];
-            const challenge = document.querySelector('script[src*="geetest"]')?.src.match(/challenge=([^&]+)/)?.[1];
-            return { gt, challenge };
-          });
-          if (!geeTestParams.gt || !geeTestParams.challenge) throw new Error('Could not extract parameters for GeeTest');
-          captchaParams.gt = geeTestParams.gt;
-          captchaParams.challenge = geeTestParams.challenge;
-          console.log(`Extracted parameters for GeeTest: gt=${geeTestParams.gt}, challenge=${geeTestParams.challenge}`);
+            await page.evaluate(token => {
+              const textarea = document.querySelector('#g-recaptcha-response');
+              if (textarea) textarea.innerHTML = token;
+            }, captchaToken);
 
-          const captchaResponse = await solver.geetest(captchaParams);
-          captchaToken = captchaResponse;
-          console.log(`GeeTest solved: ${JSON.stringify(captchaToken)}`);
-
-          await page.evaluate(params => {
-            Object.keys(params).forEach(key => {
-              const input = document.createElement('input');
-              input.type = 'hidden';
-              input.name = key;
-              input.value = params[key];
-              document.forms[0]?.appendChild(input);
-            });
-          }, captchaToken);
-
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'Image CAPTCHA') {
-          const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src);
-          if (!captchaImageUrl) throw new Error('Could not extract CAPTCHA image URL');
-          console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
-
-          const captchaResponse = await solver.imageCaptcha({
-            body: captchaImageUrl,
-            numeric: false,
-            min_len: 4,
-            max_len: 6
-          });
-          captchaToken = captchaResponse.code;
-          console.log(`Image CAPTCHA solved: ${captchaToken}`);
-
-          await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
-
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'Cloudflare Challenge Page') {
-          await page.waitForSelector('input[name="cf_captcha_kind"]', { timeout: 10000 });
-          const sitekey = await page.$eval('input[name="cf_captcha_kind"]', el => el.getAttribute('data-sitekey'));
-          if (sitekey) {
-            captchaParams.sitekey = sitekey;
-            console.log(`Extracted sitekey for Cloudflare Challenge Page: ${sitekey}`);
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              await submitButton.click();
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'Cloudflare Turnstile') {
+            const sitekey = await page.$eval('.cf-turnstile', el => el.getAttribute('data-sitekey'));
+            if (!sitekey) throw new Error('Could not extract sitekey for Cloudflare Turnstile');
+            captchaParams.googlekey = sitekey;
+            console.log(`Extracted googlekey for Cloudflare Turnstile: ${sitekey}`);
 
             const captchaResponse = await solver.turnstile(captchaParams);
-            captchaToken = captchaResponse.code;
-            console.log(`Cloudflare Challenge Page solved: ${captchaToken}`);
+            captchaToken = captchaResponse.data;
+            console.log(`Cloudflare Turnstile solved: ${captchaToken}`);
 
             await page.evaluate(token => {
               const input = document.querySelector('input[name="cf-turnstile-response"]');
@@ -1006,98 +1048,251 @@ const checkLinkStatus = async (link) => {
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
               await submitButton.click();
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
-          } else {
-            console.log('Cloudflare Challenge Page does not require CAPTCHA solving, waiting for redirect...');
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'Custom CAPTCHA') {
-          console.log('Custom CAPTCHA detected, attempting to solve as Image CAPTCHA if possible...');
-          const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src, { timeout: 5000 }).catch(() => null);
-          if (captchaImageUrl) {
+          } else if (captchaType === 'hCaptcha') {
+            const sitekey = await page.$eval('.h-captcha', el => el.getAttribute('data-sitekey'));
+            if (!sitekey) throw new Error('Could not extract sitekey for hCaptcha');
+            captchaParams.googlekey = sitekey;
+            console.log(`Extracted googlekey for hCaptcha: ${sitekey}`);
+
+            captchaParams.invisible = await page.evaluate(() => !document.querySelector('.h-captcha').classList.contains('visible'));
+
+            const captchaResponse = await solver.hcaptcha(captchaParams);
+            captchaToken = captchaResponse.data;
+            console.log(`hCaptcha solved: ${captchaToken}`);
+
+            await page.evaluate(token => {
+              const textarea = document.querySelector('#h-captcha-response');
+              if (textarea) textarea.innerHTML = token;
+            }, captchaToken);
+
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              await submitButton.click();
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'FunCaptcha') {
+            const sitekey = await page.evaluate(() => {
+              const script = document.querySelector('script[src*="arkoselabs"]');
+              return script ? new URL(script.src).searchParams.get('pk') : null;
+            });
+            if (!sitekey) throw new Error('Could not extract sitekey for FunCaptcha');
+            captchaParams.publickey = sitekey;
+            console.log(`Extracted publickey for FunCaptcha: ${sitekey}`);
+
+            const captchaResponse = await solver.funcaptcha(captchaParams);
+            captchaToken = captchaResponse.data;
+            console.log(`FunCaptcha solved: ${captchaToken}`);
+
+            await page.evaluate(token => {
+              const input = document.querySelector('input[name="fc-token"]');
+              if (input) input.value = token;
+            }, captchaToken);
+
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              await submitButton.click();
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'GeeTest') {
+            const geeTestParams = await page.evaluate(() => {
+              const gt = document.querySelector('script[src*="geetest"]')?.src.match(/gt=([^&]+)/)?.[1];
+              const challenge = document.querySelector('script[src*="geetest"]')?.src.match(/challenge=([^&]+)/)?.[1];
+              return { gt, challenge };
+            });
+            if (!geeTestParams.gt || !geeTestParams.challenge) throw new Error('Could not extract parameters for GeeTest');
+            captchaParams.gt = geeTestParams.gt;
+            captchaParams.challenge = geeTestParams.challenge;
+            console.log(`Extracted parameters for GeeTest: gt=${geeTestParams.gt}, challenge=${geeTestParams.challenge}`);
+
+            const captchaResponse = await solver.geetest(captchaParams);
+            captchaToken = captchaResponse;
+            console.log(`GeeTest solved: ${JSON.stringify(captchaToken)}`);
+
+            await page.evaluate(params => {
+              Object.keys(params).forEach(key => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = params[key];
+                document.forms[0]?.appendChild(input);
+              });
+            }, captchaToken);
+
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              await submitButton.click();
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'Image CAPTCHA') {
+            const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src);
+            if (!captchaImageUrl) throw new Error('Could not extract CAPTCHA image URL');
             console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
+
             const captchaResponse = await solver.imageCaptcha({
               body: captchaImageUrl,
               numeric: false,
               min_len: 4,
-              max_len: 6
+              max_len: 6,
             });
-            captchaToken = captchaResponse.code;
-            console.log(`Custom CAPTCHA (Image) solved: ${captchaToken}`);
+            captchaToken = captchaResponse.data;
+            console.log(`Image CAPTCHA solved: ${captchaToken}`);
 
             await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
               await submitButton.click();
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
-          } else {
-            throw new Error('Custom CAPTCHA not supported for automated solving');
+          } else if (captchaType === 'Cloudflare Challenge Page') {
+            await page.waitForSelector('input[name="cf_captcha_kind"]', { timeout: 10000 });
+            const sitekey = await page.$eval('input[name="cf_captcha_kind"]', el => el.getAttribute('data-sitekey'));
+            if (sitekey) {
+              captchaParams.googlekey = sitekey;
+              console.log(`Extracted googlekey for Cloudflare Challenge Page: ${sitekey}`);
+
+              const captchaResponse = await solver.turnstile(captchaParams);
+              captchaToken = captchaResponse.data;
+              console.log(`Cloudflare Challenge Page solved: ${captchaToken}`);
+
+              await page.evaluate(token => {
+                const input = document.querySelector('input[name="cf-turnstile-response"]');
+                if (input) input.value = token;
+              }, captchaToken);
+
+              const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+              if (submitButton) {
+                await submitButton.click();
+                await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+                content = await page.evaluate(() => document.documentElement.outerHTML);
+              }
+            } else {
+              console.log('Cloudflare Challenge Page does not require CAPTCHA solving, waiting for redirect...');
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'Custom CAPTCHA') {
+            console.log('Custom CAPTCHA detected, attempting to solve as Image CAPTCHA if possible...');
+            const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src, { timeout: 5000 }).catch(() => null);
+            if (captchaImageUrl) {
+              console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
+              const captchaResponse = await solver.imageCaptcha({
+                body: captchaImageUrl,
+                numeric: false,
+                min_len: 4,
+                max_len: 6,
+              });
+              captchaToken = captchaResponse.data;
+              console.log(`Custom CAPTCHA (Image) solved: ${captchaToken}`);
+
+              await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
+
+              const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+              if (submitButton) {
+                await submitButton.click();
+                await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+                content = await page.evaluate(() => document.documentElement.outerHTML);
+              }
+            } else {
+              throw new Error('Custom CAPTCHA not supported for automated solving');
+            }
           }
+
+          $ = cheerio.load(content);
+        } catch (error) {
+          console.error(`Error solving CAPTCHA for ${link.url}:`, error.message);
+          link.status = 'suspected-captcha';
+          link.rel = 'blocked';
+          link.linkType = 'unknown';
+          link.anchorText = 'captcha suspected';
+          link.errorDetails = `CAPTCHA solving failed: ${error.message}`;
+          // Продолжаем анализ, если HTML всё же есть
         }
+      }
 
-        $ = cheerio.load(content);
-      } catch (error) {
-        console.error(`Error solving CAPTCHA for ${link.url}:`, error.message);
-        link.status = 'suspected-captcha';
-        link.rel = 'blocked';
+      $('a').each((i, a) => {
+        const href = $(a).attr('href')?.toLowerCase().trim();
+        if (href && href.includes(cleanTargetDomain)) {
+          const anchorText = $(a).text().trim();
+          const hasSvg = $(a).find('svg').length > 0;
+          const hasImg = $(a).find('img').length > 0;
+          const hasIcon = $(a).find('i').length > 0;
+          const hasChildren = $(a).find('children').length > 0;
+          linksFound = {
+            href: href,
+            rel: $(a).attr('rel') || '',
+            anchorText: anchorText || (hasSvg ? 'SVG link' : hasImg ? 'Image link' : hasIcon ? 'Icon link' : hasChildren ? 'Element link' : 'no text'),
+          };
+          console.log(`Link found: ${JSON.stringify(linksFound)}`);
+          return false;
+        }
+      });
+
+      console.log('Links found:', linksFound ? JSON.stringify(linksFound) : 'None');
+
+      // Проверяем, нашли ли ссылки или meta robots
+      const isLinkFound = linksFound !== null;
+      const hasUsefulData = isLinkFound || isMetaRobotsFound;
+
+      if (hasUsefulData) {
+        if (isLinkFound) {
+          link.status = 'active';
+          link.rel = linksFound.rel;
+          link.anchorText = linksFound.anchorText;
+          const relValues = linksFound.rel ? linksFound.rel.toLowerCase().split(' ') : [];
+          link.linkType = relValues.some(value => ['nofollow', 'ugc', 'sponsored'].includes(value)) ? 'nofollow' : 'dofollow';
+          link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
+        } else {
+          link.status = 'active';
+          link.rel = 'not found';
+          link.linkType = 'unknown';
+          link.anchorText = 'not found';
+          link.errorDetails = link.errorDetails || '';
+        }
+        // Игнорируем Timeout, если есть полезные данные
+        link.overallStatus = link.isIndexable ? 'OK' : 'Problem';
+      } else {
+        // Если ничего не нашли, помечаем как "Problem"
+        link.status = link.status || 'broken';
+        link.rel = 'not found';
         link.linkType = 'unknown';
-        link.anchorText = 'captcha suspected';
-        link.errorDetails = `CAPTCHA solving failed: ${error.message}`;
-        return link;
+        link.anchorText = 'not found';
+        link.errorDetails = link.errorDetails || 'No useful data found';
+        link.overallStatus = 'Problem';
+      }
+
+      link.lastChecked = new Date();
+      return link;
+    } catch (error) {
+      console.error(`Critical error in checkLinkStatus for ${link.url}:`, error);
+      // Перезапускаем браузер при критической ошибке
+      await restartBrowser();
+      link.status = 'broken';
+      link.errorDetails = error.message;
+      link.rel = 'error';
+      link.linkType = 'unknown';
+      link.anchorText = 'error';
+      link.isIndexable = false;
+      link.indexabilityStatus = `check failed: ${error.message}`;
+      link.responseCode = 'Error';
+      link.overallStatus = 'Problem';
+      return link;
+    } finally {
+      if (page) {
+        await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
       }
     }
-
-    $('a').each((i, a) => {
-      const href = $(a).attr('href')?.toLowerCase().trim();
-      if (href && href.includes(cleanTargetDomain)) {
-        const anchorText = $(a).text().trim();
-        const hasSvg = $(a).find('svg').length > 0;
-        const hasImg = $(a).find('img').length > 0;
-        const hasIcon = $(a).find('i').length > 0;
-        const hasChildren = $(a).find('children').length > 0;
-        linksFound = {
-          href: href,
-          rel: $(a).attr('rel') || '',
-          anchorText: anchorText || (hasSvg ? 'SVG link' : hasImg ? 'Image link' : hasIcon ? 'Icon link' : hasChildren ? 'Element link' : 'no text')
-        };
-        console.log(`Link found: ${JSON.stringify(linksFound)}`);
-        return false;
-      }
-    });
-
-    console.log('Links found:', linksFound ? JSON.stringify(linksFound) : 'None');
-
-    if (linksFound) {
-      link.status = 'active';
-      link.rel = linksFound.rel;
-      link.anchorText = linksFound.anchorText;
-      const relValues = linksFound.rel ? linksFound.rel.toLowerCase().split(' ') : [];
-      link.linkType = relValues.some(value => ['nofollow', 'ugc', 'sponsored'].includes(value)) ? 'nofollow' : 'dofollow';
-      link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
-    } else if (captchaType !== 'none') {
-      link.status = 'suspected-captcha';
-      link.rel = 'blocked';
-      link.linkType = 'unknown';
-      link.anchorText = 'captcha suspected';
-      link.errorDetails = captchaToken ? `${captchaType} solved but no links found, token: ${captchaToken}` : `CAPTCHA detected: ${captchaType}`;
-    } else if (!link.status || link.status === 'pending') {
-      link.status = 'active';
-      link.rel = 'not found';
-      link.linkType = 'unknown';
-      link.anchorText = 'not found';
-      link.errorDetails = link.errorDetails || '';
-    }
-
-    link.lastChecked = new Date();
-    return link;
   } catch (error) {
-    console.error(`Error checking ${link.url}:`, error.message);
+    console.error(`Critical error in checkLinkStatus for ${link.url}:`, error);
+    // Перезапускаем браузер при критической ошибке
+    await restartBrowser();
     link.status = 'broken';
     link.errorDetails = error.message;
     link.rel = 'error';
@@ -1106,24 +1301,36 @@ const checkLinkStatus = async (link) => {
     link.isIndexable = false;
     link.indexabilityStatus = `check failed: ${error.message}`;
     link.responseCode = 'Error';
+    link.overallStatus = 'Problem';
     return link;
-  } finally {
-    if (browser) await browser.close();
   }
 };
 
-const processLinksInBatches = async (links, batchSize = 5, concurrency) => {
-  if (!pLimit) await new Promise(resolve => setTimeout(resolve, 100));
-  const limit = pLimit(concurrency);
+const processLinksInBatches = async (links, batchSize = 20) => {
   const results = [];
-  for (let i = 0; i < links.length; i += batchSize) {
+  const totalLinks = links.length;
+
+  for (let i = 0; i < totalLinks; i += batchSize) {
     const batch = links.slice(i, i + batchSize);
-    console.log(`Processing batch of ${batch.length} links`);
-    const batchResults = await Promise.all(batch.map(link => limit(() => checkLinkStatus(link))));
+    console.log(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalLinks / batchSize)}: links ${i + 1} to ${Math.min(i + batchSize, totalLinks)}`);
+
+    // Обрабатываем 20 ссылок параллельно
+    const batchResults = await Promise.all(
+      batch.map(async link => {
+        console.log(`Analyzing link: ${link.url}`);
+        const updatedLink = await checkLinkStatus(link);
+        console.log(`Finished analyzing link: ${link.url}`);
+        return updatedLink;
+      })
+    );
+
     results.push(...batchResults);
-    console.log(`Batch completed, processed ${i + batch.length} of ${links.length} links`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
+
+    // Пауза между батчами для снижения нагрузки
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Увеличиваем паузу до 5 секунд
   }
+
   return results;
 };
 
@@ -1138,7 +1345,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
     spreadsheet.targetDomain,
     spreadsheet.urlColumn,
     spreadsheet.targetColumn,
-    spreadsheet.gid
+    spreadsheet.gid,
   );
 
   if (links.length > maxLinks) {
@@ -1148,20 +1355,15 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
   const dbLinks = links.map(link => ({
     ...link,
     userId: spreadsheet.userId,
-    spreadsheetId: spreadsheet.spreadsheetId
+    spreadsheetId: spreadsheet.spreadsheetId,
   }));
 
-  const user = await User.findById(spreadsheet.userId);
-  const planConcurrency = {
-    free: 5,
-    basic: 20,
-    pro: 50,
-    premium: 100,
-    enterprise: 200
-  };
-  const concurrency = user.isSuperAdmin ? 200 : planConcurrency[user.plan];
+  const updatedLinks = await processLinksInBatches(dbLinks, 20);
 
-  const updatedLinks = await processLinksInBatches(dbLinks, 10, concurrency);
+  // Проверяем, не была ли операция отменена
+  if (cancelAnalysis) {
+    throw new Error('Analysis cancelled');
+  }
 
   const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
     { _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId },
@@ -1176,19 +1378,30 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
           canonicalUrl: link.canonicalUrl,
           rel: link.rel,
           linkType: link.linkType,
-          lastChecked: link.lastChecked
+          lastChecked: link.lastChecked,
         })),
-        gid: spreadsheet.gid
-      }
+        gid: spreadsheet.gid,
+      },
     },
-    { new: true, runValidators: true }
+    { new: true, runValidators: true },
   );
 
   if (!updatedSpreadsheet) {
     throw new Error('Spreadsheet not found during update');
   }
 
-  await Promise.all(updatedLinks.map(link => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName)));
+  // Ждём, пока p-limit загрузится
+  if (!pLimit) {
+    await new Promise(resolve => setTimeout(resolve, 100)); // Небольшая задержка, если p-limit ещё не загружен
+    if (!pLimit) throw new Error('Failed to load p-limit');
+  }
+
+  // Ограничиваем количество одновременных запросов на запись до 5
+  const limit = pLimit(5);
+  await Promise.all(updatedLinks.map(link =>
+    limit(() => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName))
+  ));
+
   await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid);
 };
 
@@ -1218,7 +1431,7 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
         url: row[0],
         targetDomain: row[row.length - 1] && row[row.length - 1].trim() ? row[row.length - 1] : defaultTargetDomain,
         rowIndex: index + 2,
-        spreadsheetId
+        spreadsheetId,
       }))
       .filter(link => link.url);
     return { links, sheetName };
@@ -1236,21 +1449,33 @@ const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, r
     responseCode,
     link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
     link.isIndexable === false ? link.indexabilityStatus : '',
-    isLinkFound ? 'True' : 'False'
+    isLinkFound ? 'True' : 'False',
   ];
   const range = `${sheetName}!${resultRangeStart}${link.rowIndex}:${resultRangeEnd}${link.rowIndex}`;
   console.log(`Exporting to ${range} (${spreadsheetId}): ${value}`);
-  try {
-    const response = await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range,
-      valueInputOption: 'RAW',
-      resource: { values: [value] }
-    });
-    console.log(`Successfully exported to ${range}: ${JSON.stringify(response.data)}`);
-  } catch (error) {
-    console.error(`Error exporting to ${range} (${spreadsheetId}):`, error.response ? error.response.data : error.message);
-    throw error;
+
+  let attempt = 1;
+  while (true) {
+    try {
+      const response = await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range,
+        valueInputOption: 'RAW',
+        resource: { values: [value] },
+      });
+      console.log(`Successfully exported to ${range}: ${JSON.stringify(response.data)}`);
+      return;
+    } catch (error) {
+      if (error.code === 429) {
+        const delay = 30 * 1000; // Задержка 30 секунд
+        console.log(`Rate limit exceeded for ${range}, retrying in ${delay}ms (attempt ${attempt})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        attempt++;
+        continue;
+      }
+      console.error(`Error exporting to ${range} (${spreadsheetId}):`, error.response ? error.response.data : error.message);
+      throw error;
+    }
   }
 };
 
@@ -1261,8 +1486,8 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
       repeatCell: {
         range: { sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 11, endColumnIndex: 16 },
         cell: { userEnteredFormat: { textFormat: { fontFamily: 'Arial', fontSize: 11 } } },
-        fields: 'userEnteredFormat.textFormat'
-      }
+        fields: 'userEnteredFormat.textFormat',
+      },
     },
     {
       updateBorders: {
@@ -1272,8 +1497,8 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
         left: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
         right: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
         innerHorizontal: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
-        innerVertical: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } }
-      }
+        innerVertical: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
+      },
     },
     {
       updateDimensionProperties: {
@@ -1372,6 +1597,7 @@ module.exports = {
   addSpreadsheet: [authMiddleware, addSpreadsheet],
   getSpreadsheets: [authMiddleware, getSpreadsheets],
   runSpreadsheetAnalysis: [authMiddleware, runSpreadsheetAnalysis],
+  cancelSpreadsheetAnalysis: [authMiddleware, cancelSpreadsheetAnalysis], // Здесь всё правильно
   deleteSpreadsheet: [authMiddleware, deleteSpreadsheet],
   selectPlan: [authMiddleware, selectPlan],
   processPayment: [authMiddleware, processPayment],
@@ -1379,5 +1605,5 @@ module.exports = {
   deleteAccount: [authMiddleware, deleteAccount],
   updateProfile: [authMiddleware, updateProfile],
   checkLinkStatus,
-  analyzeSpreadsheet
+  analyzeSpreadsheet,
 };
