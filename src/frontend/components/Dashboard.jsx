@@ -15,7 +15,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    console.log('Dashboard: Token in useEffect:', token); // Отладочный лог
+
     if (!token) {
       console.log('Dashboard: No token, redirecting to /login');
       navigate('/login');
@@ -27,7 +27,6 @@ const Dashboard = () => {
         const response = await axios.get(`${apiBaseUrl}/user`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        console.log('Dashboard: User fetched:', response.data); // Отладочный лог
         setUser(response.data);
       } catch (err) {
         console.error('Dashboard: Error fetching user:', err);
