@@ -3,6 +3,19 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { motion } from 'framer-motion';
 
+// Функция для повторных попыток запроса
+const retryRequest = async (fn, retries = 3, delay = 1000) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i === retries - 1) throw err; // Если последняя попытка, бросаем ошибку
+      console.log(`Retrying request (${i + 1}/${retries})...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+};
+
 const Dashboard = () => {
   const [user, setUser] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 640);
@@ -15,7 +28,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-
+    console.log('Dashboard: Token in useEffect:', token);
     if (!token) {
       console.log('Dashboard: No token, redirecting to /login');
       navigate('/login');
@@ -24,14 +37,25 @@ const Dashboard = () => {
 
     const fetchUser = async () => {
       try {
-        const response = await axios.get(`${apiBaseUrl}/user`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await retryRequest(() =>
+          axios.get(`${apiBaseUrl}/user`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        );
+        console.log('Dashboard: User fetched:', response.data);
         setUser(response.data);
       } catch (err) {
         console.error('Dashboard: Error fetching user:', err);
-        localStorage.removeItem('token');
-        navigate('/login');
+        if (err.response?.status === 401) {
+          // Если токен недействителен (401), удаляем его и перенаправляем
+          console.log('Dashboard: Invalid token, redirecting to /login');
+          localStorage.removeItem('token');
+          navigate('/login');
+        } else {
+          // При сетевой ошибке или других ошибках не удаляем токен, а показываем ошибку
+          console.log('Dashboard: Network or server error, keeping token');
+          setUser({ username: 'Error loading user', plan: 'unknown', isSuperAdmin: false }); // Заглушка
+        }
       }
     };
 
