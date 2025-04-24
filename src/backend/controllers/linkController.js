@@ -1036,6 +1036,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
       await analyzeSpreadsheet(spreadsheet, maxLinks);
       spreadsheet.status = 'completed';
     } catch (error) {
+      console.error(`Error analyzing ${spreadsheet.spreadsheetId}:`, error);
       spreadsheet.status = 'error';
       await spreadsheet.save();
       throw error;
@@ -1050,13 +1051,21 @@ const runSpreadsheetAnalysis = async (req, res) => {
 };
 
 const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
+  // Проверяем существование документа
+  const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId });
+  if (!existingSpreadsheet) {
+    throw new Error('Spreadsheet not found');
+  }
+
+  // Импортируем данные из Google Sheets
   const links = await importFromGoogleSheets(
     spreadsheet.spreadsheetId,
     spreadsheet.targetDomain,
     spreadsheet.urlColumn,
     spreadsheet.targetColumn,
-    spreadsheet.gid // Передаём GID
+    spreadsheet.gid
   );
+
   if (links.length > maxLinks) {
     throw new Error(`Link limit exceeded for your plan (${maxLinks} links)`);
   }
@@ -1078,19 +1087,34 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
   const concurrency = user.isSuperAdmin ? 200 : planConcurrency[user.plan];
 
   const updatedLinks = await processLinksInBatches(dbLinks, 10, concurrency);
-  spreadsheet.links = updatedLinks.map(link => ({
-    url: link.url,
-    targetDomain: link.targetDomain,
-    status: link.status,
-    responseCode: link.responseCode,
-    isIndexable: link.isIndexable,
-    canonicalUrl: link.canonicalUrl,
-    rel: link.rel,
-    linkType: link.linkType,
-    lastChecked: link.lastChecked
-  }));
-  await spreadsheet.save();
 
+  // Атомарно обновляем документ
+  const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
+    { _id: spreadsheet._id, userId: spreadsheet.userId }, // Условие поиска
+    {
+      $set: {
+        links: updatedLinks.map(link => ({
+          url: link.url,
+          targetDomain: link.targetDomain,
+          status: link.status,
+          responseCode: link.responseCode,
+          isIndexable: link.isIndexable,
+          canonicalUrl: link.canonicalUrl,
+          rel: link.rel,
+          linkType: link.linkType,
+          lastChecked: link.lastChecked
+        })),
+        gid: spreadsheet.gid // Обновляем gid
+      }
+    },
+    { new: true, runValidators: true } // Возвращаем обновлённый документ
+  );
+
+  if (!updatedSpreadsheet) {
+    throw new Error('Spreadsheet not found during update');
+  }
+
+  // Форматируем таблицу
   await Promise.all(updatedLinks.map(link => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd)));
   await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid);
 };
