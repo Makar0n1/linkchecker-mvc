@@ -134,7 +134,7 @@ const Projects = () => {
               transition={{ duration: 0.3 }}
             >
               <div
-                onClick={() => navigate(`/app/manual/${project._id}`)}
+                onClick={() => navigate(`/app/projects/${project._id}`)} // Изменили маршрут
                 className="cursor-pointer flex items-center gap-2"
               >
                 <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

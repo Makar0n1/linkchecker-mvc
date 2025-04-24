@@ -1,28 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { useOutletContext, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 
-const ManualLinks = () => {
-  const { projectId } = useParams(); // Получаем projectId из URL
-  const {
-    links,
-    setLinks,
-    urlList,
-    setUrlList,
-    targetDomain,
-    setTargetDomain,
-    loading,
-    setLoading,
-    error,
-    setError,
-    handleAddLinks,
-    handleCheckLinks,
-    handleDeleteLink,
-    handleDeleteAllLinks,
-  } = useOutletContext();
-
-  const [projectName, setProjectName] = useState('');
+const ManualLinks = ({
+  projectId,
+  links,
+  setLinks,
+  urlList,
+  setUrlList,
+  targetDomain,
+  setTargetDomain,
+  loading,
+  setLoading,
+  error,
+  setError,
+  handleAddLinks,
+  handleCheckLinks,
+  handleDeleteLink,
+  handleDeleteAllLinks,
+}) => {
   const [copiedField, setCopiedField] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
@@ -31,22 +27,6 @@ const ManualLinks = () => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    const fetchProject = async () => {
-      try {
-        const response = await axios.get(`${apiBaseUrl}/projects`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const project = response.data.find((proj) => proj._id === projectId);
-        if (project) {
-          setProjectName(project.name);
-        } else {
-          setError('Project not found');
-        }
-      } catch (err) {
-        setError(err.response?.data?.error || 'Failed to fetch project');
-      }
-    };
-
     const fetchLinks = async () => {
       try {
         const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
@@ -58,7 +38,6 @@ const ManualLinks = () => {
       }
     };
 
-    fetchProject();
     fetchLinks();
   }, [projectId, setLinks, setError]);
 
@@ -82,14 +61,11 @@ const ManualLinks = () => {
 
   return (
     <motion.div
-      className="max-w-full mx-auto p-4 sm:p-6 bg-white rounded-lg shadow-md overflow-hidden"
+      className="max-w-full mx-auto overflow-hidden"
       initial="hidden"
       animate="visible"
       variants={fadeInUp}
     >
-      <h2 className="text-xl sm:text-2xl font-semibold text-gray-800 mb-6">
-        Manual Links - {projectName || 'Loading...'}
-      </h2>
       <form onSubmit={(e) => handleAddLinks(e, projectId)} className="mb-6 flex flex-col gap-4">
         <textarea
           value={urlList}

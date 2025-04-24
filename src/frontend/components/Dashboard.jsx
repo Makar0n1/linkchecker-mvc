@@ -5,11 +5,6 @@ import { motion } from 'framer-motion';
 
 const Dashboard = () => {
   const [user, setUser] = useState(null);
-  const [links, setLinks] = useState([]);
-  const [urlList, setUrlList] = useState('');
-  const [targetDomain, setTargetDomain] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 640);
   const navigate = useNavigate();
   const location = useLocation();
@@ -19,7 +14,7 @@ const Dashboard = () => {
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem(' where token ?');
     if (!token) return navigate('/login');
 
     const fetchUser = async () => {
@@ -28,10 +23,6 @@ const Dashboard = () => {
           headers: { Authorization: `Bearer ${token}` },
         });
         setUser(response.data);
-
-        if (response.data.plan === 'free' && location.pathname === '/app/sheets') {
-          navigate('/app/profile');
-        }
       } catch (err) {
         localStorage.removeItem('token');
         navigate('/login');
@@ -40,76 +31,6 @@ const Dashboard = () => {
 
     fetchUser();
   }, [navigate, location.pathname]);
-
-  const handleAddLinks = async (e, projectId) => {
-    e.preventDefault();
-    if (!urlList || !targetDomain) return;
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      const urls = urlList.split('\n').map(url => url.trim()).filter(url => url);
-      const linksData = urls.map(url => ({ url, targetDomain }));
-      const response = await axios.post(`${apiBaseUrl}/${projectId}/links`, linksData, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setLinks([...links, ...response.data]);
-      setUrlList('');
-      setTargetDomain('');
-      setError(null);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to add links');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCheckLinks = async (projectId) => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setLinks(response.data);
-      setError(null);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to check links');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteLink = async (id, projectId) => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${apiBaseUrl}/${projectId}/links/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setLinks(links.filter(link => link._id !== id));
-      setError(null);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to delete link');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteAllLinks = async (projectId) => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${apiBaseUrl}/${projectId}/links`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setLinks([]);
-      setError(null);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to delete all links');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -167,17 +88,6 @@ const Dashboard = () => {
             </svg>
             Projects
           </button>
-          {user.plan !== 'free' && (
-            <button
-              onClick={() => navigate('/app/sheets')}
-              className={`px-3 py-1 rounded flex items-center gap-2 text-sm ${isActive('/app/sheets') ? 'bg-green-700' : 'hover:bg-green-700'}`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7h10v10H9zm-4-5h2m0-2v4" />
-              </svg>
-              Google Sheets
-            </button>
-          )}
           <button
             onClick={() => navigate('/app/profile')}
             className={`px-3 py-1 rounded flex items-center gap-2 text-sm ${isActive('/app/profile') ? 'bg-green-700' : 'hover:bg-green-700'}`}
@@ -235,19 +145,6 @@ const Dashboard = () => {
                   <span className={isSidebarOpen ? 'block' : 'hidden'}>Projects</span>
                 </button>
               </li>
-              {user.plan !== 'free' && (
-                <li className="mb-4">
-                  <button
-                    onClick={() => navigate('/app/sheets')}
-                    className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/sheets') ? 'bg-green-700' : 'hover:bg-green-700'}`}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7h10v10H9zm-4-5h2m0-2v4" />
-                    </svg>
-                    <span className={isSidebarOpen ? 'block' : 'hidden'}>Google Sheets</span>
-                  </button>
-                </li>
-              )}
               <li className="mb-4">
                 <button
                   onClick={() => navigate('/app/profile')}
@@ -282,7 +179,7 @@ const Dashboard = () => {
           </nav>
         </motion.aside>
         <main className="flex-grow p-4 sm:p-6 w-full overflow-x-hidden">
-          <Outlet context={{ links, setLinks, urlList, setUrlList, targetDomain, setTargetDomain, loading, setLoading, error, setError, handleAddLinks, handleCheckLinks, handleDeleteLink, handleDeleteAllLinks }} />
+          <Outlet />
         </main>
       </div>
       <footer className="bg-gray-800 text-white py-4 sm:py-6 z-10 relative">

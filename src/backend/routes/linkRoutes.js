@@ -18,13 +18,13 @@ router.delete('/:projectId/links', linkController.deleteAllLinks);
 router.post('/:projectId/links/check', linkController.checkLinks);
 router.delete('/:projectId/links/:id', linkController.deleteLink);
 
-// Google Sheets (без изменений)
-router.post('/spreadsheets', linkController.addSpreadsheet);
-router.get('/spreadsheets', linkController.getSpreadsheets);
-router.post('/spreadsheets/:spreadsheetId/run', linkController.runSpreadsheetAnalysis);
-router.delete('/spreadsheets/:spreadsheetId', linkController.deleteSpreadsheet);
+// Google Sheets (в рамках проекта)
+router.post('/:projectId/spreadsheets', linkController.addSpreadsheet);
+router.get('/:projectId/spreadsheets', linkController.getSpreadsheets);
+router.post('/:projectId/spreadsheets/:spreadsheetId/run', linkController.runSpreadsheetAnalysis);
+router.delete('/:projectId/spreadsheets/:spreadsheetId', linkController.deleteSpreadsheet);
 
-// Профиль и подписка (без изменений)
+// Профиль и подписка
 router.post('/select-plan', linkController.selectPlan);
 router.post('/process-payment', linkController.processPayment);
 router.put('/profile', linkController.updateProfile);

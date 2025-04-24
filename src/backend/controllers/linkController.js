@@ -1,7 +1,7 @@
 const FrontendLink = require('../models/FrontendLink');
 const Spreadsheet = require('../models/Spreadsheet');
 const User = require('../models/User');
-const Project = require('../models/Project'); // Добавляем модель Project
+const Project = require('../models/Project');
 const puppeteer = require('puppeteer');
 const cheerio = require('cheerio');
 const { Solver } = require('2captcha');
@@ -136,8 +136,8 @@ const deleteProject = async (req, res) => {
     const project = await Project.findOne({ _id: projectId, userId: req.userId });
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    // Удаляем все ссылки, связанные с проектом
     await FrontendLink.deleteMany({ projectId });
+    await Spreadsheet.deleteMany({ projectId });
     await Project.deleteOne({ _id: projectId, userId: req.userId });
     res.json({ message: 'Project deleted' });
   } catch (error) {
@@ -277,7 +277,149 @@ const checkLinks = async (req, res) => {
   }
 };
 
-// Остальные функции (без изменений)
+// Функции для работы с Google Sheets (в рамках проекта)
+const addSpreadsheet = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
+
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const spreadsheets = await Spreadsheet.find({ projectId, userId: user.id });
+    const planLimits = {
+      basic: 1,
+      pro: 5,
+      premium: 20,
+      enterprise: Infinity
+    };
+    const maxSpreadsheets = user.isSuperAdmin ? Infinity : planLimits[user.plan];
+    if (spreadsheets.length >= maxSpreadsheets) {
+      return res.status(403).json({ message: 'Spreadsheet limit exceeded for your plan' });
+    }
+
+    const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = req.body;
+    if (!spreadsheetId || !gid || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
+      return res.status(400).json({ error: 'All fields required' });
+    }
+
+    const planIntervalLimits = {
+      basic: 24,
+      pro: 4,
+      premium: 1,
+      enterprise: 1
+    };
+    const minInterval = user.isSuperAdmin ? 1 : planIntervalLimits[user.plan];
+    if (parseInt(intervalHours) < minInterval) {
+      return res.status(403).json({ message: `Interval must be at least ${minInterval} hours for your plan` });
+    }
+
+    const spreadsheet = new Spreadsheet({
+      spreadsheetId,
+      gid: parseInt(gid),
+      targetDomain,
+      urlColumn,
+      targetColumn,
+      resultRangeStart,
+      resultRangeEnd,
+      intervalHours: parseInt(intervalHours),
+      userId: req.userId,
+      projectId
+    });
+    await spreadsheet.save();
+    res.status(201).json(spreadsheet);
+  } catch (error) {
+    console.error('addSpreadsheet: Error adding spreadsheet', error);
+    res.status(500).json({ error: 'Error adding spreadsheet', details: error.message });
+  }
+};
+
+const getSpreadsheets = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const spreadsheets = await Spreadsheet.find({ projectId, userId: req.userId });
+    res.json(spreadsheets);
+  } catch (error) {
+    console.error('getSpreadsheets: Error fetching spreadsheets', error);
+    res.status(500).json({ error: 'Error fetching spreadsheets', details: error.message });
+  }
+};
+
+const deleteSpreadsheet = async (req, res) => {
+  const { projectId, spreadsheetId } = req.params;
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
+
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const spreadsheet = await Spreadsheet.findOneAndDelete({ _id: spreadsheetId, projectId, userId: req.userId });
+    if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
+    res.json({ message: 'Spreadsheet deleted' });
+  } catch (error) {
+    console.error('deleteSpreadsheet: Error deleting spreadsheet', error);
+    res.status(500).json({ error: 'Error deleting spreadsheet', details: error.message });
+  }
+};
+
+const runSpreadsheetAnalysis = async (req, res) => {
+  const { projectId, spreadsheetId } = req.params;
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
+
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId: req.userId });
+    if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
+
+    const planLinkLimits = {
+      basic: 5000,
+      pro: 20000,
+      premium: 100000,
+      enterprise: 1000000
+    };
+    const maxLinks = user.isSuperAdmin ? 1000000 : planLinkLimits[user.plan];
+
+    spreadsheet.status = 'running';
+    await spreadsheet.save();
+    try {
+      await analyzeSpreadsheet(spreadsheet, maxLinks);
+      spreadsheet.status = 'completed';
+    } catch (error) {
+      console.error(`Error analyzing ${spreadsheet.spreadsheetId}:`, error);
+      spreadsheet.status = 'error';
+      await spreadsheet.save();
+      throw error;
+    }
+    spreadsheet.lastRun = new Date();
+    await spreadsheet.save();
+    res.json({ message: 'Analysis completed' });
+  } catch (error) {
+    console.error('runSpreadsheetAnalysis: Error running analysis', error);
+    res.status(500).json({ error: 'Error running analysis', details: error.message });
+  }
+};
+
+// Функции для профиля и подписки
 const selectPlan = async (req, res) => {
   const { plan } = req.body;
   const validPlans = ['free', 'basic', 'pro', 'premium', 'enterprise'];
@@ -335,12 +477,14 @@ const cancelSubscription = async (req, res) => {
       return res.status(403).json({ message: 'SuperAdmin cannot cancel subscription' });
     }
 
-    const spreadsheets = await Spreadsheet.find({ userId: req.userId });
+    const projects = await Project.find({ userId: req.userId });
+    const projectIds = projects.map(project => project._id);
+    const spreadsheets = await Spreadsheet.find({ projectId: { $in: projectIds } });
     for (const spreadsheet of spreadsheets) {
       spreadsheet.status = 'inactive';
       await spreadsheet.save();
     }
-    await Spreadsheet.deleteMany({ userId: req.userId });
+    await Spreadsheet.deleteMany({ projectId: { $in: projectIds } });
 
     user.plan = 'free';
     user.subscriptionStatus = 'inactive';
@@ -372,15 +516,12 @@ const deleteAccount = async (req, res) => {
       return res.status(403).json({ message: 'SuperAdmin cannot delete their account' });
     }
 
-    console.log(`deleteAccount: Deleting Projects and FrontendLinks for user ${req.userId}`);
+    console.log(`deleteAccount: Deleting Projects, FrontendLinks, and Spreadsheets for user ${req.userId}`);
     const projects = await Project.find({ userId: req.userId });
     const projectIds = projects.map(project => project._id);
     await FrontendLink.deleteMany({ projectId: { $in: projectIds } });
+    await Spreadsheet.deleteMany({ projectId: { $in: projectIds } });
     await Project.deleteMany({ userId: req.userId });
-
-    console.log(`deleteAccount: Deleting Spreadsheets for user ${req.userId}`);
-    const spreadsheetsResult = await Spreadsheet.deleteMany({ userId: req.userId });
-    console.log(`deleteAccount: Deleted ${spreadsheetsResult.deletedCount} Spreadsheets`);
 
     console.log(`deleteAccount: Deleting user ${req.userId}`);
     const userDeleteResult = await User.findByIdAndDelete(req.userId);
@@ -983,133 +1124,8 @@ const processLinksInBatches = async (links, batchSize = 5, concurrency) => {
   return results;
 };
 
-const addSpreadsheet = async (req, res) => {
-  try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    if (!user.isSuperAdmin && user.plan === 'free') {
-      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
-    }
-
-    const spreadsheets = await Spreadsheet.find({ userId: user.id });
-    const planLimits = {
-      basic: 1,
-      pro: 5,
-      premium: 20,
-      enterprise: Infinity
-    };
-    const maxSpreadsheets = user.isSuperAdmin ? Infinity : planLimits[user.plan];
-    if (spreadsheets.length >= maxSpreadsheets) {
-      return res.status(403).json({ message: 'Spreadsheet limit exceeded for your plan' });
-    }
-
-    const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = req.body;
-    if (!spreadsheetId || !gid || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
-      return res.status(400).json({ error: 'All fields required' });
-    }
-
-    const planIntervalLimits = {
-      basic: 24,
-      pro: 4,
-      premium: 1,
-      enterprise: 1
-    };
-    const minInterval = user.isSuperAdmin ? 1 : planIntervalLimits[user.plan];
-    if (parseInt(intervalHours) < minInterval) {
-      return res.status(403).json({ message: `Interval must be at least ${minInterval} hours for your plan` });
-    }
-
-    const spreadsheet = new Spreadsheet({
-      spreadsheetId,
-      gid: parseInt(gid),
-      targetDomain,
-      urlColumn,
-      targetColumn,
-      resultRangeStart,
-      resultRangeEnd,
-      intervalHours: parseInt(intervalHours),
-      userId: req.userId
-    });
-    await spreadsheet.save();
-    res.status(201).json(spreadsheet);
-  } catch (error) {
-    console.error('addSpreadsheet: Error adding spreadsheet', error);
-    res.status(500).json({ error: 'Error adding spreadsheet', details: error.message });
-  }
-};
-
-const getSpreadsheets = async (req, res) => {
-  try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    const spreadsheets = await Spreadsheet.find({ userId: req.userId });
-    res.json(spreadsheets);
-  } catch (error) {
-    console.error('getSpreadsheets: Error fetching spreadsheets', error);
-    res.status(500).json({ error: 'Error fetching spreadsheets', details: error.message });
-  }
-};
-
-const deleteSpreadsheet = async (req, res) => {
-  const { spreadsheetId } = req.params;
-  try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    if (!user.isSuperAdmin && user.plan === 'free') {
-      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
-    }
-
-    const spreadsheet = await Spreadsheet.findOneAndDelete({ _id: spreadsheetId, userId: req.userId });
-    if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
-    res.json({ message: 'Spreadsheet deleted' });
-  } catch (error) {
-    console.error('deleteSpreadsheet: Error deleting spreadsheet', error);
-    res.status(500).json({ error: 'Error deleting spreadsheet', details: error.message });
-  }
-};
-
-const runSpreadsheetAnalysis = async (req, res) => {
-  const { spreadsheetId } = req.params;
-  try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    if (!user.isSuperAdmin && user.plan === 'free') {
-      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
-    }
-
-    const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, userId: req.userId });
-    if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
-
-    const planLinkLimits = {
-      basic: 5000,
-      pro: 20000,
-      premium: 100000,
-      enterprise: 1000000
-    };
-    const maxLinks = user.isSuperAdmin ? 1000000 : planLinkLimits[user.plan];
-
-    spreadsheet.status = 'running';
-    await spreadsheet.save();
-    try {
-      await analyzeSpreadsheet(spreadsheet, maxLinks);
-      spreadsheet.status = 'completed';
-    } catch (error) {
-      console.error(`Error analyzing ${spreadsheet.spreadsheetId}:`, error);
-      spreadsheet.status = 'error';
-      await spreadsheet.save();
-      throw error;
-    }
-    spreadsheet.lastRun = new Date();
-    await spreadsheet.save();
-    res.json({ message: 'Analysis completed' });
-  } catch (error) {
-    console.error('runSpreadsheetAnalysis: Error running analysis', error);
-    res.status(500).json({ error: 'Error running analysis', details: error.message });
-  }
-};
-
 const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
-  const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId });
+  const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId });
   if (!existingSpreadsheet) {
     throw new Error('Spreadsheet not found');
   }
@@ -1145,7 +1161,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
   const updatedLinks = await processLinksInBatches(dbLinks, 10, concurrency);
 
   const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
-    { _id: spreadsheet._id, userId: spreadsheet.userId },
+    { _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId },
     {
       $set: {
         links: updatedLinks.map(link => ({

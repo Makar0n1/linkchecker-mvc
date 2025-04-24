@@ -66,7 +66,7 @@ const Profile = () => {
       }
     };
 
-    const fetchProjectsAndLinks = async () => {
+    const fetchProjectsAndData = async () => {
       const token = localStorage.getItem('token');
       try {
         const projectsResponse = await axios.get(`${apiBaseUrl}/projects`, {
@@ -75,35 +75,29 @@ const Profile = () => {
         setProjects(projectsResponse.data);
 
         const allLinks = [];
+        const allSpreadsheets = [];
         for (const project of projectsResponse.data) {
           const linksResponse = await axios.get(`${apiBaseUrl}/${project._id}/links`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           allLinks.push(...linksResponse.data);
+
+          const spreadsheetsResponse = await axios.get(`${apiBaseUrl}/${project._id}/spreadsheets`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          allSpreadsheets.push(...spreadsheetsResponse.data);
         }
         setLinks(allLinks);
+        setSpreadsheets(allSpreadsheets);
       } catch (err) {
-        setError('Failed to fetch projects or links.');
+        setError('Failed to fetch projects, links, or spreadsheets.');
         setLinks([]);
-      }
-    };
-
-    const fetchSpreadsheets = async () => {
-      const token = localStorage.getItem('token');
-      try {
-        const response = await axios.get(`${apiBaseUrl}/spreadsheets`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setSpreadsheets(response.data);
-      } catch (err) {
-        console.error('Failed to fetch spreadsheets:', err);
         setSpreadsheets([]);
       }
     };
 
     fetchUser();
-    fetchProjectsAndLinks();
-    fetchSpreadsheets();
+    fetchProjectsAndData();
   }, [navigate]);
 
   const handleProfileUpdate = async (e) => {
@@ -267,7 +261,7 @@ const Profile = () => {
     });
   };
 
-  // Аналитика для Manual Links (с учётом проектов)
+  // Аналитика для Manual Links
   const manualStats = {
     ok: links.filter(link => {
       const isCanonicalMatch = !link.canonicalUrl || (

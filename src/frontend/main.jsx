@@ -4,10 +4,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import StartPage from './components/StartPage';
 import LoginPage from './components/LoginPage';
 import Dashboard from './components/Dashboard';
-import ManualLinks from './components/ManualLinks';
-import GoogleSheets from './components/GoogleSheets';
-import Profile from './components/Profile';
 import Projects from './components/Projects';
+import ProjectDetails from './components/ProjectDetails';
+import Profile from './components/Profile';
 import './styles.css';
 
 console.log('main.jsx loaded');
@@ -25,8 +24,7 @@ root.render(
       <Route path="/login" element={<LoginPage />} />
       <Route path="/app" element={<ProtectedRoute><Dashboard /></ProtectedRoute>}>
         <Route path="projects" element={<Projects />} />
-        <Route path="manual/:projectId" element={<ManualLinks />} />
-        <Route path="sheets" element={<GoogleSheets />} />
+        <Route path="projects/:projectId" element={<ProjectDetails />} />
         <Route path="profile" element={<Profile />} />
         <Route path="" element={<Navigate to="projects" />} />
       </Route>
