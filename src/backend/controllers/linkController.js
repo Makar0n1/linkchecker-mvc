@@ -1058,7 +1058,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
   }
 
   // Импортируем данные из Google Sheets
-  const links = await importFromGoogleSheets(
+  const { links, sheetName } = await importFromGoogleSheets(
     spreadsheet.spreadsheetId,
     spreadsheet.targetDomain,
     spreadsheet.urlColumn,
@@ -1090,7 +1090,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
 
   // Атомарно обновляем документ
   const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
-    { _id: spreadsheet._id, userId: spreadsheet.userId }, // Условие поиска
+    { _id: spreadsheet._id, userId: spreadsheet.userId },
     {
       $set: {
         links: updatedLinks.map(link => ({
@@ -1104,10 +1104,10 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
           linkType: link.linkType,
           lastChecked: link.lastChecked
         })),
-        gid: spreadsheet.gid // Обновляем gid
+        gid: spreadsheet.gid
       }
     },
-    { new: true, runValidators: true } // Возвращаем обновлённый документ
+    { new: true, runValidators: true }
   );
 
   if (!updatedSpreadsheet) {
@@ -1115,7 +1115,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
   }
 
   // Форматируем таблицу
-  await Promise.all(updatedLinks.map(link => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd)));
+  await Promise.all(updatedLinks.map(link => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName)));
   await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid);
 };
 
@@ -1130,7 +1130,7 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
     const sheet = spreadsheet.data.sheets.find(sheet => sheet.properties.sheetId === parseInt(gid));
     if (!sheet) {
       console.error(`Sheet with GID ${gid} not found in spreadsheet ${spreadsheetId}`);
-      return [];
+      return { links: [], sheetName: null };
     }
 
     const sheetName = sheet.properties.title;
@@ -1143,7 +1143,7 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
 
     const rows = response.data.values || [];
     console.log(`Imported rows from "${sheetName}" (${spreadsheetId}, GID: ${gid}): ${rows.length}`);
-    return rows
+    const links = rows
       .map((row, index) => ({
         url: row[0],
         targetDomain: row[row.length - 1] && row[row.length - 1].trim() ? row[row.length - 1] : defaultTargetDomain,
@@ -1151,13 +1151,14 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
         spreadsheetId
       }))
       .filter(link => link.url);
+    return { links, sheetName };
   } catch (error) {
     console.error(`Error importing from Google Sheets ${spreadsheetId}:`, error);
-    return [];
+    return { links: [], sheetName: null };
   }
 };
 
-const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, resultRangeEnd) => {
+const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, resultRangeEnd, sheetName) => {
   const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
   const isLinkFound = link.status === 'active' && link.rel !== 'not found';
   const value = [
@@ -1167,17 +1168,19 @@ const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, r
     link.isIndexable === false ? link.indexabilityStatus : '',
     isLinkFound ? 'True' : 'False'
   ];
-  const range = `All links!${resultRangeStart}${link.rowIndex}:${resultRangeEnd}${link.rowIndex}`;
+  const range = `${sheetName}!${resultRangeStart}${link.rowIndex}:${resultRangeEnd}${link.rowIndex}`; // Используем правильное имя листа
   console.log(`Exporting to ${range} (${spreadsheetId}): ${value}`);
   try {
-    await sheets.spreadsheets.values.update({
+    const response = await sheets.spreadsheets.values.update({
       spreadsheetId,
       range,
       valueInputOption: 'RAW',
       resource: { values: [value] }
     });
+    console.log(`Successfully exported to ${range}: ${JSON.stringify(response.data)}`);
   } catch (error) {
-    console.error(`Error exporting to ${range} (${spreadsheetId}):`, error);
+    console.error(`Error exporting to ${range} (${spreadsheetId}):`, error.response ? error.response.data : error.message);
+    throw error; // Пробрасываем ошибку, чтобы увидеть её в логах
   }
 };
 
