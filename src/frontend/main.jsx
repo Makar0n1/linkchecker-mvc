@@ -6,7 +6,6 @@ import LoginPage from './components/LoginPage';
 import Dashboard from './components/Dashboard';
 import ManualLinks from './components/ManualLinks';
 import GoogleSheets from './components/GoogleSheets';
-import RegisterPage from './components/RegisterPage';
 import Profile from './components/Profile';
 import './styles.css';
 
@@ -21,15 +20,13 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <BrowserRouter>
     <Routes>
-      <Route path="/" element={<StartPage />} /> {/* Убрали PublicRoute */}
+      <Route path="/" element={<StartPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
       <Route path="/app" element={<ProtectedRoute><Dashboard /></ProtectedRoute>}>
         <Route path="manual" element={<ManualLinks />} />
         <Route path="sheets" element={<GoogleSheets />} />
         <Route path="profile" element={<Profile />} />
         <Route path="" element={<Navigate to="manual" />} />
-        
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

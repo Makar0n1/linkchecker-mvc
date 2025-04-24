@@ -10,7 +10,7 @@ const LoginPage = () => {
   const navigate = useNavigate();
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
-    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links` // В продакшене без порта
+    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   const handleLogin = async (e) => {
@@ -84,12 +84,7 @@ const LoginPage = () => {
             </button>
           </form>
           {error && <p className="text-red-500 mt-4 text-center text-sm">{error}</p>}
-          <p className="text-gray-600 text-center mt-4 text-sm">
-            Don't have an account?{' '}
-            <Link to="/register" className="text-green-600 hover:underline">
-              Register here
-            </Link>
-          </p>
+          {/* Убрали ссылку на регистрацию */}
         </div>
       </motion.div>
       <footer className="bg-gray-800 text-white py-4 sm:py-6">
