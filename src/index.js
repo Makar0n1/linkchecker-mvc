@@ -67,7 +67,6 @@ schedule.gracefulShutdown().then(() => {
 const runAnalysis = async () => {
   console.log('Checking scheduled spreadsheet analysis...');
   try {
-    // Выбираем только таблицы со статусом pending
     const spreadsheets = await Spreadsheet.find({ status: 'pending' });
     console.log(`Found ${spreadsheets.length} spreadsheets with status 'pending' for analysis`);
 
@@ -77,25 +76,7 @@ const runAnalysis = async () => {
       const hoursSinceLastRun = (now - lastRun) / (1000 * 60 * 60);
 
       if (hoursSinceLastRun >= spreadsheet.intervalHours) {
-        // Проверяем, не анализируется ли проект
-        const project = await Project.findOne({ _id: spreadsheet.projectId });
-        if (project.isAnalyzing) {
-          console.log(`Analysis already in progress for project ${spreadsheet.projectId}, skipping spreadsheet ${spreadsheet.spreadsheetId}`);
-          continue;
-        }
-
-        console.log(`Running analysis for ${spreadsheet.spreadsheetId}`);
-        spreadsheet.status = 'checking';
-        await spreadsheet.save();
-        try {
-          await linkController.analyzeSpreadsheet(spreadsheet);
-          spreadsheet.status = 'completed';
-        } catch (error) {
-          spreadsheet.status = 'error';
-          console.error(`Error analyzing ${spreadsheet.spreadsheetId}:`, error);
-        }
-        spreadsheet.lastRun = now;
-        await spreadsheet.save();
+        await linkController.scheduleSpreadsheetAnalysis(spreadsheet);
       }
     }
   } catch (error) {

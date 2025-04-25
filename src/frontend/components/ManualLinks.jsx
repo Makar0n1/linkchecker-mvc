@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const ManualLinks = ({
@@ -19,6 +20,7 @@ const ManualLinks = ({
   handleDeleteLink,
   handleDeleteAllLinks,
 }) => {
+  const navigate = useNavigate();
   const [copiedField, setCopiedField] = useState(null);
   const [checkingLinks, setCheckingLinks] = useState(new Set());
   const [hoveredLinkId, setHoveredLinkId] = useState(null);
@@ -58,7 +60,9 @@ const ManualLinks = ({
           if (!project.isAnalyzing) {
             clearInterval(intervalId);
             setLoading(false);
-            setCheckingLinks(new Set());
+            setCheckingLinks(new Set()); // Сбрасываем checkingLinks
+            // Автоматически перезагружаем страницу
+            window.location.reload();
           }
         } catch (err) {
           console.error('Error during polling:', err);
@@ -76,10 +80,9 @@ const ManualLinks = ({
 
   const getStatus = (link) => {
     if (checkingLinks.has(link._id)) return 'Checking';
-    if (!link.status) return 'Pending';
-    const isCanonicalMatch = !link.canonicalUrl || link.url.toLowerCase().replace(/\/$/, '') === link.canonicalUrl.toLowerCase().replace(/\/$/, '');
-    const isOk = link.isIndexable && link.responseCode === '200' && link.rel !== 'not found';
-    return isOk ? 'OK' : 'Problem';
+    if (!link.status || link.status === 'pending') return 'Not checked yet...';
+    if (link.status === 'checking') return 'Checking';
+    return link.overallStatus || 'Problem';
   };
 
   const copyToClipboard = (key) => {
@@ -123,6 +126,16 @@ const ManualLinks = ({
       animate="visible"
       variants={fadeInUp}
     >
+      <button
+        onClick={() => navigate('/projects')}
+        className="mb-4 flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+        </svg>
+        Back to Projects
+      </button>
+
       <form onSubmit={(e) => handleAddLinks(e, projectId)} className="mb-6 flex flex-col gap-4">
         <textarea
           value={urlList}
@@ -225,11 +238,13 @@ const ManualLinks = ({
                         {copiedField === `url-${link._id}` ? 'Copied!' : 'Copy'}
                       </button>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base truncate">{link.targetDomain}</td>
+                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base truncate">
+                      {link.targetDomains && link.targetDomains.length > 0 ? link.targetDomains.join(', ') : 'N/A'}
+                    </td>
                     <td className="p-2 sm:p-3 whitespace-nowrap">
                       <span
                         className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          status === 'Pending' ? 'bg-gray-100 text-gray-800' :
+                          status === 'Not checked yet...' ? 'bg-gray-100 text-gray-800' :
                           status === 'Checking' ? 'bg-blue-100 text-blue-800' :
                           status === 'OK' ? (isCanonicalMismatch ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800') :
                           'bg-red-100 text-red-800'
@@ -238,17 +253,21 @@ const ManualLinks = ({
                         {status}
                       </span>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base whitespace-nowrap">{link.responseCode || 'N/A'}</td>
+                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base whitespace-nowrap">
+                      {status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.responseCode || 'N/A'}
+                    </td>
                     <td className="p-2 sm:p-3 whitespace-nowrap">
                       <span
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                          status === 'Not checked yet...' || status === 'Checking' ? 'bg-gray-100 text-gray-800' :
                           link.isIndexable === null ? 'bg-gray-100 text-gray-800' :
                           link.isIndexable ? (isCanonicalMismatch ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800') :
                           'bg-red-100 text-red-800'
                         }`}
                       >
-                        {link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No'}
-                        {isCanonicalMismatch && (
+                        {status === 'Not checked yet...' || status === 'Checking' ? 'N/A' :
+                          link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No'}
+                        {isCanonicalMismatch && status !== 'Not checked yet...' && status !== 'Checking' && (
                           <span className="relative group ml-1">
                             <svg className="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" />
@@ -260,15 +279,18 @@ const ManualLinks = ({
                         )}
                       </span>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 whitespace-wrap text-sm sm:text-base">{link.rel || 'none'}</td>
+                    <td className="p-2 sm:p-3 text-gray-700 whitespace-wrap text-sm sm:text-base">
+                      {status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.rel || 'none'}
+                    </td>
                     <td className="p-2 sm:p-3 text-center whitespace-wrap">
                       <span
                         className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          status === 'Not checked yet...' || status === 'Checking' ? 'bg-gray-100 text-gray-800' :
                           link.rel === 'not found' ? 'bg-red-100 text-red-800' :
                           link.linkType === 'dofollow' ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'
                         }`}
                       >
-                        {link.rel === 'not found' ? 'not found' : link.linkType || 'not found'}
+                        {status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.rel === 'not found' ? 'not found' : link.linkType || 'not found'}
                       </span>
                     </td>
                     <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base truncate relative">

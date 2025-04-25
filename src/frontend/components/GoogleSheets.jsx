@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom'; // Добавляем useNavigate
 import axios from 'axios';
 
 const GoogleSheets = ({
@@ -12,6 +13,7 @@ const GoogleSheets = ({
   setError,
   isAnalyzing,
 }) => {
+  const navigate = useNavigate(); // Для навигации
   const [form, setForm] = useState({
     spreadsheetId: '',
     gid: '',
@@ -22,6 +24,7 @@ const GoogleSheets = ({
     resultRangeEnd: '',
     intervalHours: 4,
   });
+  const [timers, setTimers] = useState({}); // Состояние для таймеров
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -42,7 +45,6 @@ const GoogleSheets = ({
 
     fetchSpreadsheets();
 
-    // Polling для обновления статуса таблиц
     let intervalId;
     if (runningIds.length > 0) {
       intervalId = setInterval(async () => {
@@ -64,6 +66,34 @@ const GoogleSheets = ({
 
     return () => clearInterval(intervalId);
   }, [projectId, setSpreadsheets, setError, runningIds, setLoading]);
+
+  // Обновляем таймеры каждую секунду
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      const newTimers = {};
+      spreadsheets.forEach(s => {
+        if (s.lastRun && s.intervalHours) {
+          const lastRun = new Date(s.lastRun);
+          const nextRun = new Date(lastRun.getTime() + s.intervalHours * 60 * 60 * 1000);
+          const now = new Date();
+          const timeUntilNext = nextRun - now;
+          if (timeUntilNext > 0) {
+            const hours = Math.floor(timeUntilNext / (1000 * 60 * 60));
+            const minutes = Math.floor((timeUntilNext % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((timeUntilNext % (1000 * 60)) / 1000);
+            newTimers[s._id] = `${hours}h ${minutes}m ${seconds}s`;
+          } else {
+            newTimers[s._id] = 'Ready';
+          }
+        } else {
+          newTimers[s._id] = 'Not yet run';
+        }
+      });
+      setTimers(newTimers);
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [spreadsheets]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -169,11 +199,22 @@ const GoogleSheets = ({
 
   return (
     <motion.div
-      className="max-w-full mx-auto overflow-hidden"
+      className="max-w-full mx-auto"
       initial="hidden"
       animate="visible"
       variants={fadeInUp}
     >
+      {/* Кнопка "Назад" */}
+      <button
+        onClick={() => navigate('/projects')}
+        className="mb-4 flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+        </svg>
+        Back to Projects
+      </button>
+
       <form onSubmit={addSpreadsheet} className="mb-6 grid grid-cols-2 gap-4">
         {[
           { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
@@ -217,11 +258,18 @@ const GoogleSheets = ({
               animate={{ opacity: 1 }}
               transition={{ duration: 0.3 }}
             >
-              <div className="flex items-center gap-2">
-                <span className={`w-4 h-4 rounded-full ${statusColor(s.status, isRunning)} flex-shrink-0`}></span>
-                <span className="text-gray-700 break-all">
-                  {s.spreadsheetId} - {s.targetDomain} - Every {s.intervalHours} hours
-                </span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <span className={`w-4 h-4 rounded-full ${statusColor(s.status, isRunning)} flex-shrink-0`}></span>
+                  <span className="text-gray-700 break-all">
+                    {s.spreadsheetId} - {s.targetDomain} - Every {s.intervalHours} hours
+                  </span>
+                </div>
+                <div className="text-gray-600 text-sm">
+                  <p>Scans: {s.scanCount || 0}</p>
+                  <p>Last Scan: {s.lastRun ? new Date(s.lastRun).toLocaleString() : 'Never'}</p>
+                  <p>Next Scan In: {timers[s._id] || 'Calculating...'}</p>
+                </div>
               </div>
               <div className="flex gap-2 sm:ml-auto">
                 {s.status === 'checking' ? (
