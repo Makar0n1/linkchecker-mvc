@@ -9,6 +9,7 @@ const linkRoutes = require('./routes/linkRoutes');
 const envPath = process.env.NODE_ENV === 'production'
   ? path.resolve(__dirname, '../../.env.prod')
   : path.resolve(__dirname, '../../.env');
+console.log('Server.js - Loading .env from:', envPath);
 dotenv.config({ path: envPath });
 
 console.log('Server.js - NODE_ENV:', process.env.NODE_ENV);
@@ -31,25 +32,26 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
 // Настройка CORS
 const corsOptions = {
   origin: (origin, callback) => {
-    // Разрешённые origins
     const allowedOrigins = [
-      process.env.FRONTEND_DOMAIN, // Для продакшена (https://link-check-pro.top)
-      'http://localhost:3001',    // Для разработки (Vite)
-      'http://localhost:3000',    // Для случаев, если фронтенд и бэкенд на одном порту
+      process.env.FRONTEND_DOMAIN || 'https://link-check-pro.top', // Запасной вариант
+      'http://localhost:3001',
+      'http://localhost:3000',
     ];
 
-    // Разрешаем запросы без origin (например, от Postman) или если origin в списке разрешённых
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 };
 app.use(cors(corsOptions));
+
+// Обработка preflight запросов
+app.options('*', cors(corsOptions));
 
 // Middleware для парсинга JSON
 app.use(express.json());
