@@ -262,6 +262,8 @@ const addLinks = async (req, res) => {
         url, 
         targetDomains: [targetDomain],
         projectId, 
+        userId: req.userId,
+        source: 'manual', // Указываем источник
         status: 'pending' 
       });
       await newLink.save();
@@ -286,7 +288,7 @@ const getLinks = async (req, res) => {
     const project = await Project.findOne({ _id: projectId, userId: req.userId });
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    const links = await FrontendLink.find({ projectId });
+    const links = await FrontendLink.find({ projectId, source: 'manual' }); // Фильтруем по source
     res.json(links);
   } catch (error) {
     console.error('getLinks: Error fetching links', error);
@@ -1579,10 +1581,11 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
         userId: spreadsheet.userId,
         projectId: spreadsheet.projectId,
         spreadsheetId: spreadsheet.spreadsheetId,
+        source: 'google_sheets', // Указываем источник
         status: 'pending',
         rowIndex: link.rowIndex,
       });
-      await newLink.save(); // Сохраняем в базу, чтобы получить настоящий Mongoose документ
+      await newLink.save();
       return newLink;
     })
   );
