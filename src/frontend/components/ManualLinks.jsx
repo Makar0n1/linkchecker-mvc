@@ -30,47 +30,55 @@ const ManualLinks = ({
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
-  useEffect(() => {
+  const wsBaseUrl = import.meta.env.MODE === 'production'
+    ? `wss://api.link-check-pro.top`
+    : `ws://localhost:${import.meta.env.VITE_BACKEND_PORT}`;
+
+  const fetchLinks = async () => {
     const token = localStorage.getItem('token');
-    const fetchLinks = async () => {
-      try {
-        const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setLinks(response.data);
-      } catch (err) {
-        setError(err.response?.data?.error || 'Failed to fetch links');
+    try {
+      const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setLinks(response.data);
+      
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to fetch links');
+    }
+  };
+
+  useEffect(() => {
+    fetchLinks();
+
+    // Подключение к WebSocket
+    const ws = new WebSocket(wsBaseUrl);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'subscribe', projectId }));
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      if (data.type === 'analysisComplete' && data.projectId === projectId) {
+        
+        fetchLinks();
+        setLoading(false);
+        setCheckingLinks(new Set());
       }
     };
 
-    fetchLinks();
+    ws.onclose = () => {
+      
+    };
 
-    let intervalId;
-    if (loading) {
-      intervalId = setInterval(async () => {
-        try {
-          const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          setLinks(response.data);
-          const projectResponse = await axios.get(`${apiBaseUrl}/projects`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const project = projectResponse.data.find((proj) => proj._id === projectId);
-          if (!project.isAnalyzing) {
-            clearInterval(intervalId);
-            setLoading(false);
-            setCheckingLinks(new Set()); // Сбрасываем checkingLinks
-            // Автоматически перезагружаем страницу
-            window.location.reload();
-          }
-        } catch (err) {
-          console.error('Error during polling:', err);
-        }
-      }, 5000);
-    }
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
 
-    return () => clearInterval(intervalId);
+    return () => {
+      ws.close();
+    };
   }, [projectId, setLinks, setError, loading, setLoading]);
 
   const fadeInUp = {
@@ -82,7 +90,14 @@ const ManualLinks = ({
     if (checkingLinks.has(link._id)) return 'Checking';
     if (!link.status || link.status === 'pending') return 'Not checked yet...';
     if (link.status === 'checking') return 'Checking';
-    return link.overallStatus || 'Problem';
+
+    const isOk =
+      link.responseCode === '200' &&
+      link.isIndexable === true &&
+      link.rel !== 'not found' &&
+      (link.linkType === 'dofollow' || link.linkType === 'nofollow');
+
+    return isOk ? 'OK' : 'Problem';
   };
 
   const copyToClipboard = (key) => {
@@ -100,7 +115,14 @@ const ManualLinks = ({
   const wrappedHandleCheckLinks = async (projectId) => {
     const linkIds = links.map(link => link._id);
     setCheckingLinks(new Set(linkIds));
-    await handleCheckLinks(projectId);
+    setLoading(true);
+    try {
+      await handleCheckLinks(projectId);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to check links');
+      setLoading(false);
+      setCheckingLinks(new Set());
+    }
   };
 
   const handleMouseEnterLink = (linkId) => {
@@ -127,7 +149,7 @@ const ManualLinks = ({
       variants={fadeInUp}
     >
       <button
-        onClick={() => navigate('/projects')}
+        onClick={() => navigate('/app/projects')}
         className="mb-4 flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

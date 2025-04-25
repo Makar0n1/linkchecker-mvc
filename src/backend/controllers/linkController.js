@@ -11,6 +11,7 @@ const axios = require('axios');
 const { google } = require('googleapis');
 const path = require('path');
 const async = require('async');
+
 let pLimit;
 (async () => {
   const { default: pLimitModule } = await import('p-limit');
@@ -18,17 +19,21 @@ let pLimit;
 })();
 
 const MAX_CONCURRENT_ANALYSES = 2;
-const analysisQueue = async.queue(async (task, callback) => {
-  try {
-    console.log(`Starting queued analysis for project ${task.projectId}, type: ${task.type}`);
-    await task.handler(task, callback);
-    console.log(`Finished queued analysis for project ${task.projectId}, type: ${task.type}`);
-    callback();
-  } catch (error) {
-    console.error(`Error in queued analysis for project ${task.projectId}, type: ${task.type}:`, error);
-    // Не отправляем ответ здесь, оставляем это на handler
-    callback(error);
+const analysisQueue = async.queue((task, callback) => {
+  console.log(`Starting queued analysis for project ${task.projectId}, type: ${task.type}`);
+  if (typeof task.handler !== 'function') {
+    console.error(`Handler is not a function for task type ${task.type}`);
+    return callback(new Error('Handler is not a function'));
   }
+
+  task.handler(task, (err, result) => {
+    if (err) {
+      console.error(`Error in queued analysis for project ${task.projectId}, type: ${task.type}:`, err);
+      return callback(err);
+    }
+    console.log(`Finished queued analysis for project ${task.projectId}, type: ${task.type}`);
+    callback(null, result);
+  });
 }, MAX_CONCURRENT_ANALYSES);
 
 analysisQueue.drain(() => {
@@ -49,9 +54,6 @@ const sheets = google.sheets({
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   }),
 });
-
-// Глобальный браузер для переиспользования
-// let globalBrowser = null;
 
 const initializeBrowser = async () => {
   console.log('Initializing new browser for task...');
@@ -82,7 +84,6 @@ const closeBrowser = async (browser) => {
   }
 };
 
-// Перезапускаем браузер при ошибках
 const restartBrowser = async () => {
   console.log('Restarting global browser due to error...');
   await closeBrowser();
@@ -135,20 +136,34 @@ const registerUser = async (req, res) => {
 };
 
 const loginUser = async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password required' });
+    }
+
     const user = await User.findOne({ username });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (!JWT_SECRET) {
+      console.error('loginUser: JWT_SECRET is not defined');
+      return res.status(500).json({ error: 'Server configuration error', details: 'JWT_SECRET is not defined' });
+    }
 
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '1h' });
     res.json({ token, isSuperAdmin: user.isSuperAdmin, plan: user.plan });
   } catch (error) {
     console.error('loginUser: Error logging in', error);
-    res.status(500).json({ error: 'Login failed', details: error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Login failed', details: error.message });
+    }
   }
 };
 
@@ -245,7 +260,7 @@ const addLinks = async (req, res) => {
     for (const { url, targetDomain } of linksData) {
       const newLink = new FrontendLink({ 
         url, 
-        targetDomains: [targetDomain], // Используем targetDomains как массив
+        targetDomains: [targetDomain],
         projectId, 
         status: 'pending' 
       });
@@ -349,36 +364,49 @@ const checkLinks = async (req, res) => {
     type: 'checkLinks',
     req,
     res,
-    userId: req.userId, // Передаём userId явно
-    handler: async (task, callback) => {
+    userId: req.userId,
+    handler: (task, callback) => {
+      console.log(`checkLinks handler: Starting analysis for project ${task.projectId}`);
       let project;
-      try {
-        project = await Project.findOne({ _id: task.projectId, userId: task.userId });
-        project.isAnalyzing = true;
-        await project.save();
-
-        await FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } });
-
-        const updatedLinks = await processLinksInBatches(links, 20);
-        await Promise.all(updatedLinks.map(link => link.save()));
-        console.log(`Finished link check for project ${task.projectId}`);
-
-        if (!task.res.headersSent) {
-          task.res.json(updatedLinks);
-        }
-        callback();
-      } catch (error) {
-        console.error(`Error in checkLinks for project ${task.projectId}:`, error);
-        if (!task.res.headersSent) {
-          task.res.status(500).json({ error: 'Error checking links', details: error.message });
-        }
-        callback(error);
-      } finally {
-        if (project) {
-          project.isAnalyzing = false;
-          await project.save();
-        }
-      }
+      Project.findOne({ _id: task.projectId, userId: task.userId })
+        .then(proj => {
+          if (!proj) throw new Error('Project not found in handler');
+          project = proj;
+          project.isAnalyzing = true;
+          return project.save();
+        })
+        .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
+        .then(() => processLinksInBatches(links, 20))
+        .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
+        .then(updatedLinks => {
+          console.log(`Finished link check for project ${task.projectId}`);
+          if (!task.res.headersSent) {
+            task.res.json(updatedLinks);
+          }
+          // Отправляем уведомление через WebSocket
+          const wss = task.req.wss; // Получаем wss из req
+          wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
+              client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
+            }
+          });
+          callback(null, updatedLinks);
+        })
+        .catch(error => {
+          console.error(`Error in checkLinks for project ${task.projectId}:`, error);
+          if (!task.res.headersSent) {
+            task.res.status(500).json({ error: 'Error checking links', details: error.message });
+          }
+          callback(error);
+        })
+        .finally(() => {
+          if (project) {
+            project.isAnalyzing = false;
+            project.save()
+              .then(() => console.log(`checkLinks handler: Set isAnalyzing to false for project ${task.projectId}`))
+              .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
+          }
+        });
     },
   });
 };
@@ -519,39 +547,71 @@ const runSpreadsheetAnalysis = async (req, res) => {
     type: 'runSpreadsheetAnalysis',
     req,
     res,
-    handler: async (req, res) => {
-      const project = await Project.findOne({ _id: projectId, userId: req.userId });
-      project.isAnalyzing = true;
-      await project.save();
-
-      spreadsheet.status = 'checking';
-      await spreadsheet.save();
-
-      try {
-        cancelAnalysis = false;
-        await analyzeSpreadsheet(spreadsheet, maxLinks);
-        if (cancelAnalysis) {
-          throw new Error('Analysis cancelled');
-        }
-        spreadsheet.status = 'completed';
-        spreadsheet.lastRun = new Date();
-        spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1; // Инкремент scanCount
-        await spreadsheet.save();
-        console.log(`Finished spreadsheet analysis for spreadsheet ${spreadsheetId}`);
-        res.json({ message: 'Analysis completed' });
-      } catch (error) {
-        console.error(`Error analyzing spreadsheet ${spreadsheetId} in project ${projectId}:`, error);
-        spreadsheet.status = error.message === 'Analysis cancelled' ? 'pending' : 'error';
-        spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1; // Инкремент даже при ошибке
-        await spreadsheet.save();
-        if (error.message !== 'Analysis cancelled') {
-          throw error;
-        }
-        res.json({ message: 'Analysis cancelled' });
-      } finally {
-        project.isAnalyzing = false;
-        await project.save();
-      }
+    userId: req.userId,
+    handler: (task, callback) => {
+      let project;
+      Project.findOne({ _id: task.projectId, userId: task.userId })
+        .then(proj => {
+          if (!proj) throw new Error('Project not found in handler');
+          project = proj;
+          project.isAnalyzing = true;
+          return project.save();
+        })
+        .then(() => {
+          spreadsheet.status = 'checking';
+          return spreadsheet.save();
+        })
+        .then(() => {
+          cancelAnalysis = false;
+          return analyzeSpreadsheet(spreadsheet, maxLinks);
+        })
+        .then(() => {
+          if (cancelAnalysis) {
+            throw new Error('Analysis cancelled');
+          }
+          spreadsheet.status = 'completed';
+          spreadsheet.lastRun = new Date();
+          spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
+          return spreadsheet.save();
+        })
+        .then(() => {
+          console.log(`Finished spreadsheet analysis for spreadsheet ${spreadsheetId}`);
+          if (!task.res.headersSent) {
+            task.res.json({ message: 'Analysis completed' });
+          }
+          // Отправляем уведомление через WebSocket
+          const wss = task.req.wss; // Получаем wss из req
+          wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
+              client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
+            }
+          });
+          callback(null);
+        })
+        .catch(error => {
+          console.error(`Error analyzing spreadsheet ${spreadsheetId} in project ${projectId}:`, error);
+          spreadsheet.status = error.message === 'Analysis cancelled' ? 'pending' : 'error';
+          spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
+          spreadsheet.save()
+            .then(() => {
+              if (!task.res.headersSent) {
+                if (error.message === 'Analysis cancelled') {
+                  task.res.json({ message: 'Analysis cancelled' });
+                } else {
+                  task.res.status(500).json({ error: 'Error analyzing spreadsheet', details: error.message });
+                }
+              }
+              callback(error);
+            });
+        })
+        .finally(() => {
+          if (project) {
+            project.isAnalyzing = false;
+            project.save()
+              .then(() => console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`))
+              .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
+          }
+        });
     },
   });
 };
@@ -575,15 +635,12 @@ const cancelSpreadsheetAnalysis = async (req, res) => {
       return res.status(400).json({ error: 'No analysis in progress to cancel' });
     }
 
-    // Устанавливаем флаг отмены
     cancelAnalysis = true;
 
-    // Сбрасываем статус таблицы
     spreadsheet.status = 'pending';
-    spreadsheet.links = []; // Очищаем результаты анализа
+    spreadsheet.links = [];
     await spreadsheet.save();
 
-    // Сбрасываем флаг анализа проекта
     project.isAnalyzing = false;
     await project.save();
 
@@ -1258,7 +1315,6 @@ const checkLinkStatus = async (link) => {
         await link.save();
       }
     }
-
     const findLinkForDomains = (targetDomains) => {
       let foundLink = null;
 
@@ -1439,6 +1495,8 @@ const checkLinkStatus = async (link) => {
 };
 
 const processLinksInBatches = async (links, batchSize = 20) => {
+  const { default: pLimitModule } = await import('p-limit'); // Загружаем p-limit здесь
+  const pLimit = pLimitModule;
   const results = [];
   const totalLinks = links.length;
 
@@ -1530,7 +1588,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
       $set: {
         links: updatedLinks.map(link => ({
           url: link.url,
-          targetDomain: link.targetDomains.join(', '), // Сохраняем все домены как строку
+          targetDomain: link.targetDomains.join(', '),
           status: link.status,
           responseCode: link.responseCode,
           isIndexable: link.isIndexable,
@@ -1549,10 +1607,8 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
     throw new Error('Spreadsheet not found during update');
   }
 
-  if (!pLimit) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    if (!pLimit) throw new Error('Failed to load p-limit');
-  }
+  const { default: pLimitModule } = await import('p-limit'); // Загружаем p-limit здесь
+  const pLimit = pLimitModule;
 
   const limit = pLimit(5);
   await Promise.all(updatedLinks.map(link =>
@@ -1586,12 +1642,11 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
     const links = rows
       .map((row, index) => {
         const url = row[0];
-        // Обрабатываем targetColumn: разделяем домены по переносу строки
         const targetDomainsRaw = row[row.length - 1] && row[row.length - 1].trim() ? row[row.length - 1] : defaultTargetDomain;
         const targetDomains = targetDomainsRaw.split('\n').map(domain => domain.trim()).filter(domain => domain);
         return {
           url,
-          targetDomains: targetDomains.length > 0 ? targetDomains : [defaultTargetDomain], // Если нет доменов, используем defaultTargetDomain
+          targetDomains: targetDomains.length > 0 ? targetDomains : [defaultTargetDomain],
           rowIndex: index + 2,
           spreadsheetId,
         };
@@ -1630,7 +1685,7 @@ const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, r
       return;
     } catch (error) {
       if (error.code === 429) {
-        const delay = 30 * 1000; // Задержка 30 секунд
+        const delay = 30 * 1000;
         console.log(`Rate limit exceeded for ${range}, retrying in ${delay}ms (attempt ${attempt})`);
         await new Promise(resolve => setTimeout(resolve, delay));
         attempt++;
@@ -1744,6 +1799,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     console.error(`Error formatting sheet ${spreadsheetId}:`, error);
   }
 };
+
 const scheduleSpreadsheetAnalysis = async (spreadsheet) => {
   console.log(`Adding scheduleSpreadsheetAnalysis task to queue for spreadsheet ${spreadsheet.spreadsheetId} in project ${spreadsheet.projectId}`);
 
@@ -1790,6 +1846,7 @@ const scheduleSpreadsheetAnalysis = async (spreadsheet) => {
   });
 };
 
+// Экспортируем все функции
 module.exports = {
   registerUser,
   loginUser,
@@ -1805,7 +1862,7 @@ module.exports = {
   addSpreadsheet: [authMiddleware, addSpreadsheet],
   getSpreadsheets: [authMiddleware, getSpreadsheets],
   runSpreadsheetAnalysis: [authMiddleware, runSpreadsheetAnalysis],
-  cancelSpreadsheetAnalysis: [authMiddleware, cancelSpreadsheetAnalysis], // Здесь всё правильно
+  cancelSpreadsheetAnalysis: [authMiddleware, cancelSpreadsheetAnalysis],
   deleteSpreadsheet: [authMiddleware, deleteSpreadsheet],
   selectPlan: [authMiddleware, selectPlan],
   processPayment: [authMiddleware, processPayment],

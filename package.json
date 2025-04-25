@@ -35,7 +35,8 @@
     "react-chartjs-2": "^5.3.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.5.0",
-    "serve": "^14.2.4"
+    "serve": "^14.2.4",
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.0",

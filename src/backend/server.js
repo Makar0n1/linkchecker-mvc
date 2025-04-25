@@ -4,6 +4,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const linkRoutes = require('./routes/linkRoutes');
+const WebSocket = require('ws');
 
 // Загружаем .env в зависимости от окружения
 const envPath = process.env.NODE_ENV === 'production'
@@ -33,11 +34,12 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
 const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = [
-      process.env.FRONTEND_DOMAIN || 'https://link-check-pro.top', // Запасной вариант
+      'https://link-check-pro.top',
       'http://localhost:3001',
       'http://localhost:3000',
     ];
 
+    console.log(`CORS: Checking origin ${origin} against allowed origins: ${allowedOrigins}`);
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -51,13 +53,19 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Обработка preflight запросов
-app.options('*', cors(corsOptions));
+app.options('*', (req, res) => {
+  console.log(`Handling OPTIONS request for ${req.url}`);
+  res.set({
+    'Access-Control-Allow-Origin': 'https://link-check-pro.top',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
+  });
+  res.status(204).send();
+});
 
 // Middleware для парсинга JSON
 app.use(express.json());
-
-// Маршруты API
-app.use('/api/links', linkRoutes);
 
 // Логирование всех запросов для отладки
 app.use((req, res, next) => {
@@ -65,10 +73,46 @@ app.use((req, res, next) => {
   next();
 });
 
-// Запуск сервера
-app.listen(port, () => {
+// Запуск HTTP сервера
+const server = app.listen(port, () => {
   const baseUrl = process.env.NODE_ENV === 'production'
     ? `https://api.link-check-pro.top`
     : `http://localhost:${port}`;
   console.log(`Backend running at ${baseUrl}`);
 });
+
+// Настройка WebSocket сервера
+const wss = new WebSocket.Server({ server });
+
+wss.on('connection', (ws) => {
+  console.log('WebSocket client connected');
+  ws.on('message', (message) => {
+    const data = JSON.parse(message.toString());
+    if (data.type === 'subscribe' && data.projectId) {
+      ws.projectId = data.projectId;
+      console.log(`Client subscribed to project ${data.projectId}`);
+    }
+  });
+  ws.on('close', () => {
+    console.log('WebSocket client disconnected');
+  });
+});
+
+// Middleware для добавления wss в req
+app.use((req, res, next) => {
+  req.wss = wss;
+  next();
+});
+
+// Маршруты API
+app.use('/api/links', linkRoutes);
+
+// Обработка ошибок
+app.use((err, req, res, next) => {
+  console.error(`Server error: ${err.message}`);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Server error', details: err.message });
+  }
+});
+
+module.exports = { app, wss };
