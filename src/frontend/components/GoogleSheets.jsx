@@ -206,7 +206,7 @@ const GoogleSheets = ({
     >
       {/* Кнопка "Назад" */}
       <button
-        onClick={() => navigate('/projects')}
+        onClick={() => navigate('/app/projects')}
         className="mb-4 flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
