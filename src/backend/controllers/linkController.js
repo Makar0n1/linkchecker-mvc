@@ -1570,11 +1570,22 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
     throw new Error(`Link limit exceeded for your plan (${maxLinks} links)`);
   }
 
-  const dbLinks = links.map(link => ({
-    ...link,
-    userId: spreadsheet.userId,
-    spreadsheetId: spreadsheet.spreadsheetId,
-  }));
+  // Преобразуем объекты в Mongoose документы
+  const dbLinks = await Promise.all(
+    links.map(async link => {
+      const newLink = new FrontendLink({
+        url: link.url,
+        targetDomains: link.targetDomains,
+        userId: spreadsheet.userId,
+        projectId: spreadsheet.projectId,
+        spreadsheetId: spreadsheet.spreadsheetId,
+        status: 'pending',
+        rowIndex: link.rowIndex,
+      });
+      await newLink.save(); // Сохраняем в базу, чтобы получить настоящий Mongoose документ
+      return newLink;
+    })
+  );
 
   const updatedLinks = await processLinksInBatches(dbLinks, 20);
 
@@ -1607,7 +1618,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
     throw new Error('Spreadsheet not found during update');
   }
 
-  const { default: pLimitModule } = await import('p-limit'); // Загружаем p-limit здесь
+  const { default: pLimitModule } = await import('p-limit');
   const pLimit = pLimitModule;
 
   const limit = pLimit(5);
