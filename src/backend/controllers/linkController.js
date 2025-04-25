@@ -860,7 +860,7 @@ const checkLinkStatus = async (link) => {
     const browser = await initializeBrowser();
     try {
       page = await browser.newPage();
-      await page.setDefaultNavigationTimeout(60000); // Таймаут 60 секунд
+      await page.setDefaultNavigationTimeout(60000);
 
       const randomAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
       await page.setUserAgent(randomAgent.ua);
@@ -868,7 +868,6 @@ const checkLinkStatus = async (link) => {
 
       await page.setViewport({ width: 1920, height: 1080 });
 
-      // Отключаем загрузку ненужных ресурсов
       await page.setRequestInterception(true);
       page.on('request', (req) => {
         if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
@@ -881,7 +880,7 @@ const checkLinkStatus = async (link) => {
       const startTime = Date.now();
       let response;
       try {
-        response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 }); // Убираем networkidle0, используем domcontentloaded
+        response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
       } catch (error) {
@@ -891,7 +890,6 @@ const checkLinkStatus = async (link) => {
         link.isIndexable = false;
         link.indexabilityStatus = 'timeout';
         link.responseCode = 'Timeout';
-        // Продолжаем анализ, даже если таймаут
       }
       const loadTime = Date.now() - startTime;
       link.loadTime = loadTime;
@@ -900,14 +898,12 @@ const checkLinkStatus = async (link) => {
         link.isIndexable = false;
         link.indexabilityStatus = `HTTP ${response.status()}`;
         link.status = response.status() >= 400 ? 'broken' : 'redirect';
-        // Продолжаем анализ
       }
 
-      console.log('Waiting for meta robots or links (5 seconds)...');
       await page.waitForFunction(
-        () => document.querySelector('meta[name="robots"]') || document.querySelector(`a[href*="${link.targetDomain}"]`),
+        () => document.querySelector('meta[name="robots"]') || document.querySelector('a[href]'),
         { timeout: 5000 },
-      ).catch(() => console.log('Timeout waiting for meta or links, proceeding with evaluate...'));
+      ).catch(() => {});
 
       const randomDelay = Math.floor(Math.random() * 5000) + 5000;
       await new Promise(resolve => setTimeout(resolve, randomDelay));
@@ -922,11 +918,10 @@ const checkLinkStatus = async (link) => {
         link.indexabilityStatus = `check failed: ${error.message}`;
         link.responseCode = 'Error';
         link.overallStatus = 'Problem';
-        return link; // Прерываем, если не удалось даже извлечь HTML
+        return link;
       }
 
       const $ = cheerio.load(content);
-      console.log(`Total links found in HTML: ${$('a').length}`);
 
       let metaRobots = '';
       let isMetaRobotsFound = false;
@@ -944,7 +939,6 @@ const checkLinkStatus = async (link) => {
           isIndexableBasedOnRobots = true;
         }
       } catch (error) {
-        console.log('No meta robots tag found, assuming indexable');
         link.isIndexable = true;
         link.indexabilityStatus = 'indexable';
         isIndexableBasedOnRobots = true;
@@ -962,16 +956,18 @@ const checkLinkStatus = async (link) => {
             }
           }
         } catch (error) {
-          console.log('No canonical tag found');
           link.canonicalUrl = null;
         }
       }
 
-      const cleanTargetDomain = link.targetDomain
-        .replace(/^https?:\/\//, '')
-        .replace(/^\/+/, '')
-        .replace(/\/+$/, '');
-      console.log(`Cleaned targetDomain: ${cleanTargetDomain}`);
+      // Нормализуем все целевые домены
+      const cleanTargetDomains = link.targetDomains.map(domain =>
+        domain
+          .replace(/^https?:\/\//, '')
+          .replace(/^\/+/, '')
+          .replace(/\/+$/, '')
+          .toLowerCase()
+      );
 
       let linksFound = null;
       let captchaType = 'none';
@@ -1003,10 +999,10 @@ const checkLinkStatus = async (link) => {
             console.log(`Extracted googlekey for Google reCAPTCHA: ${sitekey}`);
 
             const captchaParams = {
-              key: process.env.TWOCAPTCHA_API_KEY, // Явно передаём API-ключ
+              key: process.env.TWOCAPTCHA_API_KEY,
               googlekey: sitekey,
               pageurl: currentPageUrl,
-              version: 'v2', // Указываем версию reCAPTCHA
+              version: 'v2',
             };
 
             let captchaResponse;
@@ -1213,31 +1209,145 @@ const checkLinkStatus = async (link) => {
           link.linkType = 'unknown';
           link.anchorText = 'captcha suspected';
           link.errorDetails = `CAPTCHA solving failed: ${error.message}`;
-          // Продолжаем анализ, если HTML всё же есть
         }
       }
+      // Поиск ссылок во всех возможных местах
+      const findLinkForDomains = (targetDomains) => {
+        let foundLink = null;
 
-      $('a').each((i, a) => {
-        const href = $(a).attr('href')?.toLowerCase().trim();
-        if (href && href.includes(cleanTargetDomain)) {
-          const anchorText = $(a).text().trim();
-          const hasSvg = $(a).find('svg').length > 0;
-          const hasImg = $(a).find('img').length > 0;
-          const hasIcon = $(a).find('i').length > 0;
-          const hasChildren = $(a).find('children').length > 0;
-          linksFound = {
-            href: href,
-            rel: $(a).attr('rel') || '',
-            anchorText: anchorText || (hasSvg ? 'SVG link' : hasImg ? 'Image link' : hasIcon ? 'Icon link' : hasChildren ? 'Element link' : 'no text'),
-          };
-          console.log(`Link found: ${JSON.stringify(linksFound)}`);
-          return false;
-        }
-      });
+        // 1. Поиск в тегах <a>
+        $('a').each((i, a) => {
+          const href = $(a).attr('href')?.toLowerCase().trim();
+          if (href) {
+            const matchesDomain = targetDomains.some(domain => href.includes(domain));
+            if (matchesDomain) {
+              const anchorText = $(a).text().trim();
+              const hasSvg = $(a).find('svg').length > 0;
+              const hasImg = $(a).find('img').length > 0;
+              const hasIcon = $(a).find('i').length > 0;
+              const hasChildren = $(a).children().length > 0;
+              foundLink = {
+                href: href,
+                rel: $(a).attr('rel') || '',
+                anchorText: anchorText || (hasSvg ? 'SVG link' : hasImg ? 'Image link' : hasIcon ? 'Icon link' : hasChildren ? 'Element link' : 'no text'),
+                source: 'a',
+              };
+              console.log(`Link found in <a>: ${JSON.stringify(foundLink)}`);
+              return false; // Прерываем перебор
+            }
+          }
+        });
 
-      console.log('Links found:', linksFound ? JSON.stringify(linksFound) : 'None');
+        if (foundLink) return foundLink;
 
-      // Проверяем, нашли ли ссылки или meta robots
+        // 2. Поиск в атрибутах onclick, onmouseover и т.д.
+        const eventAttributes = ['onclick', 'onmouseover', 'onmouseout', 'onchange'];
+        eventAttributes.forEach(attr => {
+          $(`[${attr}]`).each((i, el) => {
+            const eventCode = $(el).attr(attr)?.toLowerCase();
+            if (eventCode) {
+              const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
+              if (matchesDomain) {
+                // Извлекаем URL из события
+                const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+                if (urlMatch) {
+                  const href = urlMatch[1] || urlMatch[2];
+                  const tagName = $(el).prop('tagName').toLowerCase();
+                  foundLink = {
+                    href: href.toLowerCase(),
+                    rel: '',
+                    anchorText: `Link in ${tagName} ${attr}`,
+                    source: `event_${attr}`,
+                  };
+                  console.log(`Link found in ${attr}: ${JSON.stringify(foundLink)}`);
+                  return false;
+                }
+              }
+            }
+          });
+        });
+
+        if (foundLink) return foundLink;
+
+        // 3. Поиск в тегах <img>, <i>, <svg> через родительские <a> или атрибуты
+        const tagsToCheck = ['img', 'i', 'svg'];
+        tagsToCheck.forEach(tag => {
+          $(tag).each((i, el) => {
+            // Проверяем родительский <a>
+            const parentA = $(el).closest('a');
+            if (parentA.length) {
+              const href = parentA.attr('href')?.toLowerCase().trim();
+              if (href) {
+                const matchesDomain = targetDomains.some(domain => href.includes(domain));
+                if (matchesDomain) {
+                  const anchorText = `Link in ${tag}`;
+                  foundLink = {
+                    href: href,
+                    rel: parentA.attr('rel') || '',
+                    anchorText: anchorText,
+                    source: `${tag}_parent_a`,
+                  };
+                  console.log(`Link found in parent <a> of <${tag}>: ${JSON.stringify(foundLink)}`);
+                  return false;
+                }
+              }
+            }
+
+            // Проверяем атрибуты onclick и т.д. в самом теге
+            eventAttributes.forEach(attr => {
+              const eventCode = $(el).attr(attr)?.toLowerCase();
+              if (eventCode) {
+                const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
+                if (matchesDomain) {
+                  const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+                  if (urlMatch) {
+                    const href = urlMatch[1] || urlMatch[2];
+                    foundLink = {
+                      href: href.toLowerCase(),
+                      rel: '',
+                      anchorText: `Link in ${tag} ${attr}`,
+                      source: `${tag}_event_${attr}`,
+                    };
+                    console.log(`Link found in <${tag}> ${attr}: ${JSON.stringify(foundLink)}`);
+                    return false;
+                  }
+                }
+              }
+            });
+          });
+        });
+
+        if (foundLink) return foundLink;
+
+        // 4. Поиск в JavaScript-коде внутри тегов <script>
+        $('script').each((i, script) => {
+          const scriptContent = $(script).html()?.toLowerCase();
+          if (scriptContent) {
+            const matchesDomain = targetDomains.some(domain => scriptContent.includes(domain));
+            if (matchesDomain) {
+              // Ищем URL в JavaScript-коде
+              const urlMatch = scriptContent.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+              if (urlMatch) {
+                const href = urlMatch[1] || urlMatch[2];
+                foundLink = {
+                  href: href.toLowerCase(),
+                  rel: '',
+                  anchorText: 'Link in JavaScript',
+                  source: 'script',
+                };
+                console.log(`Link found in <script>: ${JSON.stringify(foundLink)}`);
+                return false;
+              }
+            }
+          }
+        });
+
+        return foundLink;
+      };
+
+      // Ищем ссылки для любого из целевых доменов
+      linksFound = findLinkForDomains(cleanTargetDomains);
+
       const isLinkFound = linksFound !== null;
       const hasUsefulData = isLinkFound || isMetaRobotsFound;
 
@@ -1256,10 +1366,8 @@ const checkLinkStatus = async (link) => {
           link.anchorText = 'not found';
           link.errorDetails = link.errorDetails || '';
         }
-        // Игнорируем Timeout, если есть полезные данные
         link.overallStatus = link.isIndexable ? 'OK' : 'Problem';
       } else {
-        // Если ничего не нашли, помечаем как "Problem"
         link.status = link.status || 'broken';
         link.rel = 'not found';
         link.linkType = 'unknown';
@@ -1270,20 +1378,6 @@ const checkLinkStatus = async (link) => {
 
       link.lastChecked = new Date();
       return link;
-    } catch (error) {
-      console.error(`Critical error in checkLinkStatus for ${link.url}:`, error);
-      // Перезапускаем браузер при критической ошибке
-      await restartBrowser();
-      link.status = 'broken';
-      link.errorDetails = error.message;
-      link.rel = 'error';
-      link.linkType = 'unknown';
-      link.anchorText = 'error';
-      link.isIndexable = false;
-      link.indexabilityStatus = `check failed: ${error.message}`;
-      link.responseCode = 'Error';
-      link.overallStatus = 'Problem';
-      return link;
     } finally {
       if (page) {
         await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
@@ -1291,7 +1385,6 @@ const checkLinkStatus = async (link) => {
     }
   } catch (error) {
     console.error(`Critical error in checkLinkStatus for ${link.url}:`, error);
-    // Перезапускаем браузер при критической ошибке
     await restartBrowser();
     link.status = 'broken';
     link.errorDetails = error.message;
@@ -1310,25 +1403,29 @@ const processLinksInBatches = async (links, batchSize = 20) => {
   const results = [];
   const totalLinks = links.length;
 
+  const limit = pLimit(10);
+
   for (let i = 0; i < totalLinks; i += batchSize) {
     const batch = links.slice(i, i + batchSize);
     console.log(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalLinks / batchSize)}: links ${i + 1} to ${Math.min(i + batchSize, totalLinks)}`);
 
-    // Обрабатываем 20 ссылок параллельно
+    const memoryUsage = process.memoryUsage();
+    console.log(`Memory usage before batch: RSS=${(memoryUsage.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
+
     const batchResults = await Promise.all(
-      batch.map(async link => {
-        console.log(`Analyzing link: ${link.url}`);
+      batch.map(link => limit(async () => {
         const updatedLink = await checkLinkStatus(link);
-        console.log(`Finished analyzing link: ${link.url}`);
         return updatedLink;
-      })
+      }))
     );
 
     results.push(...batchResults);
     console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
 
-    // Пауза между батчами для снижения нагрузки
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Увеличиваем паузу до 5 секунд
+    const memoryUsageAfter = process.memoryUsage();
+    console.log(`Memory usage after batch: RSS=${(memoryUsageAfter.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsageAfter.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsageAfter.heapUsed / 1024 / 1024).toFixed(2)}MB`);
+
+    await new Promise(resolve => setTimeout(resolve, 5000));
   }
 
   return results;
@@ -1360,7 +1457,6 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
 
   const updatedLinks = await processLinksInBatches(dbLinks, 20);
 
-  // Проверяем, не была ли операция отменена
   if (cancelAnalysis) {
     throw new Error('Analysis cancelled');
   }
@@ -1371,7 +1467,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
       $set: {
         links: updatedLinks.map(link => ({
           url: link.url,
-          targetDomain: link.targetDomain,
+          targetDomain: link.targetDomains.join(', '), // Сохраняем все домены как строку
           status: link.status,
           responseCode: link.responseCode,
           isIndexable: link.isIndexable,
@@ -1390,13 +1486,11 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
     throw new Error('Spreadsheet not found during update');
   }
 
-  // Ждём, пока p-limit загрузится
   if (!pLimit) {
-    await new Promise(resolve => setTimeout(resolve, 100)); // Небольшая задержка, если p-limit ещё не загружен
+    await new Promise(resolve => setTimeout(resolve, 100));
     if (!pLimit) throw new Error('Failed to load p-limit');
   }
 
-  // Ограничиваем количество одновременных запросов на запись до 5
   const limit = pLimit(5);
   await Promise.all(updatedLinks.map(link =>
     limit(() => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName))
@@ -1427,12 +1521,18 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
     const rows = response.data.values || [];
     console.log(`Imported rows from "${sheetName}" (${spreadsheetId}, GID: ${gid}): ${rows.length}`);
     const links = rows
-      .map((row, index) => ({
-        url: row[0],
-        targetDomain: row[row.length - 1] && row[row.length - 1].trim() ? row[row.length - 1] : defaultTargetDomain,
-        rowIndex: index + 2,
-        spreadsheetId,
-      }))
+      .map((row, index) => {
+        const url = row[0];
+        // Обрабатываем targetColumn: разделяем домены по переносу строки
+        const targetDomainsRaw = row[row.length - 1] && row[row.length - 1].trim() ? row[row.length - 1] : defaultTargetDomain;
+        const targetDomains = targetDomainsRaw.split('\n').map(domain => domain.trim()).filter(domain => domain);
+        return {
+          url,
+          targetDomains: targetDomains.length > 0 ? targetDomains : [defaultTargetDomain], // Если нет доменов, используем defaultTargetDomain
+          rowIndex: index + 2,
+          spreadsheetId,
+        };
+      })
       .filter(link => link.url);
     return { links, sheetName };
   } catch (error) {
