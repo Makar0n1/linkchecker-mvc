@@ -17,6 +17,7 @@ const frontendLinkSchema = new mongoose.Schema({
   linkType: { type: String },
   anchorText: { type: String },
   canonicalUrl: { type: String },
+  redirectUrl: { type: String }, // Новое поле для хранения конечного URL после перенаправления
   overallStatus: { type: String },
   errorDetails: { type: String },
   lastChecked: { type: Date },
