@@ -27,7 +27,11 @@ const GoogleSheets = ({
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
   const [progressData, setProgressData] = useState({});
-  const [taskIds, setTaskIds] = useState({});
+  const [taskIds, setTaskIds] = useState(() => {
+    // Восстанавливаем taskIds из localStorage при загрузке
+    const savedTaskIds = localStorage.getItem(`taskIds-${projectId}`);
+    return savedTaskIds ? JSON.parse(savedTaskIds) : {};
+  });
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -58,6 +62,7 @@ const GoogleSheets = ({
         setLoading(false);
         setProgressData({});
         setTaskIds({});
+        localStorage.removeItem(`taskIds-${projectId}`);
       }
     } catch (err) {
       console.error('Error fetching analysis status:', err);
@@ -68,7 +73,7 @@ const GoogleSheets = ({
     const token = localStorage.getItem('token');
     console.log(`Starting SSE for spreadsheet ${spreadsheetId}, task ${taskId}`);
     const eventSource = new EventSource(`${apiBaseUrl}/${projectId}/task-progress-sse/${taskId}?token=${token}`);
-  
+
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       console.log(`SSE message received for task ${taskId}:`, data);
@@ -92,6 +97,7 @@ const GoogleSheets = ({
         setTaskIds(prev => {
           const newTaskIds = { ...prev };
           delete newTaskIds[spreadsheetId];
+          localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
           return newTaskIds;
         });
         setIsProjectAnalyzing(false);
@@ -99,12 +105,12 @@ const GoogleSheets = ({
         eventSource.close();
       }
     };
-  
+
     eventSource.onerror = (error) => {
       console.error(`SSE error for task ${taskId}:`, error);
       eventSource.close();
     };
-  
+
     return eventSource;
   };
 
@@ -113,7 +119,6 @@ const GoogleSheets = ({
 
     const statusInterval = setInterval(fetchAnalysisStatus, 10000);
 
-    // Запускаем SSE для каждого активного taskId
     const eventSources = {};
     Object.keys(taskIds).forEach(spreadsheetId => {
       const taskId = taskIds[spreadsheetId];
@@ -162,14 +167,13 @@ const GoogleSheets = ({
     const token = localStorage.getItem('token');
     setLoading(true);
     try {
-      // Проверяем, что все поля заполнены, но разрешаем gid быть 0
       const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = form;
       if (!spreadsheetId || gid === '' || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
         setError('All fields are required');
         setLoading(false);
         return;
       }
-  
+
       const response = await axios.post(
         `${apiBaseUrl}/${projectId}/spreadsheets`,
         { ...form, gid: parseInt(form.gid), intervalHours: parseInt(form.intervalHours) },
@@ -212,10 +216,11 @@ const GoogleSheets = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       const { taskId } = response.data;
-      setTaskIds(prev => ({
-        ...prev,
-        [spreadsheetId]: taskId,
-      }));
+      setTaskIds(prev => {
+        const newTaskIds = { ...prev, [spreadsheetId]: taskId };
+        localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
+        return newTaskIds;
+      });
       const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -233,6 +238,7 @@ const GoogleSheets = ({
       setTaskIds(prev => {
         const newTaskIds = { ...prev };
         delete newTaskIds[spreadsheetId];
+        localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
         return newTaskIds;
       });
     }
@@ -259,6 +265,7 @@ const GoogleSheets = ({
       setTaskIds(prev => {
         const newTaskIds = { ...prev };
         delete newTaskIds[spreadsheetId];
+        localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
         return newTaskIds;
       });
     } catch (err) {

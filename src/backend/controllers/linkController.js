@@ -990,21 +990,22 @@ const updateProfile = async (req, res) => {
   }
 };
 
-const checkLinkStatus = async (link) => {
+const checkLinkStatus = async (link, browser) => {
   let page;
-  let browser;
-  try {
-    const targetDomains = link.targetDomains || (link.targetDomain ? [link.targetDomain] : []);
-    if (!targetDomains.length) {
-      throw new Error('No target domains specified for link');
-    }
-    console.log(`Checking URL: ${link.url} for domains: ${targetDomains.join(', ')}`);
+  let attempt = 0;
+  const maxAttempts = 3;
 
-    browser = await initializeBrowser();
-    page = await browser.newPage();
-    await page.setDefaultNavigationTimeout(60000);
+  while (attempt < maxAttempts) {
+    try {
+      console.log(`Attempt ${attempt + 1} to check link ${link.url}`);
+      if (!browser) {
+        browser = await initializeBrowser();
+      }
 
-    const userAgents = [
+      page = await browser.newPage();
+      await page.setDefaultNavigationTimeout(60000);
+
+      const userAgents = [
       {
         ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
         headers: {
@@ -1271,7 +1272,7 @@ const checkLinkStatus = async (link) => {
       }
     }
 
-    const cleanTargetDomains = targetDomains.map(domain =>
+    const cleanTargetDomains = link.targetDomains.map(domain =>
       domain
         .replace(/^https?:\/\//, '')
         .replace(/^\/+/, '')
@@ -1522,6 +1523,7 @@ const checkLinkStatus = async (link) => {
         await link.save();
       }
     }
+
     const findLinkForDomains = (targetDomains) => {
       let foundLink = null;
 
@@ -1681,24 +1683,31 @@ const checkLinkStatus = async (link) => {
     await link.save();
     return link;
   } catch (error) {
-    console.error(`Critical error in checkLinkStatus for ${link.url}:`, error);
-    link.status = 'broken';
-    link.errorDetails = error.message;
-    link.rel = 'error';
-    link.linkType = 'unknown';
-    link.anchorText = 'error';
-    link.isIndexable = false;
-    link.indexabilityStatus = `check failed: ${error.message}`;
-    link.responseCode = 'Error';
-    link.overallStatus = 'Problem';
-    await link.save();
-    return link;
+    console.error(`Critical error in checkLinkStatus for ${link.url} on attempt ${attempt + 1}:`, error);
+    attempt += 1;
+    if (page) {
+      await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
+    }
+    if (attempt === maxAttempts) {
+      link.status = 'broken';
+      link.errorDetails = `Failed after ${maxAttempts} attempts: ${error.message}`;
+      link.rel = 'error';
+      link.linkType = 'unknown';
+      link.anchorText = 'error';
+      link.isIndexable = false;
+      link.indexabilityStatus = `check failed: ${error.message}`;
+      link.responseCode = 'Error';
+      link.overallStatus = 'Problem';
+      await link.save();
+      return link;
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000));
   } finally {
     if (page) {
       await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
     }
-    await closeBrowser(browser);
   }
+}
 };
 
 const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spreadsheetId, taskId) => {
@@ -1730,72 +1739,81 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
     const memoryUsage = process.memoryUsage();
     console.log(`Memory usage before batch: RSS=${(memoryUsage.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
 
-    const startTime = Date.now();
-    const batchResults = await Promise.all(
-      batch.map(link => limit(async () => {
-        console.log(`Starting analysis for link: ${link.url}`);
-        try {
-          const updatedLink = await checkLinkStatus(link);
-          console.log(`Finished analysis for link: ${link.url}, status: ${updatedLink.status}, overallStatus: ${updatedLink.overallStatus}`);
+    let browser;
+    try {
+      browser = await initializeBrowser();
+      const startTime = Date.now();
+      const batchResults = await Promise.all(
+        batch.map(link => limit(async () => {
+          console.log(`Starting analysis for link: ${link.url}`);
+          try {
+            const updatedLink = await checkLinkStatus(link, browser);
+            console.log(`Finished analysis for link: ${link.url}, status: ${updatedLink.status}, overallStatus: ${updatedLink.overallStatus}`);
 
-          // Обновляем прогресс после каждой ссылки
-          processedLinks += 1;
-          const batchTime = Date.now() - startTime;
-          totalProcessingTime += batchTime;
-          const avgTimePerLink = totalProcessingTime / processedLinks;
-          const remainingLinks = totalLinks - processedLinks;
-          const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
-          const progress = Math.round((processedLinks / totalLinks) * 100);
+            processedLinks += 1;
+            const batchTime = Date.now() - startTime;
+            totalProcessingTime += batchTime;
+            const avgTimePerLink = totalProcessingTime / processedLinks;
+            const remainingLinks = totalLinks - processedLinks;
+            const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
+            const progress = Math.round((processedLinks / totalLinks) * 100);
 
-          await AnalysisTask.findByIdAndUpdate(taskId, {
-            $set: {
-              progress,
-              processedLinks,
-              totalLinks,
-              estimatedTimeRemaining,
-            },
-          });
-          console.log(`Updated progress for task ${taskId}: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
+            await AnalysisTask.findByIdAndUpdate(taskId, {
+              $set: {
+                progress,
+                processedLinks,
+                totalLinks,
+                estimatedTimeRemaining,
+              },
+            });
+            console.log(`Updated progress for task ${taskId}: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
 
-          return updatedLink;
-        } catch (error) {
-          console.error(`Error processing link ${link.url}:`, error);
-          link.status = 'broken';
-          link.errorDetails = `Failed during analysis: ${error.message}`;
-          link.overallStatus = 'Problem';
-          await link.save();
+            return updatedLink;
+          } catch (error) {
+            console.error(`Error processing link ${link.url}:`, error);
+            link.status = 'broken';
+            link.errorDetails = `Failed during analysis: ${error.message}`;
+            link.overallStatus = 'Problem';
+            await link.save();
 
-          // Обновляем прогресс даже при ошибке
-          processedLinks += 1;
-          const batchTime = Date.now() - startTime;
-          totalProcessingTime += batchTime;
-          const avgTimePerLink = totalProcessingTime / processedLinks;
-          const remainingLinks = totalLinks - processedLinks;
-          const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
-          const progress = Math.round((processedLinks / totalLinks) * 100);
+            processedLinks += 1;
+            const batchTime = Date.now() - startTime;
+            totalProcessingTime += batchTime;
+            const avgTimePerLink = totalProcessingTime / processedLinks;
+            const remainingLinks = totalLinks - processedLinks;
+            const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
+            const progress = Math.round((processedLinks / totalLinks) * 100);
 
-          await AnalysisTask.findByIdAndUpdate(taskId, {
-            $set: {
-              progress,
-              processedLinks,
-              totalLinks,
-              estimatedTimeRemaining,
-            },
-          });
-          console.log(`Updated progress for task ${taskId} after error: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
+            await AnalysisTask.findByIdAndUpdate(taskId, {
+              $set: {
+                progress,
+                processedLinks,
+                totalLinks,
+                estimatedTimeRemaining,
+              },
+            });
+            console.log(`Updated progress for task ${taskId} after error: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
 
-          return link;
-        }
-      }))
-    );
+            return link;
+          }
+        }))
+      );
 
-    results.push(...batchResults);
-    console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
+      results.push(...batchResults);
+      console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
 
-    const memoryUsageAfter = process.memoryUsage();
-    console.log(`Memory usage after batch: RSS=${(memoryUsageAfter.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsageAfter.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsageAfter.heapUsed / 1024 / 1024).toFixed(2)}MB`);
+      const memoryUsageAfter = process.memoryUsage();
+      console.log(`Memory usage after batch: RSS=${(memoryUsageAfter.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsageAfter.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsageAfter.heapUsed / 1024 / 1024).toFixed(2)}MB`);
 
-    await new Promise(resolve => setTimeout(resolve, 5000));
+      await closeBrowser(browser);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    } catch (error) {
+      console.error(`Critical error in processLinksInBatches for batch ${Math.floor(i / batchSize) + 1}:`, error);
+      if (browser) {
+        await closeBrowser(browser);
+      }
+      throw error; // Передаем ошибку вверх, чтобы очередь могла обработать
+    }
   }
 
   const pendingLinks = await FrontendLink.find({ status: 'checking' });
@@ -1814,80 +1832,85 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
 };
 
 const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId) => {
-  const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId });
-  if (!existingSpreadsheet) {
-    throw new Error('Spreadsheet not found');
-  }
+  try {
+    const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId });
+    if (!existingSpreadsheet) {
+      throw new Error('Spreadsheet not found');
+    }
 
-  const { links, sheetName } = await importFromGoogleSheets(
-    spreadsheet.spreadsheetId,
-    spreadsheet.targetDomain,
-    spreadsheet.urlColumn,
-    spreadsheet.targetColumn,
-    spreadsheet.gid,
-  );
+    const { links, sheetName } = await importFromGoogleSheets(
+      spreadsheet.spreadsheetId,
+      spreadsheet.targetDomain,
+      spreadsheet.urlColumn,
+      spreadsheet.targetColumn,
+      spreadsheet.gid,
+    );
 
-  if (links.length > maxLinks) {
-    throw new Error(`Link limit exceeded for your plan (${maxLinks} links)`);
-  }
+    if (links.length > maxLinks) {
+      throw new Error(`Link limit exceeded for your plan (${maxLinks} links)`);
+    }
 
-  const dbLinks = await Promise.all(
-    links.map(async link => {
-      const newLink = new FrontendLink({
-        url: link.url,
-        targetDomains: link.targetDomains,
-        userId: spreadsheet.userId,
-        projectId: spreadsheet.projectId,
-        spreadsheetId: spreadsheet.spreadsheetId,
-        source: 'google_sheets',
-        status: 'pending',
-        rowIndex: link.rowIndex,
-      });
-      await newLink.save();
-      return newLink;
-    })
-  );
-
-  const updatedLinks = await processLinksInBatches(dbLinks, 20, projectId, wss, spreadsheet.spreadsheetId, taskId);
-
-  if (cancelAnalysis) {
-    throw new Error('Analysis cancelled');
-  }
-
-  const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
-    { _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId },
-    {
-      $set: {
-        links: updatedLinks.map(link => ({
+    const dbLinks = await Promise.all(
+      links.map(async link => {
+        const newLink = new FrontendLink({
           url: link.url,
-          targetDomain: link.targetDomains.join(', '),
-          status: link.status,
-          responseCode: link.responseCode,
-          isIndexable: link.isIndexable,
-          canonicalUrl: link.canonicalUrl,
-          rel: link.rel,
-          linkType: link.linkType,
-          lastChecked: link.lastChecked,
-        })),
-        gid: spreadsheet.gid,
+          targetDomains: link.targetDomains,
+          userId: spreadsheet.userId,
+          projectId: spreadsheet.projectId,
+          spreadsheetId: spreadsheet.spreadsheetId,
+          source: 'google_sheets',
+          status: 'pending',
+          rowIndex: link.rowIndex,
+        });
+        await newLink.save();
+        return newLink;
+      })
+    );
+
+    const updatedLinks = await processLinksInBatches(dbLinks, 20, projectId, wss, spreadsheet.spreadsheetId, taskId);
+
+    if (cancelAnalysis) {
+      throw new Error('Analysis cancelled');
+    }
+
+    const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
+      { _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId },
+      {
+        $set: {
+          links: updatedLinks.map(link => ({
+            url: link.url,
+            targetDomain: link.targetDomains.join(', '),
+            status: link.status,
+            responseCode: link.responseCode,
+            isIndexable: link.isIndexable,
+            canonicalUrl: link.canonicalUrl,
+            rel: link.rel,
+            linkType: link.linkType,
+            lastChecked: link.lastChecked,
+          })),
+          gid: spreadsheet.gid,
+        },
       },
-    },
-    { new: true, runValidators: true },
-  );
+      { new: true, runValidators: true },
+    );
 
-  if (!updatedSpreadsheet) {
-    throw new Error('Spreadsheet not found during update');
+    if (!updatedSpreadsheet) {
+      throw new Error('Spreadsheet not found during update');
+    }
+
+    const { default: pLimitModule } = await import('p-limit');
+    const pLimit = pLimitModule;
+
+    const limit = pLimit(5);
+    await Promise.all(updatedLinks.map(link =>
+      limit(() => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName))
+    ));
+
+    await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd);
+  } catch (error) {
+    console.error(`Critical error in analyzeSpreadsheet for spreadsheet ${spreadsheet._id}:`, error);
+    throw error; // Передаем ошибку в очередь для корректной обработки
   }
-
-  const { default: pLimitModule } = await import('p-limit');
-  const pLimit = pLimitModule;
-
-  const limit = pLimit(5);
-  await Promise.all(updatedLinks.map(link =>
-    limit(() => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName))
-  ));
-
-  await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd);
 };
 
 const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlColumn, targetColumn, gid) => {
