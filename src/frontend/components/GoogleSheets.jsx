@@ -162,6 +162,14 @@ const GoogleSheets = ({
     const token = localStorage.getItem('token');
     setLoading(true);
     try {
+      // Проверяем, что все поля заполнены, но разрешаем gid быть 0
+      const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = form;
+      if (!spreadsheetId || gid === '' || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
+        setError('All fields are required');
+        setLoading(false);
+        return;
+      }
+  
       const response = await axios.post(
         `${apiBaseUrl}/${projectId}/spreadsheets`,
         { ...form, gid: parseInt(form.gid), intervalHours: parseInt(form.intervalHours) },

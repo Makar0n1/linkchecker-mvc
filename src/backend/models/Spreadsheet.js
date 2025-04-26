@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const spreadsheetSchema = new mongoose.Schema({
   spreadsheetId: { type: String, required: true },
-  gid: { type: Number, required: true },
+  gid: { type: Number, required: true, min: 0 },
   targetDomain: { type: String, required: true },
   urlColumn: { type: String, required: true },
   targetColumn: { type: String, required: true },
