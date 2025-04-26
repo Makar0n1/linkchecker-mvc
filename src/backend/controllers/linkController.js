@@ -2,6 +2,7 @@ const FrontendLink = require('../models/FrontendLink');
 const Spreadsheet = require('../models/Spreadsheet');
 const User = require('../models/User');
 const Project = require('../models/Project');
+const AnalysisTask = require('../models/AnalysisTask');
 const puppeteer = require('puppeteer');
 const cheerio = require('cheerio');
 const { Solver } = require('2captcha');
@@ -26,13 +27,32 @@ const analysisQueue = async.queue((task, callback) => {
     return callback(new Error('Handler is not a function'));
   }
 
-  task.handler(task, (err, result) => {
-    if (err) {
-      console.error(`Error in queued analysis for project ${task.projectId}, type: ${task.type}:`, err);
-      return callback(err);
-    }
-    console.log(`Finished queued analysis for project ${task.projectId}, type: ${task.type}`);
-    callback(null, result);
+  // Обновляем статус задачи на 'processing'
+  AnalysisTask.findOneAndUpdate(
+    { _id: task.taskId, status: 'pending' },
+    { $set: { status: 'processing' } },
+    { new: true }
+  ).then(() => {
+    task.handler(task, (err, result) => {
+      if (err) {
+        console.error(`Error in queued analysis for project ${task.projectId}, type: ${task.type}:`, err);
+        // Обновляем статус на 'failed'
+        AnalysisTask.findOneAndUpdate(
+          { _id: task.taskId },
+          { $set: { status: 'failed', error: err.message } }
+        ).then(() => callback(err));
+        return;
+      }
+      console.log(`Finished queued analysis for project ${task.projectId}, type: ${task.type}`);
+      // Обновляем статус на 'completed'
+      AnalysisTask.findOneAndUpdate(
+        { _id: task.taskId },
+        { $set: { status: 'completed' } }
+      ).then(() => callback(null, result));
+    });
+  }).catch(err => {
+    console.error(`Error updating task status to processing for task ${task.taskId}:`, err);
+    callback(err);
   });
 }, MAX_CONCURRENT_ANALYSES);
 
@@ -43,6 +63,162 @@ analysisQueue.drain(() => {
 analysisQueue.error((err, task) => {
   console.error(`Error in analysis queue for project ${task.projectId}, type: ${task.type}:`, err);
 });
+
+
+const loadPendingTasks = async () => {
+  try {
+    const pendingTasks = await AnalysisTask.find({ status: 'pending' });
+    console.log(`Found ${pendingTasks.length} pending tasks to process`);
+    for (const task of pendingTasks) {
+      if (task.type === 'checkLinks') {
+        const project = await Project.findById(task.projectId);
+        if (!project) {
+          console.log(`Project ${task.projectId} not found, marking task as failed`);
+          await AnalysisTask.findByIdAndUpdate(task._id, { $set: { status: 'failed', error: 'Project not found' } });
+          continue;
+        }
+        const links = await FrontendLink.find({ projectId: task.projectId, source: 'manual' });
+        analysisQueue.push({
+          taskId: task._id,
+          projectId: task.projectId,
+          type: task.type,
+          req: task.data.req || null,
+          res: task.data.res || null,
+          userId: task.data.userId,
+          handler: (task, callback) => {
+            let project;
+            Project.findOne({ _id: task.projectId, userId: task.userId })
+              .then(proj => {
+                if (!proj) throw new Error('Project not found in handler');
+                project = proj;
+                project.isAnalyzing = true;
+                return project.save();
+              })
+              .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
+              .then(() => processLinksInBatches(links, 20))
+              .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
+              .then(updatedLinks => {
+                console.log(`Finished link check for project ${task.projectId}`);
+                if (task.res && !task.res.headersSent) {
+                  task.res.json(updatedLinks);
+                }
+                const wss = task.req?.wss;
+                if (wss) {
+                  wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
+                      client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
+                    }
+                  });
+                }
+                callback(null, updatedLinks);
+              })
+              .catch(error => {
+                console.error(`Error in checkLinks for project ${task.projectId}:`, error);
+                if (task.res && !task.res.headersSent) {
+                  task.res.status(500).json({ error: 'Error checking links', details: error.message });
+                }
+                callback(error);
+              })
+              .finally(() => {
+                if (project) {
+                  project.isAnalyzing = false;
+                  project.save()
+                    .then(() => console.log(`checkLinks handler: Set isAnalyzing to false for project ${task.projectId}`))
+                    .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
+                }
+              });
+          },
+        });
+      } else if (task.type === 'runSpreadsheetAnalysis') {
+        const spreadsheet = await Spreadsheet.findOne({ _id: task.data.spreadsheetId, projectId: task.projectId });
+        if (!spreadsheet) {
+          console.log(`Spreadsheet ${task.data.spreadsheetId} not found, marking task as failed`);
+          await AnalysisTask.findByIdAndUpdate(task._id, { $set: { status: 'failed', error: 'Spreadsheet not found' } });
+          continue;
+        }
+        analysisQueue.push({
+          taskId: task._id,
+          projectId: task.projectId,
+          type: task.type,
+          req: task.data.req || null,
+          res: task.data.res || null,
+          userId: task.data.userId,
+          handler: (task, callback) => {
+            let project;
+            Project.findOne({ _id: task.projectId, userId: task.userId })
+              .then(proj => {
+                if (!proj) throw new Error('Project not found in handler');
+                project = proj;
+                project.isAnalyzing = true;
+                return project.save();
+              })
+              .then(() => {
+                spreadsheet.status = 'checking';
+                return spreadsheet.save();
+              })
+              .then(() => {
+                cancelAnalysis = false;
+                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks);
+              })
+              .then(() => {
+                if (cancelAnalysis) {
+                  throw new Error('Analysis cancelled');
+                }
+                spreadsheet.status = 'completed';
+                spreadsheet.lastRun = new Date();
+                spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
+                return spreadsheet.save();
+              })
+              .then(() => {
+                console.log(`Finished spreadsheet analysis for spreadsheet ${spreadsheet._id}`);
+                if (task.res && !task.res.headersSent) {
+                  task.res.json({ message: 'Analysis completed' });
+                }
+                const wss = task.req?.wss;
+                if (wss) {
+                  wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
+                      client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
+                    }
+                  });
+                }
+                callback(null);
+              })
+              .catch(error => {
+                console.error(`Error analyzing spreadsheet ${spreadsheet._id} in project ${task.projectId}:`, error);
+                spreadsheet.status = error.message === 'Analysis cancelled' ? 'pending' : 'error';
+                spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
+                spreadsheet.save()
+                  .then(() => {
+                    if (task.res && !task.res.headersSent) {
+                      if (error.message === 'Analysis cancelled') {
+                        task.res.json({ message: 'Analysis cancelled' });
+                      } else {
+                        task.res.status(500).json({ error: 'Error analyzing spreadsheet', details: error.message });
+                      }
+                    }
+                    callback(error);
+                  });
+              })
+              .finally(() => {
+                if (project) {
+                  project.isAnalyzing = false;
+                  project.save()
+                    .then(() => console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`))
+                    .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
+                }
+              });
+          },
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error loading pending tasks:', error);
+  }
+};
+
+// Вызываем при старте сервера
+loadPendingTasks();
 
 const solver = new Solver(process.env.TWOCAPTCHA_API_KEY);
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -345,7 +521,7 @@ const checkLinks = async (req, res) => {
     return res.status(409).json({ error: 'Analysis is already in progress for this project' });
   }
 
-  const links = await FrontendLink.find({ projectId });
+  const links = await FrontendLink.find({ projectId, source: 'manual' });
 
   const planLinkCheckLimits = {
     free: 20,
@@ -361,7 +537,17 @@ const checkLinks = async (req, res) => {
 
   console.log(`Adding checkLinks task to queue for project ${projectId} with ${links.length} links`);
 
+  // Сохраняем задачу в базу
+  const task = new AnalysisTask({
+    projectId,
+    type: 'checkLinks',
+    status: 'pending',
+    data: { req, res, userId: req.userId },
+  });
+  await task.save();
+
   analysisQueue.push({
+    taskId: task._id,
     projectId,
     type: 'checkLinks',
     req,
@@ -385,8 +571,7 @@ const checkLinks = async (req, res) => {
           if (!task.res.headersSent) {
             task.res.json(updatedLinks);
           }
-          // Отправляем уведомление через WebSocket
-          const wss = task.req.wss; // Получаем wss из req
+          const wss = task.req.wss;
           wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
               client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
@@ -544,7 +729,17 @@ const runSpreadsheetAnalysis = async (req, res) => {
 
   console.log(`Adding runSpreadsheetAnalysis task to queue for spreadsheet ${spreadsheetId} in project ${projectId}`);
 
+  // Сохраняем задачу в базу
+  const task = new AnalysisTask({
+    projectId,
+    type: 'runSpreadsheetAnalysis',
+    status: 'pending',
+    data: { req, res, userId: req.userId, spreadsheetId, maxLinks },
+  });
+  await task.save();
+
   analysisQueue.push({
+    taskId: task._id,
     projectId,
     type: 'runSpreadsheetAnalysis',
     req,
@@ -581,8 +776,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
           if (!task.res.headersSent) {
             task.res.json({ message: 'Analysis completed' });
           }
-          // Отправляем уведомление через WebSocket
-          const wss = task.req.wss; // Получаем wss из req
+          const wss = task.req.wss;
           wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
               client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
@@ -1859,6 +2053,19 @@ const scheduleSpreadsheetAnalysis = async (spreadsheet) => {
     });
   });
 };
+const getAnalysisStatus = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const tasks = await AnalysisTask.find({ projectId, status: { $in: ['pending', 'processing'] } });
+    res.json({ isAnalyzing: project.isAnalyzing || tasks.length > 0 });
+  } catch (error) {
+    console.error('getAnalysisStatus: Error fetching analysis status', error);
+    res.status(500).json({ error: 'Error fetching analysis status', details: error.message });
+  }
+};
 
 // Экспортируем все функции
 module.exports = {
@@ -1883,6 +2090,7 @@ module.exports = {
   cancelSubscription: [authMiddleware, cancelSubscription],
   deleteAccount: [authMiddleware, deleteAccount],
   updateProfile: [authMiddleware, updateProfile],
+  getAnalysisStatus: [authMiddleware, getAnalysisStatus], // Добавляем новый маршрут
   checkLinkStatus,
   analyzeSpreadsheet,
   scheduleSpreadsheetAnalysis,

@@ -13,7 +13,7 @@ const GoogleSheets = ({
   setError,
   isAnalyzing,
 }) => {
-  const navigate = useNavigate(); // Для навигации
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     spreadsheetId: '',
     gid: '',
@@ -24,50 +24,93 @@ const GoogleSheets = ({
     resultRangeEnd: '',
     intervalHours: 4,
   });
-  const [timers, setTimers] = useState({}); // Состояние для таймеров
+  const [timers, setTimers] = useState({});
+  const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
-  useEffect(() => {
+  const wsBaseUrl = import.meta.env.MODE === 'production'
+    ? `wss://api.link-check-pro.top`
+    : `ws://localhost:${import.meta.env.VITE_BACKEND_PORT}`;
+
+  const fetchSpreadsheets = async () => {
     const token = localStorage.getItem('token');
-    const fetchSpreadsheets = async () => {
-      try {
-        const response = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setSpreadsheets(response.data);
-      } catch (err) {
-        setError(err.response?.data?.error || 'Failed to fetch spreadsheets');
+    try {
+      const response = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setSpreadsheets(response.data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to fetch spreadsheets');
+    }
+  };
+
+  const fetchAnalysisStatus = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const response = await axios.get(`${apiBaseUrl}/${projectId}/analysis-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setIsProjectAnalyzing(response.data.isAnalyzing);
+      if (!response.data.isAnalyzing && runningIds.length > 0) {
+        fetchSpreadsheets();
+        setRunningIds([]);
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error('Error fetching analysis status:', err);
+    }
+  };
+
+  const connectWebSocket = () => {
+    const ws = new WebSocket(wsBaseUrl);
+
+    ws.onopen = () => {
+      console.log('Connected to WebSocket');
+      ws.send(JSON.stringify({ type: 'subscribe', projectId }));
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('WebSocket message received:', data);
+      if (data.type === 'analysisComplete' && data.projectId === projectId) {
+        console.log(`Analysis completed for project ${projectId}, fetching updated spreadsheets`);
+        fetchSpreadsheets();
+        setRunningIds([]);
+        setLoading(false);
+        setIsProjectAnalyzing(false);
       }
     };
 
+    ws.onclose = () => {
+      console.log('Disconnected from WebSocket, attempting to reconnect in 5 seconds...');
+      setTimeout(connectWebSocket, 5000);
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      ws.close();
+    };
+
+    return ws;
+  };
+
+  useEffect(() => {
     fetchSpreadsheets();
 
-    let intervalId;
-    if (runningIds.length > 0) {
-      intervalId = setInterval(async () => {
-        try {
-          const response = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          setSpreadsheets(response.data);
-          const stillRunning = response.data.filter(s => runningIds.includes(s._id)).some(s => s.status === 'checking');
-          if (!stillRunning) {
-            setRunningIds([]);
-            setLoading(false);
-          }
-        } catch (err) {
-          console.error('Error during polling:', err);
-        }
-      }, 5000);
-    }
+    const ws = connectWebSocket();
 
-    return () => clearInterval(intervalId);
+    // Проверяем статус анализа каждые 10 секунд
+    const statusInterval = setInterval(fetchAnalysisStatus, 10000);
+
+    return () => {
+      ws.close();
+      clearInterval(statusInterval);
+    };
   }, [projectId, setSpreadsheets, setError, runningIds, setLoading]);
 
-  // Обновляем таймеры каждую секунду
   useEffect(() => {
     const intervalId = setInterval(() => {
       const newTimers = {};
@@ -143,6 +186,8 @@ const GoogleSheets = ({
       setError(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to run analysis');
+      setRunningIds(runningIds.filter(id => id !== spreadsheetId));
+      setLoading(false);
     }
   };
 
@@ -204,7 +249,6 @@ const GoogleSheets = ({
       animate="visible"
       variants={fadeInUp}
     >
-      {/* Кнопка "Назад" */}
       <button
         onClick={() => navigate('/app/projects')}
         className="mb-4 flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors"
@@ -236,13 +280,13 @@ const GoogleSheets = ({
             min={field.min}
             max={field.max}
             className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
-            disabled={isAnalyzing}
+            disabled={isProjectAnalyzing}
           />
         ))}
         <button
           type="submit"
           className="col-span-2 bg-green-500 text-white p-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
-          disabled={isAnalyzing}
+          disabled={isProjectAnalyzing}
         >
           Add Spreadsheet
         </button>
@@ -285,15 +329,15 @@ const GoogleSheets = ({
                   <>
                     <button
                       onClick={() => runAnalysis(s._id)}
-                      disabled={isRunning || isAnalyzing}
-                      className={`bg-green-500 text-white px-4 py-1 rounded-lg ${isRunning || isAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
+                      disabled={isRunning || isProjectAnalyzing}
+                      className={`bg-green-500 text-white px-4 py-1 rounded-lg ${isRunning || isProjectAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
                     >
                       {isRunning ? 'Running...' : 'Run'}
                     </button>
                     <button
                       onClick={() => deleteSpreadsheet(s._id)}
-                      disabled={isRunning || isAnalyzing}
-                      className={`bg-red-500 text-white px-4 py-1 rounded-lg ${isRunning || isAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
+                      disabled={isRunning || isProjectAnalyzing}
+                      className={`bg-red-500 text-white px-4 py-1 rounded-lg ${isRunning || isProjectAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
                     >
                       Delete
                     </button>

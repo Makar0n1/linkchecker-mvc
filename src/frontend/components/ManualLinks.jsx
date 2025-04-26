@@ -41,27 +41,25 @@ const ManualLinks = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       setLinks(response.data);
-      
+      console.log('Fetched links:', response.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch links');
     }
   };
 
-  useEffect(() => {
-    fetchLinks();
-
-    // Подключение к WebSocket
+  const connectWebSocket = () => {
     const ws = new WebSocket(wsBaseUrl);
 
     ws.onopen = () => {
+      console.log('Connected to WebSocket');
       ws.send(JSON.stringify({ type: 'subscribe', projectId }));
     };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      
+      console.log('WebSocket message received:', data);
       if (data.type === 'analysisComplete' && data.projectId === projectId) {
-        
+        console.log(`Analysis completed for project ${projectId}, fetching updated links`);
         fetchLinks();
         setLoading(false);
         setCheckingLinks(new Set());
@@ -69,12 +67,23 @@ const ManualLinks = ({
     };
 
     ws.onclose = () => {
-      
+      console.log('Disconnected from WebSocket, attempting to reconnect in 5 seconds...');
+      setTimeout(connectWebSocket, 5000); // Переподключаемся через 5 секунд
     };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
+      ws.close(); // Закрываем соединение, чтобы сработал onclose и переподключение
     };
+
+    return ws;
+  };
+
+  useEffect(() => {
+    fetchLinks();
+
+    // Подключение к WebSocket
+    const ws = connectWebSocket();
 
     return () => {
       ws.close();
