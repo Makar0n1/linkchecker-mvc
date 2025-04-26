@@ -5,7 +5,7 @@ const linkController = require('../controllers/linkController');
 router.post('/register', linkController.registerUser);
 router.post('/login', linkController.loginUser);
 router.get('/user', linkController.getUserInfo);
-router.get('/user/tasks', getUserTasks);
+router.get('/user/tasks', linkController.getUserTasks);
 router.get('/:projectId/analysis-status', linkController.getAnalysisStatus);
 router.get('/:projectId/task-progress/:taskId', linkController.getTaskProgress);
 router.get('/:projectId/task-progress-sse/:taskId', linkController.getTaskProgressSSE);
