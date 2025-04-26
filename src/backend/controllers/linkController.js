@@ -82,9 +82,10 @@ const loadPendingTasks = async () => {
           taskId: task._id,
           projectId: task.projectId,
           type: task.type,
-          req: task.data.req || null,
-          res: task.data.res || null,
+          req: null, // req недоступен при перезапуске
+          res: null, // res недоступен при перезапуске
           userId: task.data.userId,
+          wss: null, // wss недоступен при перезапуске
           handler: (task, callback) => {
             let project;
             Project.findOne({ _id: task.projectId, userId: task.userId })
@@ -95,14 +96,14 @@ const loadPendingTasks = async () => {
                 return project.save();
               })
               .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
-              .then(() => processLinksInBatches(links, 20, task.projectId, task.req?.wss)) // Передаём projectId и wss
+              .then(() => processLinksInBatches(links, 20, task.projectId, task.wss))
               .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
               .then(updatedLinks => {
                 console.log(`Finished link check for project ${task.projectId}`);
                 if (task.res && !task.res.headersSent) {
                   task.res.json(updatedLinks);
                 }
-                const wss = task.req?.wss;
+                const wss = task.wss;
                 if (wss) {
                   wss.clients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
@@ -140,9 +141,10 @@ const loadPendingTasks = async () => {
           taskId: task._id,
           projectId: task.projectId,
           type: task.type,
-          req: task.data.req || null,
-          res: task.data.res || null,
+          req: null,
+          res: null,
           userId: task.data.userId,
+          wss: null,
           handler: (task, callback) => {
             let project;
             Project.findOne({ _id: task.projectId, userId: task.userId })
@@ -158,7 +160,7 @@ const loadPendingTasks = async () => {
               })
               .then(() => {
                 cancelAnalysis = false;
-                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.req?.wss); // Передаём projectId и wss
+                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss);
               })
               .then(() => {
                 if (cancelAnalysis) {
@@ -174,7 +176,7 @@ const loadPendingTasks = async () => {
                 if (task.res && !task.res.headersSent) {
                   task.res.json({ message: 'Analysis completed' });
                 }
-                const wss = task.req?.wss;
+                const wss = task.wss;
                 if (wss) {
                   wss.clients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
@@ -541,7 +543,7 @@ const checkLinks = async (req, res) => {
     projectId,
     type: 'checkLinks',
     status: 'pending',
-    data: { req, res, userId: req.userId },
+    data: { userId: req.userId }, // Сохраняем только userId
   });
   await task.save();
 
@@ -552,6 +554,7 @@ const checkLinks = async (req, res) => {
     req,
     res,
     userId: req.userId,
+    wss: req.wss, // Передаём wss отдельно
     handler: (task, callback) => {
       console.log(`checkLinks handler: Starting analysis for project ${task.projectId}`);
       let project;
@@ -563,14 +566,14 @@ const checkLinks = async (req, res) => {
           return project.save();
         })
         .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
-        .then(() => processLinksInBatches(links, 20, task.projectId, task.req.wss)) // Передаём projectId и wss
+        .then(() => processLinksInBatches(links, 20, task.projectId, task.wss))
         .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
         .then(updatedLinks => {
           console.log(`Finished link check for project ${task.projectId}`);
           if (!task.res.headersSent) {
             task.res.json(updatedLinks);
           }
-          const wss = task.req.wss;
+          const wss = task.wss;
           wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
               client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
@@ -732,7 +735,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
     projectId,
     type: 'runSpreadsheetAnalysis',
     status: 'pending',
-    data: { req, res, userId: req.userId, spreadsheetId, maxLinks },
+    data: { userId: req.userId, spreadsheetId, maxLinks }, // Сохраняем только необходимые данные
   });
   await task.save();
 
@@ -743,6 +746,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
     req,
     res,
     userId: req.userId,
+    wss: req.wss, // Передаём wss отдельно
     handler: (task, callback) => {
       let project;
       Project.findOne({ _id: task.projectId, userId: task.userId })
@@ -758,7 +762,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
         })
         .then(() => {
           cancelAnalysis = false;
-          return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.req.wss); // Передаём projectId и wss
+          return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.wss);
         })
         .then(() => {
           if (cancelAnalysis) {
@@ -774,7 +778,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
           if (!task.res.headersSent) {
             task.res.json({ message: 'Analysis completed' });
           }
-          const wss = task.req.wss;
+          const wss = task.wss;
           wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
               client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
