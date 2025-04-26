@@ -59,7 +59,6 @@ const ManualLinks = ({
       const data = JSON.parse(event.data);
       console.log('WebSocket message received:', data);
       if (data.type === 'analysisComplete' && data.projectId === projectId) {
-        console.log(`Analysis completed for project ${projectId}, fetching updated links`);
         fetchLinks();
         setLoading(false);
         setCheckingLinks(new Set());
@@ -67,7 +66,6 @@ const ManualLinks = ({
     };
 
     ws.onclose = () => {
-      console.log('Disconnected from WebSocket, attempting to reconnect in 5 seconds...');
       setTimeout(connectWebSocket, 5000); // Переподключаемся через 5 секунд
     };
 

@@ -85,7 +85,6 @@ const GoogleSheets = ({
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log(`SSE message received for task ${taskId}:`, data);
       if (data.error) {
         console.error(data.error);
         eventSource.close();
@@ -101,7 +100,6 @@ const GoogleSheets = ({
         },
       }));
       if (data.status === 'completed' || data.status === 'failed') {
-        console.log(`Analysis completed/failed for spreadsheet ${spreadsheetId}, closing SSE`);
         setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
         setTaskIds(prev => {
           const newTaskIds = { ...prev };
@@ -115,7 +113,6 @@ const GoogleSheets = ({
     };
 
     eventSource.onerror = (error) => {
-      console.error(`SSE error for task ${taskId}:`, error);
       eventSource.close();
     };
 
