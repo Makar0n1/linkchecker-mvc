@@ -12,6 +12,7 @@ const axios = require('axios');
 const { google } = require('googleapis');
 const path = require('path');
 const async = require('async');
+//const { wss } = require('../server');
 
 let pLimit;
 (async () => {
@@ -96,16 +97,16 @@ const loadPendingTasks = async () => {
                 return project.save();
               })
               .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
-              .then(() => processLinksInBatches(links, 20, task.projectId, task.wss))
+              .then(() => processLinksInBatches(links, 20, task.projectId, task.wss, null, task.taskId))
               .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
               .then(updatedLinks => {
                 console.log(`Finished link check for project ${task.projectId}`);
                 if (task.res && !task.res.headersSent) {
                   task.res.json(updatedLinks);
                 }
-                const wss = task.wss;
-                if (wss) {
-                  wss.clients.forEach(client => {
+                const wssLocal = task.wss;
+                if (wssLocal) {
+                  wssLocal.clients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
                       client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
                     }
@@ -145,7 +146,7 @@ const loadPendingTasks = async () => {
           res: null,
           userId: task.data.userId,
           wss: null,
-          spreadsheetId: task.data.spreadsheetId, // Добавляем spreadsheetId
+          spreadsheetId: task.data.spreadsheetId,
           handler: (task, callback) => {
             let project;
             Project.findOne({ _id: task.projectId, userId: task.userId })
@@ -161,7 +162,7 @@ const loadPendingTasks = async () => {
               })
               .then(() => {
                 cancelAnalysis = false;
-                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss);
+                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss, task.taskId);
               })
               .then(() => {
                 if (cancelAnalysis) {
@@ -177,9 +178,9 @@ const loadPendingTasks = async () => {
                 if (task.res && !task.res.headersSent) {
                   task.res.json({ message: 'Analysis completed' });
                 }
-                const wss = task.wss;
-                if (wss) {
-                  wss.clients.forEach(client => {
+                const wssLocal = task.wss;
+                if (wssLocal) {
+                  wssLocal.clients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
                       client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId, spreadsheetId: task.spreadsheetId }));
                     }
@@ -269,20 +270,24 @@ const restartBrowser = async () => {
   return await initializeBrowser();
 };
 
-const authMiddleware = async (req, res, next) => {
-  const token = req.headers['authorization']?.split(' ')[1];
+const authMiddleware = (req, res, next) => {
+  let token = req.headers.authorization?.split(' ')[1]; // Проверяем заголовок Authorization: Bearer <token>
+  if (!token) {
+    token = req.query.token; // Если в заголовке нет, проверяем query-параметр token
+  }
+
   if (!token) {
     console.log('authMiddleware: No token provided');
     return res.status(401).json({ error: 'No token provided' });
   }
+
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    console.log(`authMiddleware: Token verified, userId: ${decoded.userId}`);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
     next();
   } catch (error) {
-    console.error('authMiddleware: Invalid token', error);
-    res.status(401).json({ error: 'Invalid token' });
+    console.log('authMiddleware: Invalid token', error.message);
+    return res.status(401).json({ error: 'Invalid token' });
   }
 };
 
@@ -544,7 +549,7 @@ const checkLinks = async (req, res) => {
     projectId,
     type: 'checkLinks',
     status: 'pending',
-    data: { userId: req.userId }, // Сохраняем только userId
+    data: { userId: req.userId },
   });
   await task.save();
 
@@ -555,7 +560,7 @@ const checkLinks = async (req, res) => {
     req,
     res,
     userId: req.userId,
-    wss: req.wss, // Передаём wss отдельно
+    wss: req.wss,
     handler: (task, callback) => {
       console.log(`checkLinks handler: Starting analysis for project ${task.projectId}`);
       let project;
@@ -567,15 +572,15 @@ const checkLinks = async (req, res) => {
           return project.save();
         })
         .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
-        .then(() => processLinksInBatches(links, 20, task.projectId, task.wss))
+        .then(() => processLinksInBatches(links, 20, task.projectId, task.wss, null, task.taskId))
         .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
         .then(updatedLinks => {
           console.log(`Finished link check for project ${task.projectId}`);
           if (!task.res.headersSent) {
             task.res.json(updatedLinks);
           }
-          const wss = task.wss;
-          wss.clients.forEach(client => {
+          const wssLocal = task.wss;
+          wssLocal.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
               client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
             }
@@ -748,7 +753,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
     res,
     userId: req.userId,
     wss: req.wss,
-    spreadsheetId, // Добавляем spreadsheetId в задачу
+    spreadsheetId,
     handler: (task, callback) => {
       let project;
       Project.findOne({ _id: task.projectId, userId: task.userId })
@@ -764,7 +769,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
         })
         .then(() => {
           cancelAnalysis = false;
-          return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.wss);
+          return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.wss, task.taskId);
         })
         .then(() => {
           if (cancelAnalysis) {
@@ -780,8 +785,8 @@ const runSpreadsheetAnalysis = async (req, res) => {
           if (!task.res.headersSent) {
             task.res.json({ message: 'Analysis completed' });
           }
-          const wss = task.wss;
-          wss.clients.forEach(client => {
+          const wssLocal = task.wss;
+          wssLocal.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
               client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId, spreadsheetId: task.spreadsheetId }));
             }
@@ -814,6 +819,8 @@ const runSpreadsheetAnalysis = async (req, res) => {
         });
     },
   });
+
+  res.json({ taskId: task._id });
 };
 
 const cancelSpreadsheetAnalysis = async (req, res) => {
@@ -1694,15 +1701,27 @@ const checkLinkStatus = async (link) => {
   }
 };
 
-const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spreadsheetId) => {
+const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spreadsheetId, taskId) => {
   const { default: pLimitModule } = await import('p-limit');
   const pLimit = pLimitModule;
   const results = [];
   const totalLinks = links.length;
 
+  console.log(`Starting processLinksInBatches: taskId=${taskId}, totalLinks=${totalLinks}`);
+
   const limit = pLimit(10);
   let processedLinks = 0;
   let totalProcessingTime = 0;
+
+  await AnalysisTask.findByIdAndUpdate(taskId, {
+    $set: {
+      totalLinks,
+      processedLinks: 0,
+      progress: 0,
+      estimatedTimeRemaining: 0,
+    },
+  });
+  console.log(`Initialized progress for task ${taskId}: totalLinks=${totalLinks}`);
 
   for (let i = 0; i < totalLinks; i += batchSize) {
     const batch = links.slice(i, i + batchSize);
@@ -1739,21 +1758,15 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
     const remainingLinks = totalLinks - processedLinks;
     const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
 
-    if (wss) {
-      wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN && client.projectId === projectId) {
-          client.send(JSON.stringify({
-            type: 'analysisProgress',
-            projectId,
-            spreadsheetId, // Добавляем spreadsheetId
-            progress,
-            processedLinks,
-            totalLinks,
-            estimatedTimeRemaining,
-          }));
-        }
-      });
-    }
+    await AnalysisTask.findByIdAndUpdate(taskId, {
+      $set: {
+        progress,
+        processedLinks,
+        totalLinks,
+        estimatedTimeRemaining,
+      },
+    });
+    console.log(`Updated progress for task ${taskId}: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
 
     results.push(...batchResults);
     console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
@@ -1779,7 +1792,7 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
   return results;
 };
 
-const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss) => {
+const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId) => {
   const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId });
   if (!existingSpreadsheet) {
     throw new Error('Spreadsheet not found');
@@ -1814,7 +1827,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss) => {
     })
   );
 
-  const updatedLinks = await processLinksInBatches(dbLinks, 20, projectId, wss, spreadsheet.spreadsheetId);
+  const updatedLinks = await processLinksInBatches(dbLinks, 20, projectId, wss, spreadsheet.spreadsheetId, taskId);
 
   if (cancelAnalysis) {
     throw new Error('Analysis cancelled');
@@ -2108,6 +2121,82 @@ const columnLetterToIndex = (letter) => {
   }
   return index - 1; // Google Sheets columns are 0-based
 };
+const getTaskProgress = async (req, res) => {
+  const { projectId, taskId } = req.params;
+  try {
+    const task = await AnalysisTask.findOne({ _id: taskId, projectId });
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    res.json({
+      progress: task.progress,
+      processedLinks: task.processedLinks,
+      totalLinks: task.totalLinks,
+      estimatedTimeRemaining: task.estimatedTimeRemaining,
+      status: task.status,
+    });
+  } catch (error) {
+    console.error('getTaskProgress: Error fetching task progress', error);
+    res.status(500).json({ error: 'Error fetching task progress', details: error.message });
+  }
+};
+const getTaskProgressSSE = async (req, res) => {
+  const { projectId, taskId } = req.params;
+  console.log(`SSE request for project ${projectId}, task ${taskId}, userId: ${req.userId}`);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const task = await AnalysisTask.findOne({ _id: taskId, projectId });
+  if (!task) {
+    console.log(`Task ${taskId} not found for project ${projectId}`);
+    res.write(`data: ${JSON.stringify({ error: 'Task not found' })}\n\n`);
+    res.end();
+    return;
+  }
+
+  res.write(`data: ${JSON.stringify({
+    progress: task.progress,
+    processedLinks: task.processedLinks,
+    totalLinks: task.totalLinks,
+    estimatedTimeRemaining: task.estimatedTimeRemaining,
+    status: task.status,
+  })}\n\n`);
+
+  const intervalId = setInterval(async () => {
+    const updatedTask = await AnalysisTask.findOne({ _id: taskId, projectId });
+    if (!updatedTask) {
+      console.log(`Task ${taskId} no longer exists for project ${projectId}`);
+      res.write(`data: ${JSON.stringify({ error: 'Task not found' })}\n\n`);
+      clearInterval(intervalId);
+      res.end();
+      return;
+    }
+
+    console.log(`Sending SSE update for task ${taskId}: progress=${updatedTask.progress}%`);
+    res.write(`data: ${JSON.stringify({
+      progress: updatedTask.progress,
+      processedLinks: updatedTask.processedLinks,
+      totalLinks: updatedTask.totalLinks,
+      estimatedTimeRemaining: updatedTask.estimatedTimeRemaining,
+      status: updatedTask.status,
+    })}\n\n`);
+
+    if (updatedTask.status === 'completed' || updatedTask.status === 'failed') {
+      console.log(`Task ${taskId} completed or failed, closing SSE connection`);
+      clearInterval(intervalId);
+      res.end();
+    }
+  }, 2000);
+
+  req.on('close', () => {
+    console.log(`SSE connection closed for task ${taskId}`);
+    clearInterval(intervalId);
+    res.end();
+  });
+};
 // Экспортируем все функции
 module.exports = {
   registerUser,
@@ -2132,6 +2221,8 @@ module.exports = {
   deleteAccount: [authMiddleware, deleteAccount],
   updateProfile: [authMiddleware, updateProfile],
   getAnalysisStatus: [authMiddleware, getAnalysisStatus], // Добавляем новый маршрут
+  getTaskProgress: [authMiddleware, getTaskProgress],
+  getTaskProgressSSE: [authMiddleware, getTaskProgressSSE],
   checkLinkStatus,
   analyzeSpreadsheet,
   scheduleSpreadsheetAnalysis,

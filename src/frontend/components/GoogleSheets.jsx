@@ -27,14 +27,11 @@ const GoogleSheets = ({
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
   const [progressData, setProgressData] = useState({});
+  const [taskIds, setTaskIds] = useState({});
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
-
-  const wsBaseUrl = import.meta.env.MODE === 'production'
-    ? `wss://api.link-check-pro.top`
-    : `ws://localhost:${import.meta.env.VITE_BACKEND_PORT}`;
 
   const fetchSpreadsheets = async () => {
     const token = localStorage.getItem('token');
@@ -60,70 +57,74 @@ const GoogleSheets = ({
         setRunningIds([]);
         setLoading(false);
         setProgressData({});
+        setTaskIds({});
       }
     } catch (err) {
       console.error('Error fetching analysis status:', err);
     }
   };
 
-  const connectWebSocket = () => {
-    const ws = new WebSocket(wsBaseUrl);
-
-    ws.onopen = () => {
-      console.log('Connected to WebSocket');
-      ws.send(JSON.stringify({ type: 'subscribe', projectId }));
-    };
-
-    ws.onmessage = (event) => {
+  const startSSE = (spreadsheetId, taskId) => {
+    const token = localStorage.getItem('token');
+    console.log(`Starting SSE for spreadsheet ${spreadsheetId}, task ${taskId}`);
+    const eventSource = new EventSource(`${apiBaseUrl}/${projectId}/task-progress-sse/${taskId}?token=${token}`);
+  
+    eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log('WebSocket message received:', data);
-      if (data.type === 'analysisProgress' && data.projectId === projectId) {
-        console.log(`Updating progress for spreadsheet ${data.spreadsheetId}: ${data.progress}%`);
-        setProgressData(prev => ({
-          ...prev,
-          [data.spreadsheetId]: {
-            progress: data.progress,
-            processedLinks: data.processedLinks,
-            totalLinks: data.totalLinks,
-            estimatedTimeRemaining: data.estimatedTimeRemaining,
-          },
-        }));
+      console.log(`SSE message received for task ${taskId}:`, data);
+      if (data.error) {
+        console.error(data.error);
+        eventSource.close();
+        return;
       }
-      if (data.type === 'analysisComplete' && data.projectId === projectId) {
-        console.log(`Analysis completed for project ${projectId}, fetching updated spreadsheets`);
-        fetchSpreadsheets();
-        setRunningIds([]);
-        setLoading(false);
+      setProgressData(prev => ({
+        ...prev,
+        [spreadsheetId]: {
+          progress: data.progress,
+          processedLinks: data.processedLinks,
+          totalLinks: data.totalLinks,
+          estimatedTimeRemaining: data.estimatedTimeRemaining,
+        },
+      }));
+      if (data.status === 'completed' || data.status === 'failed') {
+        console.log(`Analysis completed/failed for spreadsheet ${spreadsheetId}, closing SSE`);
+        setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
+        setTaskIds(prev => {
+          const newTaskIds = { ...prev };
+          delete newTaskIds[spreadsheetId];
+          return newTaskIds;
+        });
         setIsProjectAnalyzing(false);
-        setProgressData({});
+        fetchSpreadsheets();
+        eventSource.close();
       }
     };
-
-    ws.onclose = () => {
-      console.log('Disconnected from WebSocket, attempting to reconnect in 5 seconds...');
-      setTimeout(connectWebSocket, 5000);
+  
+    eventSource.onerror = (error) => {
+      console.error(`SSE error for task ${taskId}:`, error);
+      eventSource.close();
     };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      ws.close();
-    };
-
-    return ws;
+  
+    return eventSource;
   };
 
   useEffect(() => {
     fetchSpreadsheets();
 
-    const ws = connectWebSocket();
-
     const statusInterval = setInterval(fetchAnalysisStatus, 10000);
 
+    // Запускаем SSE для каждого активного taskId
+    const eventSources = {};
+    Object.keys(taskIds).forEach(spreadsheetId => {
+      const taskId = taskIds[spreadsheetId];
+      eventSources[spreadsheetId] = startSSE(spreadsheetId, taskId);
+    });
+
     return () => {
-      ws.close();
       clearInterval(statusInterval);
+      Object.values(eventSources).forEach(eventSource => eventSource.close());
     };
-  }, [projectId, setSpreadsheets, setError, runningIds, setLoading]);
+  }, [projectId, setSpreadsheets, setError, runningIds, setLoading, taskIds]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -199,9 +200,14 @@ const GoogleSheets = ({
       },
     }));
     try {
-      await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/run`, {}, {
+      const response = await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/run`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      const { taskId } = response.data;
+      setTaskIds(prev => ({
+        ...prev,
+        [spreadsheetId]: taskId,
+      }));
       const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -215,6 +221,11 @@ const GoogleSheets = ({
         const newProgress = { ...prev };
         delete newProgress[spreadsheetId];
         return newProgress;
+      });
+      setTaskIds(prev => {
+        const newTaskIds = { ...prev };
+        delete newTaskIds[spreadsheetId];
+        return newTaskIds;
       });
     }
   };
@@ -236,6 +247,11 @@ const GoogleSheets = ({
         const newProgress = { ...prev };
         delete newProgress[spreadsheetId];
         return newProgress;
+      });
+      setTaskIds(prev => {
+        const newTaskIds = { ...prev };
+        delete newTaskIds[spreadsheetId];
+        return newTaskIds;
       });
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to cancel analysis');
