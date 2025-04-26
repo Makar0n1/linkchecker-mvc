@@ -55,7 +55,7 @@ const GoogleSheets = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       setIsProjectAnalyzing(response.data.isAnalyzing);
-      if (!response.data.isAnalyzing && runningIds.length > 0) {
+      if (!response.data.isAnalyzing) {
         fetchSpreadsheets();
         setRunningIds([]);
         setLoading(false);
@@ -78,9 +78,10 @@ const GoogleSheets = ({
       const data = JSON.parse(event.data);
       console.log('WebSocket message received:', data);
       if (data.type === 'analysisProgress' && data.projectId === projectId) {
+        console.log(`Updating progress for spreadsheet ${data.spreadsheetId}: ${data.progress}%`);
         setProgressData(prev => ({
           ...prev,
-          [data.spreadsheetId]: { // Используем spreadsheetId
+          [data.spreadsheetId]: {
             progress: data.progress,
             processedLinks: data.processedLinks,
             totalLinks: data.totalLinks,
@@ -188,6 +189,15 @@ const GoogleSheets = ({
     const token = localStorage.getItem('token');
     setRunningIds([...runningIds, spreadsheetId]);
     setLoading(true);
+    setProgressData(prev => ({
+      ...prev,
+      [spreadsheetId]: {
+        progress: 0,
+        processedLinks: 0,
+        totalLinks: 0,
+        estimatedTimeRemaining: 0,
+      },
+    }));
     try {
       await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/run`, {}, {
         headers: { Authorization: `Bearer ${token}` },
@@ -201,6 +211,11 @@ const GoogleSheets = ({
       setError(err.response?.data?.error || 'Failed to run analysis');
       setRunningIds(runningIds.filter(id => id !== spreadsheetId));
       setLoading(false);
+      setProgressData(prev => {
+        const newProgress = { ...prev };
+        delete newProgress[spreadsheetId];
+        return newProgress;
+      });
     }
   };
 
@@ -311,8 +326,8 @@ const GoogleSheets = ({
       </form>
       <ul>
         {spreadsheets.map((s) => {
-          const isRunning = runningIds.includes(s._id);
-          const progress = progressData[s._id] || {};
+          const isRunning = runningIds.includes(s._id) || s.status === 'checking';
+          const progress = progressData[s._id] || { progress: 0, processedLinks: 0, totalLinks: 0, estimatedTimeRemaining: 0 };
           return (
             <motion.li
               key={s._id}
@@ -365,7 +380,7 @@ const GoogleSheets = ({
                   )}
                 </div>
               </div>
-              {isRunning && progress.progress !== undefined && (
+              {isRunning && isProjectAnalyzing && (
                 <div className="flex flex-col gap-2">
                   <div className="w-full bg-gray-200 rounded-full h-4">
                     <div

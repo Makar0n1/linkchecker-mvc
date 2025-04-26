@@ -82,10 +82,10 @@ const loadPendingTasks = async () => {
           taskId: task._id,
           projectId: task.projectId,
           type: task.type,
-          req: null, // req недоступен при перезапуске
-          res: null, // res недоступен при перезапуске
+          req: null,
+          res: null,
           userId: task.data.userId,
-          wss: null, // wss недоступен при перезапуске
+          wss: null,
           handler: (task, callback) => {
             let project;
             Project.findOne({ _id: task.projectId, userId: task.userId })
@@ -145,6 +145,7 @@ const loadPendingTasks = async () => {
           res: null,
           userId: task.data.userId,
           wss: null,
+          spreadsheetId: task.data.spreadsheetId, // Добавляем spreadsheetId
           handler: (task, callback) => {
             let project;
             Project.findOne({ _id: task.projectId, userId: task.userId })
@@ -180,7 +181,7 @@ const loadPendingTasks = async () => {
                 if (wss) {
                   wss.clients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
-                      client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
+                      client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId, spreadsheetId: task.spreadsheetId }));
                     }
                   });
                 }
@@ -735,7 +736,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
     projectId,
     type: 'runSpreadsheetAnalysis',
     status: 'pending',
-    data: { userId: req.userId, spreadsheetId, maxLinks }, // Сохраняем только необходимые данные
+    data: { userId: req.userId, spreadsheetId, maxLinks },
   });
   await task.save();
 
@@ -746,7 +747,8 @@ const runSpreadsheetAnalysis = async (req, res) => {
     req,
     res,
     userId: req.userId,
-    wss: req.wss, // Передаём wss отдельно
+    wss: req.wss,
+    spreadsheetId, // Добавляем spreadsheetId в задачу
     handler: (task, callback) => {
       let project;
       Project.findOne({ _id: task.projectId, userId: task.userId })
@@ -781,7 +783,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
           const wss = task.wss;
           wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
-              client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
+              client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId, spreadsheetId: task.spreadsheetId }));
             }
           });
           callback(null);
