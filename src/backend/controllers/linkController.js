@@ -1017,7 +1017,7 @@ const checkLinkStatus = async (link, browser) => {
       }
 
       page = await browser.newPage();
-      await page.setDefaultNavigationTimeout(60000); // Увеличиваем тайм-аут до 60 секунд
+      await page.setDefaultNavigationTimeout(60000); // Тайм-аут 60 секунд
 
       const userAgents = [
       {
@@ -1184,334 +1184,213 @@ const checkLinkStatus = async (link, browser) => {
         },
       },
     ];
+      const selectedAgent = userAgents[attempt % userAgents.length];
+      await page.setUserAgent(selectedAgent.ua);
+      await page.setExtraHTTPHeaders(selectedAgent.headers);
 
-    const selectedAgent = userAgents[attempt % userAgents.length]; // Меняем User-Agent на каждой попытке
-    await page.setUserAgent(selectedAgent.ua);
-    await page.setExtraHTTPHeaders(selectedAgent.headers);
+      await page.setViewport({ width: 1920, height: 1080 });
 
-    await page.setViewport({ width: 1920, height: 1080 });
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        if (['image', 'stylesheet', 'font', 'media', 'script'].includes(req.resourceType())) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
 
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font', 'media', 'script'].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
+      const startTime = Date.now();
+      let response;
+      let finalUrl = link.url;
 
-    const startTime = Date.now();
-    let response;
-    let finalUrl = link.url; // Для отслеживания URL после перенаправлений
-    try {
-      response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      finalUrl = await page.url(); // Получаем конечный URL после возможных перенаправлений
-      console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
-      link.responseCode = response ? response.status().toString() : 'Timeout';
-    } catch (error) {
-      console.error(`Navigation failed for ${link.url}:`, error.message);
-      link.status = 'timeout';
-      link.errorDetails = error.message;
-      link.isIndexable = false;
-      link.indexabilityStatus = 'timeout';
-      link.responseCode = 'Timeout';
-      await link.save();
-    }
-    const loadTime = Date.now() - startTime;
-    link.loadTime = loadTime;
-
-    // Обрабатываем коды ответа
-    if (response) {
-      const statusCode = response.status();
-      link.responseCode = statusCode.toString();
-
-      // Обрабатываем 500
-      if (statusCode === 500) {
-        console.log(`Received 500 for ${link.url}, but will try to process content anyway`);
-        // Продолжаем обработку, так как контент может быть доступен
-      }
-      // Обрабатываем 304 (Not Modified)
-      else if (statusCode === 304) {
-        console.log(`Received 304 for ${link.url}, treating as successful`);
-        // Контент всё равно доступен из кэша браузера
-      }
-      // Обрабатываем 302 (Redirect)
-      else if (statusCode === 302) {
-        console.log(`Received 302 for ${link.url}, followed redirect to ${finalUrl}`);
-        link.redirectUrl = finalUrl; // Сохраняем конечный URL
-      }
-      // Обрабатываем 418 (I'm a teapot)
-      else if (statusCode === 418) {
-        console.log(`Received 418 for ${link.url}, likely region restriction`);
-        link.errorDetails = 'Region restriction (418)';
-        throw new Error('Region restriction (418)');
-      }
-      // Обрабатываем другие ошибки (например, 4xx, 5xx)
-      else if (!response.ok() && ![302, 304].includes(statusCode)) {
+      // Ждём навигацию и обрабатываем редиректы
+      try {
+        const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+        response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await navigationPromise; // Ждём завершения всех редиректов
+        finalUrl = await page.url();
+        console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
+        link.responseCode = response ? response.status().toString() : 'Timeout';
+      } catch (error) {
+        console.error(`Navigation failed for ${link.url}:`, error.message);
+        link.status = 'timeout';
+        link.errorDetails = error.message;
         link.isIndexable = false;
-        link.indexabilityStatus = `HTTP ${statusCode}`;
-        link.status = statusCode >= 400 ? 'broken' : 'redirect';
+        link.indexabilityStatus = 'timeout';
+        link.responseCode = 'Timeout';
         await link.save();
       }
-    }
+      const loadTime = Date.now() - startTime;
+      link.loadTime = loadTime;
 
-    await page.waitForFunction(
-      () => document.querySelector('meta[name="robots"]') || document.querySelector('a[href]'),
-      { timeout: 3000 },
-    ).catch(() => {});
+      // Обрабатываем коды ответа
+      if (response) {
+        const statusCode = response.status();
+        link.responseCode = statusCode.toString();
 
-    const randomDelay = Math.floor(Math.random() * 2000) + 1000;
-    await new Promise(resolve => setTimeout(resolve, randomDelay));
-    let content;
-    try {
-      content = await page.evaluate(() => document.documentElement.outerHTML);
-    } catch (error) {
-      console.error(`Failed to extract HTML for ${link.url}:`, error.message);
-      link.status = 'broken';
-      link.errorDetails = `Failed to extract HTML: ${error.message}`;
-      link.isIndexable = false;
-      link.indexabilityStatus = `check failed: ${error.message}`;
-      link.responseCode = 'Error';
-      link.overallStatus = 'Problem';
-      await link.save();
-      return link;
-    }
+        if (statusCode === 500) {
+          console.log(`Received 500 for ${link.url}, but will try to process content anyway`);
+        } else if (statusCode === 304) {
+          console.log(`Received 304 for ${link.url}, treating as successful`);
+        } else if (statusCode === 302) {
+          console.log(`Received 302 for ${link.url}, followed redirect to ${finalUrl}`);
+          link.redirectUrl = finalUrl;
+        } else if (statusCode === 418) {
+          console.log(`Received 418 for ${link.url}, likely region restriction`);
+          link.errorDetails = 'Region restriction (418)';
+          throw new Error('Region restriction (418)');
+        } else if (!response.ok() && ![302, 304].includes(statusCode)) {
+          link.isIndexable = false;
+          link.indexabilityStatus = `HTTP ${statusCode}`;
+          link.status = statusCode >= 400 ? 'broken' : 'redirect';
+          await link.save();
+        }
+      }
 
-    const $ = cheerio.load(content);
+      // Ждём, пока страница стабилизируется
+      await page.waitForFunction(
+        () => document.readyState === 'complete' || (document.querySelector('meta[name="robots"]') || document.querySelector('a[href]')),
+        { timeout: 5000 },
+      ).catch(() => console.log(`Timeout waiting for page to stabilize for ${link.url}`));
 
-    let metaRobots = '';
-    let isMetaRobotsFound = false;
-    let isIndexableBasedOnRobots = false;
-    try {
-      metaRobots = (await page.$eval('meta[name="robots"]', el => el?.content)) || '';
-      isMetaRobotsFound = true;
-      const robotsValues = metaRobots.toLowerCase().split(',').map(val => val.trim());
-      if (robotsValues.includes('noindex') || robotsValues.includes('nofollow')) {
+      const randomDelay = Math.floor(Math.random() * 2000) + 1000;
+      await new Promise(resolve => setTimeout(resolve, randomDelay));
+
+      let content;
+      try {
+        content = await page.evaluate(() => document.documentElement.outerHTML);
+      } catch (error) {
+        console.error(`Failed to extract HTML for ${link.url}:`, error.message);
+        link.status = 'broken';
+        link.errorDetails = `Failed to extract HTML: ${error.message}`;
         link.isIndexable = false;
-        link.indexabilityStatus = robotsValues.includes('noindex') ? 'noindex' : 'nofollow';
-      } else {
+        link.indexabilityStatus = `check failed: ${error.message}`;
+        link.responseCode = 'Error';
+        link.overallStatus = 'Problem';
+        await link.save();
+        return link;
+      }
+
+      const $ = cheerio.load(content);
+
+      let metaRobots = '';
+      let isMetaRobotsFound = false;
+      let isIndexableBasedOnRobots = false;
+      try {
+        // Проверяем, что страница не перенаправлена
+        await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
+        metaRobots = (await page.$eval('meta[name="robots"]', el => el?.content)) || '';
+        isMetaRobotsFound = true;
+        const robotsValues = metaRobots.toLowerCase().split(',').map(val => val.trim());
+        if (robotsValues.includes('noindex') || robotsValues.includes('nofollow')) {
+          link.isIndexable = false;
+          link.indexabilityStatus = robotsValues.includes('noindex') ? 'noindex' : 'nofollow';
+        } else {
+          link.isIndexable = true;
+          link.indexabilityStatus = 'indexable';
+          isIndexableBasedOnRobots = true;
+        }
+      } catch (error) {
+        console.error(`Failed to extract meta robots for ${link.url}:`, error.message);
         link.isIndexable = true;
         link.indexabilityStatus = 'indexable';
         isIndexableBasedOnRobots = true;
       }
-    } catch (error) {
-      link.isIndexable = true;
-      link.indexabilityStatus = 'indexable';
-      isIndexableBasedOnRobots = true;
-    }
 
-    if (link.isIndexable && (link.responseCode === '200' || link.responseCode === 'Timeout' || link.responseCode === '304' || link.responseCode === '302')) {
-      try {
-        const canonical = await page.$eval('link[rel="canonical"]', el => el?.href);
-        if (canonical) {
-          link.canonicalUrl = canonical;
-          const currentUrl = finalUrl.toLowerCase().replace(/\/$/, ''); // Используем конечный URL после перенаправления
-          const canonicalNormalized = canonical.toLowerCase().replace(/\/$/, '');
-          if (currentUrl !== canonicalNormalized) {
-            link.indexabilityStatus = 'canonical mismatch';
+      if (link.isIndexable && (link.responseCode === '200' || link.responseCode === 'Timeout' || link.responseCode === '304' || link.responseCode === '302')) {
+        try {
+          // Проверяем, что страница не перенаправлена
+          await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
+          const canonical = await page.$eval('link[rel="canonical"]', el => el?.href);
+          if (canonical) {
+            link.canonicalUrl = canonical;
+            const currentUrl = finalUrl.toLowerCase().replace(/\/$/, '');
+            const canonicalNormalized = canonical.toLowerCase().replace(/\/$/, '');
+            if (currentUrl !== canonicalNormalized) {
+              link.indexabilityStatus = 'canonical mismatch';
+            }
           }
+        } catch (error) {
+          console.error(`Failed to extract canonical URL for ${link.url}:`, error.message);
+          link.canonicalUrl = null;
         }
-      } catch (error) {
-        link.canonicalUrl = null;
       }
-    }
 
-    const cleanTargetDomains = link.targetDomains.map(domain =>
-      domain
-        .replace(/^https?:\/\//, '')
-        .replace(/^\/+/, '')
-        .replace(/\/+$/, '')
-        .toLowerCase()
-    );
+      const cleanTargetDomains = link.targetDomains.map(domain =>
+        domain
+          .replace(/^https?:\/\//, '')
+          .replace(/^\/+/, '')
+          .replace(/\/+$/, '')
+          .toLowerCase()
+      );
 
-    let linksFound = null;
-    let captchaType = 'none';
-    let captchaToken = null;
+      let linksFound = null;
+      let captchaType = 'none';
+      let captchaToken = null;
 
-    if ($('.cf-turnstile').length > 0) captchaType = 'Cloudflare Turnstile';
-    else if ($('.g-recaptcha').length > 0) captchaType = 'Google reCAPTCHA';
-    else if ($('.h-captcha').length > 0) captchaType = 'hCaptcha';
-    else if ($('form[action*="/cdn-cgi/"]').length > 0) captchaType = 'Cloudflare Challenge Page';
-    else if ($('div[id*="arkose"]').length > 0 || $('script[src*="arkoselabs"]').length > 0) captchaType = 'FunCaptcha';
-    else if ($('div[class*="geetest"]').length > 0) captchaType = 'GeeTest';
-    else if ($('img[src*="captcha"]').length > 0 || $('input[placeholder*="enter code"]').length > 0) captchaType = 'Image CAPTCHA';
-    else if ($('body').text().toLowerCase().includes('verify you are not a robot')) captchaType = 'Custom CAPTCHA';
+      if ($('.cf-turnstile').length > 0) captchaType = 'Cloudflare Turnstile';
+      else if ($('.g-recaptcha').length > 0) captchaType = 'Google reCAPTCHA';
+      else if ($('.h-captcha').length > 0) captchaType = 'hCaptcha';
+      else if ($('form[action*="/cdn-cgi/"]').length > 0) captchaType = 'Cloudflare Challenge Page';
+      else if ($('div[id*="arkose"]').length > 0 || $('script[src*="arkoselabs"]').length > 0) captchaType = 'FunCaptcha';
+      else if ($('div[class*="geetest"]').length > 0) captchaType = 'GeeTest';
+      else if ($('img[src*="captcha"]').length > 0 || $('input[placeholder*="enter code"]').length > 0) captchaType = 'Image CAPTCHA';
+      else if ($('body').text().toLowerCase().includes('verify you are not a robot')) captchaType = 'Custom CAPTCHA';
 
-    if (captchaType !== 'none') console.log(`CAPTCHA detected: ${captchaType}`);
+      if (captchaType !== 'none') console.log(`CAPTCHA detected: ${captchaType}`);
 
-    if (captchaType !== 'none') {
-      try {
-        const currentPageUrl = await page.url();
-        console.log(`Current page URL after redirects: ${currentPageUrl}`);
-
-        const captchaParams = {
-          pageurl: currentPageUrl,
-        };
-
-        if (captchaType === 'Google reCAPTCHA') {
-          const sitekey = await page.$eval('.g-recaptcha', el => el.getAttribute('data-sitekey'));
-          if (!sitekey) throw new Error('Could not extract sitekey for Google reCAPTCHA');
-          console.log(`Extracted googlekey for Google reCAPTCHA: ${sitekey}`);
+      if (captchaType !== 'none') {
+        try {
+          const currentPageUrl = await page.url();
+          console.log(`Current page URL after redirects: ${currentPageUrl}`);
 
           const captchaParams = {
-            key: process.env.TWOCAPTCHA_API_KEY,
-            googlekey: sitekey,
             pageurl: currentPageUrl,
-            version: 'v2',
           };
 
-          let captchaResponse;
-          try {
-            captchaResponse = await solver.recaptcha(captchaParams);
-            captchaToken = captchaResponse.data;
-            console.log(`Google reCAPTCHA solved: ${captchaToken}`);
-          } catch (error) {
-            console.error(`Detailed CAPTCHA error for ${link.url}:`, error);
-            throw new Error(`CAPTCHA solving failed: ${error.message}`);
-          }
+          if (captchaType === 'Google reCAPTCHA') {
+            const sitekey = await page.$eval('.g-recaptcha', el => el.getAttribute('data-sitekey'));
+            if (!sitekey) throw new Error('Could not extract sitekey for Google reCAPTCHA');
+            console.log(`Extracted googlekey for Google reCAPTCHA: ${sitekey}`);
 
-          await page.evaluate(token => {
-            const textarea = document.querySelector('#g-recaptcha-response');
-            if (textarea) textarea.innerHTML = token;
-          }, captchaToken);
+            const captchaParams = {
+              key: process.env.TWOCAPTCHA_API_KEY,
+              googlekey: sitekey,
+              pageurl: currentPageUrl,
+              version: 'v2',
+            };
 
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'Cloudflare Turnstile') {
-          const sitekey = await page.$eval('.cf-turnstile', el => el.getAttribute('data-sitekey'));
-          if (!sitekey) throw new Error('Could not extract sitekey for Cloudflare Turnstile');
-          captchaParams.googlekey = sitekey;
-          console.log(`Extracted googlekey for Cloudflare Turnstile: ${sitekey}`);
+            let captchaResponse;
+            try {
+              captchaResponse = await solver.recaptcha(captchaParams);
+              captchaToken = captchaResponse.data;
+              console.log(`Google reCAPTCHA solved: ${captchaToken}`);
+            } catch (error) {
+              console.error(`Detailed CAPTCHA error for ${link.url}:`, error);
+              throw new Error(`CAPTCHA solving failed: ${error.message}`);
+            }
 
-          const captchaResponse = await solver.turnstile(captchaParams);
-          captchaToken = captchaResponse.data;
-          console.log(`Cloudflare Turnstile solved: ${captchaToken}`);
+            await page.evaluate(token => {
+              const textarea = document.querySelector('#g-recaptcha-response');
+              if (textarea) textarea.innerHTML = token;
+            }, captchaToken);
 
-          await page.evaluate(token => {
-            const input = document.querySelector('input[name="cf-turnstile-response"]');
-            if (input) input.value = token;
-          }, captchaToken);
-
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'hCaptcha') {
-          const sitekey = await page.$eval('.h-captcha', el => el.getAttribute('data-sitekey'));
-          if (!sitekey) throw new Error('Could not extract sitekey for hCaptcha');
-          captchaParams.googlekey = sitekey;
-          console.log(`Extracted googlekey for hCaptcha: ${sitekey}`);
-
-          captchaParams.invisible = await page.evaluate(() => !document.querySelector('.h-captcha').classList.contains('visible'));
-
-          const captchaResponse = await solver.hcaptcha(captchaParams);
-          captchaToken = captchaResponse.data;
-          console.log(`hCaptcha solved: ${captchaToken}`);
-
-          await page.evaluate(token => {
-            const textarea = document.querySelector('#h-captcha-response');
-            if (textarea) textarea.innerHTML = token;
-          }, captchaToken);
-
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'FunCaptcha') {
-          const sitekey = await page.evaluate(() => {
-            const script = document.querySelector('script[src*="arkoselabs"]');
-            return script ? new URL(script.src).searchParams.get('pk') : null;
-          });
-          if (!sitekey) throw new Error('Could not extract sitekey for FunCaptcha');
-          captchaParams.publickey = sitekey;
-          console.log(`Extracted publickey for FunCaptcha: ${sitekey}`);
-
-          const captchaResponse = await solver.funcaptcha(captchaParams);
-          captchaToken = captchaResponse.data;
-          console.log(`FunCaptcha solved: ${captchaToken}`);
-
-          await page.evaluate(token => {
-            const input = document.querySelector('input[name="fc-token"]');
-            if (input) input.value = token;
-          }, captchaToken);
-
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'GeeTest') {
-          const geeTestParams = await page.evaluate(() => {
-            const gt = document.querySelector('script[src*="geetest"]')?.src.match(/gt=([^&]+)/)?.[1];
-            const challenge = document.querySelector('script[src*="geetest"]')?.src.match(/challenge=([^&]+)/)?.[1];
-            return { gt, challenge };
-          });
-          if (!geeTestParams.gt || !geeTestParams.challenge) throw new Error('Could not extract parameters for GeeTest');
-          captchaParams.gt = geeTestParams.gt;
-          captchaParams.challenge = geeTestParams.challenge;
-          console.log(`Extracted parameters for GeeTest: gt=${geeTestParams.gt}, challenge=${geeTestParams.challenge}`);
-
-          const captchaResponse = await solver.geetest(captchaParams);
-          captchaToken = captchaResponse;
-          console.log(`GeeTest solved: ${JSON.stringify(captchaToken)}`);
-
-          await page.evaluate(params => {
-            Object.keys(params).forEach(key => {
-              const input = document.createElement('input');
-              input.type = 'hidden';
-              input.name = key;
-              input.value = params[key];
-              document.forms[0]?.appendChild(input);
-            });
-          }, captchaToken);
-
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'Image CAPTCHA') {
-          const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src);
-          if (!captchaImageUrl) throw new Error('Could not extract CAPTCHA image URL');
-          console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
-
-          const captchaResponse = await solver.imageCaptcha({
-            body: captchaImageUrl,
-            numeric: false,
-            min_len: 4,
-            max_len: 6,
-          });
-          captchaToken = captchaResponse.data;
-          console.log(`Image CAPTCHA solved: ${captchaToken}`);
-
-          await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
-
-          const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-          if (submitButton) {
-            await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'Cloudflare Challenge Page') {
-          await page.waitForSelector('input[name="cf_captcha_kind"]', { timeout: 10000 });
-          const sitekey = await page.$eval('input[name="cf_captcha_kind"]', el => el.getAttribute('data-sitekey'));
-          if (sitekey) {
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await submitButton.click();
+              await navigationPromise;
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'Cloudflare Turnstile') {
+            const sitekey = await page.$eval('.cf-turnstile', el => el.getAttribute('data-sitekey'));
+            if (!sitekey) throw new Error('Could not extract sitekey for Cloudflare Turnstile');
             captchaParams.googlekey = sitekey;
-            console.log(`Extracted googlekey for Cloudflare Challenge Page: ${sitekey}`);
+            console.log(`Extracted googlekey for Cloudflare Turnstile: ${sitekey}`);
 
             const captchaResponse = await solver.turnstile(captchaParams);
             captchaToken = captchaResponse.data;
-            console.log(`Cloudflare Challenge Page solved: ${captchaToken}`);
+            console.log(`Cloudflare Turnstile solved: ${captchaToken}`);
 
             await page.evaluate(token => {
               const input = document.querySelector('input[name="cf-turnstile-response"]');
@@ -1520,20 +1399,97 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
               await submitButton.click();
-              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
-          } else {
-            console.log('Cloudflare Challenge Page does not require CAPTCHA solving, waiting for redirect...');
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            content = await page.evaluate(() => document.documentElement.outerHTML);
-          }
-        } else if (captchaType === 'Custom CAPTCHA') {
-          console.log('Custom CAPTCHA detected, attempting to solve as Image CAPTCHA if possible...');
-          const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src, { timeout: 5000 }).catch(() => null);
-          if (captchaImageUrl) {
+          } else if (captchaType === 'hCaptcha') {
+            const sitekey = await page.$eval('.h-captcha', el => el.getAttribute('data-sitekey'));
+            if (!sitekey) throw new Error('Could not extract sitekey for hCaptcha');
+            captchaParams.googlekey = sitekey;
+            console.log(`Extracted googlekey for hCaptcha: ${sitekey}`);
+
+            captchaParams.invisible = await page.evaluate(() => !document.querySelector('.h-captcha').classList.contains('visible'));
+
+            const captchaResponse = await solver.hcaptcha(captchaParams);
+            captchaToken = captchaResponse.data;
+            console.log(`hCaptcha solved: ${captchaToken}`);
+
+            await page.evaluate(token => {
+              const textarea = document.querySelector('#h-captcha-response');
+              if (textarea) textarea.innerHTML = token;
+            }, captchaToken);
+
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await submitButton.click();
+              await navigationPromise;
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'FunCaptcha') {
+            const sitekey = await page.evaluate(() => {
+              const script = document.querySelector('script[src*="arkoselabs"]');
+              return script ? new URL(script.src).searchParams.get('pk') : null;
+            });
+            if (!sitekey) throw new Error('Could not extract sitekey for FunCaptcha');
+            captchaParams.publickey = sitekey;
+            console.log(`Extracted publickey for FunCaptcha: ${sitekey}`);
+
+            const captchaResponse = await solver.funcaptcha(captchaParams);
+            captchaToken = captchaResponse.data;
+            console.log(`FunCaptcha solved: ${captchaToken}`);
+
+            await page.evaluate(token => {
+              const input = document.querySelector('input[name="fc-token"]');
+              if (input) input.value = token;
+            }, captchaToken);
+
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await submitButton.click();
+              await navigationPromise;
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'GeeTest') {
+            const geeTestParams = await page.evaluate(() => {
+              const gt = document.querySelector('script[src*="geetest"]')?.src.match(/gt=([^&]+)/)?.[1];
+              const challenge = document.querySelector('script[src*="geetest"]')?.src.match(/challenge=([^&]+)/)?.[1];
+              return { gt, challenge };
+            });
+            if (!geeTestParams.gt || !geeTestParams.challenge) throw new Error('Could not extract parameters for GeeTest');
+            captchaParams.gt = geeTestParams.gt;
+            captchaParams.challenge = geeTestParams.challenge;
+            console.log(`Extracted parameters for GeeTest: gt=${geeTestParams.gt}, challenge=${geeTestParams.challenge}`);
+
+            const captchaResponse = await solver.geetest(captchaParams);
+            captchaToken = captchaResponse;
+            console.log(`GeeTest solved: ${JSON.stringify(captchaToken)}`);
+
+            await page.evaluate(params => {
+              Object.keys(params).forEach(key => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = params[key];
+                document.forms[0]?.appendChild(input);
+              });
+            }, captchaToken);
+
+            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+            if (submitButton) {
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await submitButton.click();
+              await navigationPromise;
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'Image CAPTCHA') {
+            const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src);
+            if (!captchaImageUrl) throw new Error('Could not extract CAPTCHA image URL');
             console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
+
             const captchaResponse = await solver.imageCaptcha({
               body: captchaImageUrl,
               numeric: false,
@@ -1541,110 +1497,116 @@ const checkLinkStatus = async (link, browser) => {
               max_len: 6,
             });
             captchaToken = captchaResponse.data;
-            console.log(`Custom CAPTCHA (Image) solved: ${captchaToken}`);
+            console.log(`Image CAPTCHA solved: ${captchaToken}`);
 
             await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
               await submitButton.click();
-              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
-          } else {
-            throw new Error('Custom CAPTCHA not supported for automated solving');
-          }
-        }
+          } else if (captchaType === 'Cloudflare Challenge Page') {
+            await page.waitForSelector('input[name="cf_captcha_kind"]', { timeout: 10000 });
+            const sitekey = await page.$eval('input[name="cf_captcha_kind"]', el => el.getAttribute('data-sitekey'));
+            if (sitekey) {
+              captchaParams.googlekey = sitekey;
+              console.log(`Extracted googlekey for Cloudflare Challenge Page: ${sitekey}`);
 
-        $ = cheerio.load(content);
-      } catch (error) {
-        console.error(`Error solving CAPTCHA for ${link.url}:`, error.message);
-        link.status = 'suspected-captcha';
-        link.rel = 'blocked';
-        link.linkType = 'unknown';
-        link.anchorText = 'captcha suspected';
-        link.errorDetails = `CAPTCHA solving failed: ${error.message}`;
-        await link.save();
-      }
-    }
+              const captchaResponse = await solver.turnstile(captchaParams);
+              captchaToken = captchaResponse.data;
+              console.log(`Cloudflare Challenge Page solved: ${captchaToken}`);
 
-    const findLinkForDomains = (targetDomains) => {
-      let foundLink = null;
+              await page.evaluate(token => {
+                const input = document.querySelector('input[name="cf-turnstile-response"]');
+                if (input) input.value = token;
+              }, captchaToken);
 
-      $('a').each((i, a) => {
-        const href = $(a).attr('href')?.toLowerCase().trim();
-        if (href) {
-          const matchesDomain = targetDomains.some(domain => href.includes(domain));
-          if (matchesDomain) {
-            const anchorText = $(a).text().trim();
-            const hasSvg = $(a).find('svg').length > 0;
-            const hasImg = $(a).find('img').length > 0;
-            const hasIcon = $(a).find('i').length > 0;
-            const hasChildren = $(a).children().length > 0;
-            foundLink = {
-              href: href,
-              rel: $(a).attr('rel') || '',
-              anchorText: anchorText || (hasSvg ? 'SVG link' : hasImg ? 'Image link' : hasIcon ? 'Icon link' : hasChildren ? 'Element link' : 'no text'),
-              source: 'a',
-            };
-            console.log(`Link found in <a>: ${JSON.stringify(foundLink)}`);
-            return false;
-          }
-        }
-      });
-
-      if (foundLink) return foundLink;
-
-      const eventAttributes = ['onclick', 'onmouseover', 'onmouseout', 'onchange'];
-      eventAttributes.forEach(attr => {
-        $(`[${attr}]`).each((i, el) => {
-          const eventCode = $(el).attr(attr)?.toLowerCase();
-          if (eventCode) {
-            const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
-            if (matchesDomain) {
-              const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
-              if (urlMatch) {
-                const href = urlMatch[1] || urlMatch[2];
-                const tagName = $(el).prop('tagName').toLowerCase();
-                foundLink = {
-                  href: href.toLowerCase(),
-                  rel: '',
-                  anchorText: `Link in ${tagName} ${attr}`,
-                  source: `event_${attr}`,
-                };
-                console.log(`Link found in ${attr}: ${JSON.stringify(foundLink)}`);
-                return false;
+              const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+              if (submitButton) {
+                const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+                await submitButton.click();
+                await navigationPromise;
+                content = await page.evaluate(() => document.documentElement.outerHTML);
               }
+            } else {
+              console.log('Cloudflare Challenge Page does not require CAPTCHA solving, waiting for redirect...');
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await navigationPromise;
+              content = await page.evaluate(() => document.documentElement.outerHTML);
+            }
+          } else if (captchaType === 'Custom CAPTCHA') {
+            console.log('Custom CAPTCHA detected, attempting to solve as Image CAPTCHA if possible...');
+            const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src, { timeout: 5000 }).catch(() => null);
+            if (captchaImageUrl) {
+              console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
+              const captchaResponse = await solver.imageCaptcha({
+                body: captchaImageUrl,
+                numeric: false,
+                min_len: 4,
+                max_len: 6,
+              });
+              captchaToken = captchaResponse.data;
+              console.log(`Custom CAPTCHA (Image) solved: ${captchaToken}`);
+
+              await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
+
+              const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+              if (submitButton) {
+                const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+                await submitButton.click();
+                await navigationPromise;
+                content = await page.evaluate(() => document.documentElement.outerHTML);
+              }
+            } else {
+              throw new Error('Custom CAPTCHA not supported for automated solving');
+            }
+          }
+
+          $ = cheerio.load(content);
+        } catch (error) {
+          console.error(`Error solving CAPTCHA for ${link.url}:`, error.message);
+          link.status = 'suspected-captcha';
+          link.rel = 'blocked';
+          link.linkType = 'unknown';
+          link.anchorText = 'captcha suspected';
+          link.errorDetails = `CAPTCHA solving failed: ${error.message}`;
+          await link.save();
+        }
+      }
+
+      const findLinkForDomains = (targetDomains) => {
+        let foundLink = null;
+
+        $('a').each((i, a) => {
+          const href = $(a).attr('href')?.toLowerCase().trim();
+          if (href) {
+            const matchesDomain = targetDomains.some(domain => href.includes(domain));
+            if (matchesDomain) {
+              const anchorText = $(a).text().trim();
+              const hasSvg = $(a).find('svg').length > 0;
+              const hasImg = $(a).find('img').length > 0;
+              const hasIcon = $(a).find('i').length > 0;
+              const hasChildren = $(a).children().length > 0;
+              foundLink = {
+                href: href,
+                rel: $(a).attr('rel') || '',
+                anchorText: anchorText || (hasSvg ? 'SVG link' : hasImg ? 'Image link' : hasIcon ? 'Icon link' : hasChildren ? 'Element link' : 'no text'),
+                source: 'a',
+              };
+              console.log(`Link found in <a>: ${JSON.stringify(foundLink)}`);
+              return false;
             }
           }
         });
-      });
 
-      if (foundLink) return foundLink;
+        if (foundLink) return foundLink;
 
-      const tagsToCheck = ['img', 'i', 'svg'];
-      tagsToCheck.forEach(tag => {
-        $(tag).each((i, el) => {
-          const parentA = $(el).closest('a');
-          if (parentA.length) {
-            const href = parentA.attr('href')?.toLowerCase().trim();
-            if (href) {
-              const matchesDomain = targetDomains.some(domain => href.includes(domain));
-              if (matchesDomain) {
-                const anchorText = `Link in ${tag}`;
-                foundLink = {
-                  href: href,
-                  rel: parentA.attr('rel') || '',
-                  anchorText: anchorText,
-                  source: `${tag}_parent_a`,
-                };
-                console.log(`Link found in parent <a> of <${tag}>: ${JSON.stringify(foundLink)}`);
-                return false;
-              }
-            }
-          }
-
-          eventAttributes.forEach(attr => {
+        const eventAttributes = ['onclick', 'onmouseover', 'onmouseout', 'onchange'];
+        eventAttributes.forEach(attr => {
+          $(`[${attr}]`).each((i, el) => {
             const eventCode = $(el).attr(attr)?.toLowerCase();
             if (eventCode) {
               const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
@@ -1652,106 +1614,153 @@ const checkLinkStatus = async (link, browser) => {
                 const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
                 if (urlMatch) {
                   const href = urlMatch[1] || urlMatch[2];
+                  const tagName = $(el).prop('tagName').toLowerCase();
                   foundLink = {
                     href: href.toLowerCase(),
                     rel: '',
-                    anchorText: `Link in ${tag} ${attr}`,
-                    source: `${tag}_event_${attr}`,
+                    anchorText: `Link in ${tagName} ${attr}`,
+                    source: `event_${attr}`,
                   };
-                  console.log(`Link found in <${tag}> ${attr}: ${JSON.stringify(foundLink)}`);
+                  console.log(`Link found in ${attr}: ${JSON.stringify(foundLink)}`);
                   return false;
                 }
               }
             }
           });
         });
-      });
 
-      if (foundLink) return foundLink;
+        if (foundLink) return foundLink;
 
-      $('script').each((i, script) => {
-        const scriptContent = $(script).html()?.toLowerCase();
-        if (scriptContent) {
-          const matchesDomain = targetDomains.some(domain => scriptContent.includes(domain));
-          if (matchesDomain) {
-            const urlMatch = scriptContent.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
-            if (urlMatch) {
-              const href = urlMatch[1] || urlMatch[2];
-              foundLink = {
-                href: href.toLowerCase(),
-                rel: '',
-                anchorText: 'Link in JavaScript',
-                source: 'script',
-              };
-              console.log(`Link found in <script>: ${JSON.stringify(foundLink)}`);
-              return false;
+        const tagsToCheck = ['img', 'i', 'svg'];
+        tagsToCheck.forEach(tag => {
+          $(tag).each((i, el) => {
+            const parentA = $(el).closest('a');
+            if (parentA.length) {
+              const href = parentA.attr('href')?.toLowerCase().trim();
+              if (href) {
+                const matchesDomain = targetDomains.some(domain => href.includes(domain));
+                if (matchesDomain) {
+                  const anchorText = `Link in ${tag}`;
+                  foundLink = {
+                    href: href,
+                    rel: parentA.attr('rel') || '',
+                    anchorText: anchorText,
+                    source: `${tag}_parent_a`,
+                  };
+                  console.log(`Link found in parent <a> of <${tag}>: ${JSON.stringify(foundLink)}`);
+                  return false;
+                }
+              }
+            }
+
+            eventAttributes.forEach(attr => {
+              const eventCode = $(el).attr(attr)?.toLowerCase();
+              if (eventCode) {
+                const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
+                if (matchesDomain) {
+                  const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+                  if (urlMatch) {
+                    const href = urlMatch[1] || urlMatch[2];
+                    foundLink = {
+                      href: href.toLowerCase(),
+                      rel: '',
+                      anchorText: `Link in ${tag} ${attr}`,
+                      source: `${tag}_event_${attr}`,
+                    };
+                    console.log(`Link found in <${tag}> ${attr}: ${JSON.stringify(foundLink)}`);
+                    return false;
+                  }
+                }
+              }
+            });
+          });
+        });
+
+        if (foundLink) return foundLink;
+
+        $('script').each((i, script) => {
+          const scriptContent = $(script).html()?.toLowerCase();
+          if (scriptContent) {
+            const matchesDomain = targetDomains.some(domain => scriptContent.includes(domain));
+            if (matchesDomain) {
+              const urlMatch = scriptContent.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+              if (urlMatch) {
+                const href = urlMatch[1] || urlMatch[2];
+                foundLink = {
+                  href: href.toLowerCase(),
+                  rel: '',
+                  anchorText: 'Link in JavaScript',
+                  source: 'script',
+                };
+                console.log(`Link found in <script>: ${JSON.stringify(foundLink)}`);
+                return false;
+              }
             }
           }
+        });
+
+        return foundLink;
+      };
+
+      linksFound = findLinkForDomains(cleanTargetDomains);
+
+      const isLinkFound = linksFound !== null;
+      const hasUsefulData = isLinkFound || isMetaRobotsFound;
+
+      if (hasUsefulData) {
+        if (isLinkFound) {
+          link.status = 'active';
+          link.rel = linksFound.rel;
+          link.anchorText = linksFound.anchorText; // Исправляем опечатку (было "|")
+          const relValues = linksFound.rel ? linksFound.rel.toLowerCase().split(' ') : [];
+          link.linkType = relValues.some(value => ['nofollow', 'ugc', 'sponsored'].includes(value)) ? 'nofollow' : 'dofollow';
+          link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
+        } else {
+          link.status = 'active';
+          link.rel = 'not found';
+          link.linkType = 'unknown';
+          link.anchorText = 'not found';
+          link.errorDetails = link.errorDetails || '';
         }
-      });
-
-      return foundLink;
-    };
-
-    linksFound = findLinkForDomains(cleanTargetDomains);
-
-    const isLinkFound = linksFound !== null;
-    const hasUsefulData = isLinkFound || isMetaRobotsFound;
-
-    if (hasUsefulData) {
-      if (isLinkFound) {
-        link.status = 'active';
-        link.rel = linksFound.rel;
-        link.anchorText | linksFound.anchorText;
-        const relValues = linksFound.rel ? linksFound.rel.toLowerCase().split(' ') : [];
-        link.linkType = relValues.some(value => ['nofollow', 'ugc', 'sponsored'].includes(value)) ? 'nofollow' : 'dofollow';
-        link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
+        link.overallStatus = link.isIndexable ? 'OK' : 'Problem';
       } else {
-        link.status = 'active';
+        link.status = 'broken';
         link.rel = 'not found';
         link.linkType = 'unknown';
         link.anchorText = 'not found';
-        link.errorDetails = link.errorDetails || '';
+        link.errorDetails = link.errorDetails || 'No useful data found';
+        link.overallStatus = 'Problem';
       }
-      link.overallStatus = link.isIndexable ? 'OK' : 'Problem';
-    } else {
-      link.status = 'broken';
-      link.rel = 'not found';
-      link.linkType = 'unknown';
-      link.anchorText = 'not found';
-      link.errorDetails = link.errorDetails || 'No useful data found';
-      link.overallStatus = 'Problem';
-    }
 
-    link.lastChecked = new Date();
-    await link.save();
-    return link;
-  } catch (error) {
-    console.error(`Critical error in checkLinkStatus for ${link.url} on attempt ${attempt + 1}:`, error);
-    attempt += 1;
-    if (page) {
-      await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
-    }
-    if (attempt === maxAttempts) {
-      link.status = 'broken';
-      link.errorDetails = `Failed after ${maxAttempts} attempts: ${error.message}`;
-      link.rel = 'error';
-      link.linkType = 'unknown';
-      link.anchorText = 'error';
-      link.isIndexable = false;
-      link.indexabilityStatus = `check failed: ${error.message}`;
-      link.responseCode = 'Error';
-      link.overallStatus = 'Problem';
+      link.lastChecked = new Date();
       await link.save();
       return link;
-    }
-    await new Promise(resolve => setTimeout(resolve, 2000));
-  } finally {
-    if (page) {
-      await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
+    } catch (error) {
+      console.error(`Critical error in checkLinkStatus for ${link.url} on attempt ${attempt + 1}:`, error);
+      attempt += 1;
+      if (page) {
+        await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
+      }
+      if (attempt === maxAttempts) {
+        link.status = 'broken';
+        link.errorDetails = `Failed after ${maxAttempts} attempts: ${error.message}`;
+        link.rel = 'error';
+        link.linkType = 'unknown';
+        link.anchorText = 'error';
+        link.isIndexable = false;
+        link.indexabilityStatus = `check failed: ${error.message}`;
+        link.responseCode = 'Error';
+        link.overallStatus = 'Problem';
+        await link.save();
+        return link;
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } finally {
+      if (page) {
+        await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
+      }
     }
   }
-}
 };
 
 const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spreadsheetId, taskId) => {
