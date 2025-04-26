@@ -12,6 +12,7 @@ const axios = require('axios');
 const { google } = require('googleapis');
 const path = require('path');
 const async = require('async');
+const { URL } = require('url');
 //const { wss } = require('../server');
 
 let pLimit;
@@ -1009,6 +1010,22 @@ const checkLinkStatus = async (link, browser) => {
   let attempt = 0;
   const maxAttempts = 3;
 
+  // Валидация URL перед началом обработки
+  try {
+    new URL(link.url); // Проверяем, является ли URL валидным
+  } catch (error) {
+    console.error(`Invalid URL detected: ${link.url}`);
+    link.status = 'broken';
+    link.errorDetails = `Invalid URL: ${link.url}`;
+    link.isIndexable = false;
+    link.indexabilityStatus = 'invalid-url';
+    link.responseCode = 'Error';
+    link.overallStatus = 'Problem';
+    link.lastChecked = new Date();
+    await link.save();
+    return link;
+  }
+
   while (attempt < maxAttempts) {
     try {
       console.log(`Attempt ${attempt + 1} to check link ${link.url}`);
@@ -1218,6 +1235,7 @@ const checkLinkStatus = async (link, browser) => {
         link.indexabilityStatus = 'timeout';
         link.responseCode = 'Timeout';
         await link.save();
+        return link; // Возвращаем ссылку и прерываем попытки
       }
       const loadTime = Date.now() - startTime;
       link.loadTime = loadTime;

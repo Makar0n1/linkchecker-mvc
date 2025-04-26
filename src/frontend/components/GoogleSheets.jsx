@@ -186,12 +186,36 @@ const GoogleSheets = ({
         setLoading(false);
         return;
       }
-
+    
+      // Загружаем данные из Google Sheets (предположим, что это делается через API)
       const response = await axios.post(
         `${apiBaseUrl}/${projectId}/spreadsheets`,
         { ...form, gid: parseInt(form.gid), intervalHours: parseInt(form.intervalHours) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+    
+      // После добавления таблицы можно загрузить ссылки и проверить их
+      const linksResponse = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets/${response.data._id}/links`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    
+      const links = linksResponse.data;
+      const invalidLinks = links.filter(link => {
+        try {
+          new URL(link.url);
+          return false;
+        } catch (error) {
+          return true;
+        }
+      });
+    
+      if (invalidLinks.length > 0) {
+        console.warn('Found invalid URLs:', invalidLinks.map(link => link.url));
+        setError(`Found ${invalidLinks.length} invalid URLs. Please fix them in the spreadsheet.`);
+        setLoading(false);
+        return;
+      }
+    
       setSpreadsheets([...spreadsheets, { ...response.data, status: 'pending' }]);
       setForm({
         spreadsheetId: '',
@@ -209,7 +233,7 @@ const GoogleSheets = ({
     } finally {
       setLoading(false);
     }
-  };
+    };
 
   const runAnalysis = async (spreadsheetId) => {
     const token = localStorage.getItem('token');
