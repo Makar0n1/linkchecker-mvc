@@ -38,11 +38,10 @@ const corsOptions = {
       'http://localhost:3001',
       'http://localhost:3000',
     ];
-
-    console.log(`CORS: Checking origin ${origin} against allowed origins: ${allowedOrigins}`);
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.log(`CORS: Origin ${origin} not allowed. Allowed origins: ${allowedOrigins}`); // Логируем только ошибки
       callback(new Error('Not allowed by CORS'));
     }
   },

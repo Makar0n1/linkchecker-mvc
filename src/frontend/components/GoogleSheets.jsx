@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom'; // Добавляем useNavigate
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const GoogleSheets = ({
@@ -27,8 +27,9 @@ const GoogleSheets = ({
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
   const [progressData, setProgressData] = useState({});
-  const [taskIds, setTaskIds] = useState({}); // Убираем localStorage
+  const [taskIds, setTaskIds] = useState({});
 
+  // Исправляем формирование apiBaseUrl
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
@@ -121,12 +122,20 @@ const GoogleSheets = ({
     return eventSource;
   };
 
+  // Первый useEffect для начальной загрузки данных
   useEffect(() => {
     fetchSpreadsheets();
-    fetchUserTasks(); // Загружаем taskIds с сервера
+    fetchUserTasks(); // Загружаем taskIds один раз при монтировании
 
     const statusInterval = setInterval(fetchAnalysisStatus, 10000);
 
+    return () => {
+      clearInterval(statusInterval);
+    };
+  }, [projectId, setSpreadsheets, setError, runningIds, setLoading]); // Убираем taskIds из зависимостей
+
+  // Второй useEffect для управления SSE на основе taskIds
+  useEffect(() => {
     const eventSources = {};
     Object.keys(taskIds).forEach(spreadsheetId => {
       const taskId = taskIds[spreadsheetId];
@@ -134,10 +143,9 @@ const GoogleSheets = ({
     });
 
     return () => {
-      clearInterval(statusInterval);
       Object.values(eventSources).forEach(eventSource => eventSource.close());
     };
-  }, [projectId, setSpreadsheets, setError, runningIds, setLoading, taskIds]);
+  }, [taskIds]); // Зависимость только от taskIds
 
   useEffect(() => {
     const intervalId = setInterval(() => {
