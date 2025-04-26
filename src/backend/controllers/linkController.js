@@ -1737,6 +1737,26 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
         try {
           const updatedLink = await checkLinkStatus(link);
           console.log(`Finished analysis for link: ${link.url}, status: ${updatedLink.status}, overallStatus: ${updatedLink.overallStatus}`);
+
+          // Обновляем прогресс после каждой ссылки
+          processedLinks += 1;
+          const batchTime = Date.now() - startTime;
+          totalProcessingTime += batchTime;
+          const avgTimePerLink = totalProcessingTime / processedLinks;
+          const remainingLinks = totalLinks - processedLinks;
+          const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
+          const progress = Math.round((processedLinks / totalLinks) * 100);
+
+          await AnalysisTask.findByIdAndUpdate(taskId, {
+            $set: {
+              progress,
+              processedLinks,
+              totalLinks,
+              estimatedTimeRemaining,
+            },
+          });
+          console.log(`Updated progress for task ${taskId}: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
+
           return updatedLink;
         } catch (error) {
           console.error(`Error processing link ${link.url}:`, error);
@@ -1744,29 +1764,30 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
           link.errorDetails = `Failed during analysis: ${error.message}`;
           link.overallStatus = 'Problem';
           await link.save();
+
+          // Обновляем прогресс даже при ошибке
+          processedLinks += 1;
+          const batchTime = Date.now() - startTime;
+          totalProcessingTime += batchTime;
+          const avgTimePerLink = totalProcessingTime / processedLinks;
+          const remainingLinks = totalLinks - processedLinks;
+          const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
+          const progress = Math.round((processedLinks / totalLinks) * 100);
+
+          await AnalysisTask.findByIdAndUpdate(taskId, {
+            $set: {
+              progress,
+              processedLinks,
+              totalLinks,
+              estimatedTimeRemaining,
+            },
+          });
+          console.log(`Updated progress for task ${taskId} after error: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
+
           return link;
         }
       }))
     );
-
-    processedLinks += batchResults.length;
-    const batchTime = Date.now() - startTime;
-    totalProcessingTime += batchTime;
-
-    const progress = Math.round((processedLinks / totalLinks) * 100);
-    const avgTimePerLink = totalProcessingTime / processedLinks;
-    const remainingLinks = totalLinks - processedLinks;
-    const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
-
-    await AnalysisTask.findByIdAndUpdate(taskId, {
-      $set: {
-        progress,
-        processedLinks,
-        totalLinks,
-        estimatedTimeRemaining,
-      },
-    });
-    console.log(`Updated progress for task ${taskId}: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
 
     results.push(...batchResults);
     console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
@@ -2189,7 +2210,7 @@ const getTaskProgressSSE = async (req, res) => {
       clearInterval(intervalId);
       res.end();
     }
-  }, 2000);
+  }, 1000); // Уменьшаем интервал до 1 секунды
 
   req.on('close', () => {
     console.log(`SSE connection closed for task ${taskId}`);
