@@ -745,6 +745,10 @@ const runSpreadsheetAnalysis = async (req, res) => {
   });
   await task.save();
 
+  // Сохраняем taskId в activeTasks пользователя
+  user.activeTasks.set(projectId, task._id.toString());
+  await user.save();
+
   analysisQueue.push({
     taskId: task._id,
     projectId,
@@ -813,7 +817,13 @@ const runSpreadsheetAnalysis = async (req, res) => {
           if (project) {
             project.isAnalyzing = false;
             project.save()
-              .then(() => console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`))
+              .then(async () => {
+                console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`);
+                // Удаляем taskId из activeTasks после завершения
+                const user = await User.findById(task.userId);
+                user.activeTasks.delete(projectId);
+                await user.save();
+              })
               .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
           }
         });
@@ -850,6 +860,10 @@ const cancelSpreadsheetAnalysis = async (req, res) => {
 
     project.isAnalyzing = false;
     await project.save();
+
+    // Удаляем taskId из activeTasks
+    user.activeTasks.delete(projectId);
+    await user.save();
 
     res.json({ message: 'Analysis cancelled and data cleared' });
   } catch (error) {
@@ -1003,7 +1017,7 @@ const checkLinkStatus = async (link, browser) => {
       }
 
       page = await browser.newPage();
-      await page.setDefaultNavigationTimeout(60000);
+      await page.setDefaultNavigationTimeout(30000); // Уменьшаем тайм-аут до 30 секунд
 
       const userAgents = [
       {
@@ -1179,7 +1193,7 @@ const checkLinkStatus = async (link, browser) => {
 
     await page.setRequestInterception(true);
     page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+      if (['image', 'stylesheet', 'font', 'media', 'script'].includes(req.resourceType())) { // Блокируем больше ресурсов
         req.abort();
       } else {
         req.continue();
@@ -1189,7 +1203,7 @@ const checkLinkStatus = async (link, browser) => {
     const startTime = Date.now();
     let response;
     try {
-      response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       console.log(`Page loaded with status: ${response ? response.status() : 'No response'}`);
       link.responseCode = response ? response.status().toString() : 'Timeout';
     } catch (error) {
@@ -1213,10 +1227,10 @@ const checkLinkStatus = async (link, browser) => {
 
     await page.waitForFunction(
       () => document.querySelector('meta[name="robots"]') || document.querySelector('a[href]'),
-      { timeout: 5000 },
+      { timeout: 3000 }, // Уменьшаем тайм-аут до 3 секунд
     ).catch(() => {});
 
-    const randomDelay = Math.floor(Math.random() * 5000) + 5000;
+    const randomDelay = Math.floor(Math.random() * 2000) + 1000; // Уменьшаем задержку до 1-3 секунд
     await new Promise(resolve => setTimeout(resolve, randomDelay));
     let content;
     try {
@@ -1334,7 +1348,7 @@ const checkLinkStatus = async (link, browser) => {
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
             content = await page.evaluate(() => document.documentElement.outerHTML);
           }
         } else if (captchaType === 'Cloudflare Turnstile') {
@@ -1355,7 +1369,7 @@ const checkLinkStatus = async (link, browser) => {
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
             content = await page.evaluate(() => document.documentElement.outerHTML);
           }
         } else if (captchaType === 'hCaptcha') {
@@ -1378,7 +1392,7 @@ const checkLinkStatus = async (link, browser) => {
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
             content = await page.evaluate(() => document.documentElement.outerHTML);
           }
         } else if (captchaType === 'FunCaptcha') {
@@ -1402,7 +1416,7 @@ const checkLinkStatus = async (link, browser) => {
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
             content = await page.evaluate(() => document.documentElement.outerHTML);
           }
         } else if (captchaType === 'GeeTest') {
@@ -1433,7 +1447,7 @@ const checkLinkStatus = async (link, browser) => {
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
             content = await page.evaluate(() => document.documentElement.outerHTML);
           }
         } else if (captchaType === 'Image CAPTCHA') {
@@ -1455,7 +1469,7 @@ const checkLinkStatus = async (link, browser) => {
           const submitButton = await page.$('button[type="submit"], input[type="submit"]');
           if (submitButton) {
             await submitButton.click();
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
             content = await page.evaluate(() => document.documentElement.outerHTML);
           }
         } else if (captchaType === 'Cloudflare Challenge Page') {
@@ -1477,12 +1491,12 @@ const checkLinkStatus = async (link, browser) => {
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
               await submitButton.click();
-              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else {
             console.log('Cloudflare Challenge Page does not require CAPTCHA solving, waiting for redirect...');
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
             content = await page.evaluate(() => document.documentElement.outerHTML);
           }
         } else if (captchaType === 'Custom CAPTCHA') {
@@ -1504,7 +1518,7 @@ const checkLinkStatus = async (link, browser) => {
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
               await submitButton.click();
-              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else {
@@ -1718,10 +1732,11 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
 
   console.log(`Starting processLinksInBatches: taskId=${taskId}, totalLinks=${totalLinks}`);
 
-  const limit = pLimit(10);
+  const limit = pLimit(10); // Ограничиваем параллельные проверки
   let processedLinks = 0;
   let totalProcessingTime = 0;
 
+  // Инициализируем прогресс
   await AnalysisTask.findByIdAndUpdate(taskId, {
     $set: {
       totalLinks,
@@ -1743,31 +1758,14 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
     try {
       browser = await initializeBrowser();
       const startTime = Date.now();
+
+      // Обрабатываем ссылки в батче параллельно
       const batchResults = await Promise.all(
         batch.map(link => limit(async () => {
           console.log(`Starting analysis for link: ${link.url}`);
           try {
             const updatedLink = await checkLinkStatus(link, browser);
             console.log(`Finished analysis for link: ${link.url}, status: ${updatedLink.status}, overallStatus: ${updatedLink.overallStatus}`);
-
-            processedLinks += 1;
-            const batchTime = Date.now() - startTime;
-            totalProcessingTime += batchTime;
-            const avgTimePerLink = totalProcessingTime / processedLinks;
-            const remainingLinks = totalLinks - processedLinks;
-            const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
-            const progress = Math.round((processedLinks / totalLinks) * 100);
-
-            await AnalysisTask.findByIdAndUpdate(taskId, {
-              $set: {
-                progress,
-                processedLinks,
-                totalLinks,
-                estimatedTimeRemaining,
-              },
-            });
-            console.log(`Updated progress for task ${taskId}: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
-
             return updatedLink;
           } catch (error) {
             console.error(`Error processing link ${link.url}:`, error);
@@ -1775,29 +1773,29 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
             link.errorDetails = `Failed during analysis: ${error.message}`;
             link.overallStatus = 'Problem';
             await link.save();
-
-            processedLinks += 1;
-            const batchTime = Date.now() - startTime;
-            totalProcessingTime += batchTime;
-            const avgTimePerLink = totalProcessingTime / processedLinks;
-            const remainingLinks = totalLinks - processedLinks;
-            const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
-            const progress = Math.round((processedLinks / totalLinks) * 100);
-
-            await AnalysisTask.findByIdAndUpdate(taskId, {
-              $set: {
-                progress,
-                processedLinks,
-                totalLinks,
-                estimatedTimeRemaining,
-              },
-            });
-            console.log(`Updated progress for task ${taskId} after error: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
-
             return link;
           }
         }))
       );
+
+      // Обновляем прогресс после всего батча
+      processedLinks += batchResults.length;
+      const batchTime = Date.now() - startTime;
+      totalProcessingTime += batchTime;
+      const avgTimePerLink = totalProcessingTime / processedLinks;
+      const remainingLinks = totalLinks - processedLinks;
+      const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
+      const progress = Math.round((processedLinks / totalLinks) * 100);
+
+      await AnalysisTask.findByIdAndUpdate(taskId, {
+        $set: {
+          progress,
+          processedLinks,
+          totalLinks,
+          estimatedTimeRemaining,
+        },
+      });
+      console.log(`Updated progress for task ${taskId}: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
 
       results.push(...batchResults);
       console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
@@ -1805,14 +1803,17 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
       const memoryUsageAfter = process.memoryUsage();
       console.log(`Memory usage after batch: RSS=${(memoryUsageAfter.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsageAfter.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsageAfter.heapUsed / 1024 / 1024).toFixed(2)}MB`);
 
+      // Закрываем браузер и очищаем память
       await closeBrowser(browser);
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      browser = null; // Помогаем сборщику мусора
+      global.gc && global.gc(); // Принудительно вызываем сборку мусора, если доступно
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Уменьшаем задержку до 1 секунды
     } catch (error) {
       console.error(`Critical error in processLinksInBatches for batch ${Math.floor(i / batchSize) + 1}:`, error);
       if (browser) {
         await closeBrowser(browser);
       }
-      throw error; // Передаем ошибку вверх, чтобы очередь могла обработать
+      throw error; // Передаём ошибку в очередь для корректной обработки
     }
   }
 
@@ -2241,6 +2242,16 @@ const getTaskProgressSSE = async (req, res) => {
     res.end();
   });
 };
+const getUserTasks = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).select('activeTasks');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ activeTasks: user.activeTasks || {} });
+  } catch (error) {
+    console.error('getUserTasks: Error fetching user tasks', error);
+    res.status(500).json({ error: 'Error fetching user tasks', details: error.message });
+  }
+};
 // Экспортируем все функции
 module.exports = {
   registerUser,
@@ -2267,6 +2278,7 @@ module.exports = {
   getAnalysisStatus: [authMiddleware, getAnalysisStatus], // Добавляем новый маршрут
   getTaskProgress: [authMiddleware, getTaskProgress],
   getTaskProgressSSE: [authMiddleware, getTaskProgressSSE],
+  getUserTasks: [authMiddleware, getUserTasks],
   checkLinkStatus,
   analyzeSpreadsheet,
   scheduleSpreadsheetAnalysis,

@@ -27,11 +27,7 @@ const GoogleSheets = ({
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
   const [progressData, setProgressData] = useState({});
-  const [taskIds, setTaskIds] = useState(() => {
-    // Восстанавливаем taskIds из localStorage при загрузке
-    const savedTaskIds = localStorage.getItem(`taskIds-${projectId}`);
-    return savedTaskIds ? JSON.parse(savedTaskIds) : {};
-  });
+  const [taskIds, setTaskIds] = useState({}); // Убираем localStorage
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -49,6 +45,18 @@ const GoogleSheets = ({
     }
   };
 
+  const fetchUserTasks = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const response = await axios.get(`${apiBaseUrl}/user/tasks`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setTaskIds(response.data.activeTasks || {});
+    } catch (err) {
+      console.error('Error fetching user tasks:', err);
+    }
+  };
+
   const fetchAnalysisStatus = async () => {
     const token = localStorage.getItem('token');
     try {
@@ -62,7 +70,7 @@ const GoogleSheets = ({
         setLoading(false);
         setProgressData({});
         setTaskIds({});
-        localStorage.removeItem(`taskIds-${projectId}`);
+        await fetchUserTasks(); // Обновляем taskIds с сервера
       }
     } catch (err) {
       console.error('Error fetching analysis status:', err);
@@ -97,7 +105,6 @@ const GoogleSheets = ({
         setTaskIds(prev => {
           const newTaskIds = { ...prev };
           delete newTaskIds[spreadsheetId];
-          localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
           return newTaskIds;
         });
         setIsProjectAnalyzing(false);
@@ -116,6 +123,7 @@ const GoogleSheets = ({
 
   useEffect(() => {
     fetchSpreadsheets();
+    fetchUserTasks(); // Загружаем taskIds с сервера
 
     const statusInterval = setInterval(fetchAnalysisStatus, 10000);
 

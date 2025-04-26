@@ -21,6 +21,7 @@ const userSchema = new mongoose.Schema({
     email: String,
     phone: String
   },
+  activeTasks: { type: Map, of: String, default: {} },
   linksCheckedThisMonth: { type: Number, default: 0 },
   lastReset: { type: Date, default: Date.now }
 });
