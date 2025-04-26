@@ -26,7 +26,7 @@ const GoogleSheets = ({
   });
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
-  const [progressData, setProgressData] = useState({}); // Для хранения прогресса по spreadsheetId
+  const [progressData, setProgressData] = useState({});
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -59,7 +59,7 @@ const GoogleSheets = ({
         fetchSpreadsheets();
         setRunningIds([]);
         setLoading(false);
-        setProgressData({}); // Сбрасываем прогресс
+        setProgressData({});
       }
     } catch (err) {
       console.error('Error fetching analysis status:', err);
@@ -80,7 +80,7 @@ const GoogleSheets = ({
       if (data.type === 'analysisProgress' && data.projectId === projectId) {
         setProgressData(prev => ({
           ...prev,
-          [data.spreadsheetId || projectId]: {
+          [data.spreadsheetId]: { // Используем spreadsheetId
             progress: data.progress,
             processedLinks: data.processedLinks,
             totalLinks: data.totalLinks,
@@ -94,7 +94,7 @@ const GoogleSheets = ({
         setRunningIds([]);
         setLoading(false);
         setIsProjectAnalyzing(false);
-        setProgressData({}); // Сбрасываем прогресс
+        setProgressData({});
       }
     };
 
@@ -375,7 +375,7 @@ const GoogleSheets = ({
                   </div>
                   <div className="text-gray-600 text-sm">
                     <p>Progress: {progress.progress}%</p>
-                    <p>Processed: {progress.processedLinks} of {progress.totalLinks} links</p>
+                    <p>Processed: {progress.processedLinks} / {progress.totalLinks} links</p>
                     <p>Estimated time remaining: {progress.estimatedTimeRemaining} seconds</p>
                   </div>
                 </div>

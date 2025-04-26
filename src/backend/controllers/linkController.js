@@ -1692,7 +1692,7 @@ const checkLinkStatus = async (link) => {
   }
 };
 
-const processLinksInBatches = async (links, batchSize = 20, projectId, wss) => {
+const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spreadsheetId) => {
   const { default: pLimitModule } = await import('p-limit');
   const pLimit = pLimitModule;
   const results = [];
@@ -1732,19 +1732,18 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss) => {
     const batchTime = Date.now() - startTime;
     totalProcessingTime += batchTime;
 
-    // Вычисляем прогресс и примерное время до окончания
     const progress = Math.round((processedLinks / totalLinks) * 100);
     const avgTimePerLink = totalProcessingTime / processedLinks;
     const remainingLinks = totalLinks - processedLinks;
-    const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000); // в секундах
+    const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
 
-    // Отправляем прогресс через WebSocket
     if (wss) {
       wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.projectId === projectId) {
           client.send(JSON.stringify({
             type: 'analysisProgress',
             projectId,
+            spreadsheetId, // Добавляем spreadsheetId
             progress,
             processedLinks,
             totalLinks,
@@ -1763,7 +1762,6 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss) => {
     await new Promise(resolve => setTimeout(resolve, 5000));
   }
 
-  // Проверяем, что все ссылки обновлены
   const pendingLinks = await FrontendLink.find({ status: 'checking' });
   if (pendingLinks.length > 0) {
     console.log(`Found ${pendingLinks.length} links still in "checking" status after analysis. Updating...`);
@@ -1814,7 +1812,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss) => {
     })
   );
 
-  const updatedLinks = await processLinksInBatches(dbLinks, 20, projectId, wss);
+  const updatedLinks = await processLinksInBatches(dbLinks, 20, projectId, wss, spreadsheet.spreadsheetId);
 
   if (cancelAnalysis) {
     throw new Error('Analysis cancelled');
@@ -1853,7 +1851,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss) => {
     limit(() => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName))
   ));
 
-  await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid);
+  await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd);
 };
 
 const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlColumn, targetColumn, gid) => {
@@ -1935,19 +1933,22 @@ const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, r
   }
 };
 
-const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
+const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, resultRangeEnd) => {
   console.log(`Formatting sheet ${spreadsheetId} (gid: ${gid})...`);
+  const startColumnIndex = columnLetterToIndex(resultRangeStart);
+  const endColumnIndex = columnLetterToIndex(resultRangeEnd) + 1; // +1, так как endColumnIndex не включён
+
   const requests = [
     {
       repeatCell: {
-        range: { sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 11, endColumnIndex: 16 },
+        range: { sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex, endColumnIndex },
         cell: { userEnteredFormat: { textFormat: { fontFamily: 'Arial', fontSize: 11 } } },
         fields: 'userEnteredFormat.textFormat',
       },
     },
     {
       updateBorders: {
-        range: { sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 11, endColumnIndex: 16 },
+        range: { sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex, endColumnIndex },
         top: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
         bottom: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
         left: { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } },
@@ -1958,7 +1959,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     },
     {
       updateDimensionProperties: {
-        range: { sheetId: gid, dimension: 'COLUMNS', startIndex: 11, endIndex: 16 },
+        range: { sheetId: gid, dimension: 'COLUMNS', startIndex: startColumnIndex, endIndex: endColumnIndex },
         properties: { pixelSize: 120 },
         fields: 'pixelSize'
       }
@@ -1966,7 +1967,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 11, endColumnIndex: 12 }],
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex, endColumnIndex: startColumnIndex + 1 }],
           booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'OK' }] }, format: { backgroundColor: { red: 0.83, green: 0.92, blue: 0.83 } } }
         },
         index: 0
@@ -1975,7 +1976,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 11, endColumnIndex: 12 }],
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex, endColumnIndex: startColumnIndex + 1 }],
           booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Problem' }] }, format: { backgroundColor: { red: 0.98, green: 0.82, blue: 0.82 } } }
         },
         index: 1
@@ -1984,7 +1985,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 13, endColumnIndex: 14 }],
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 2, endColumnIndex: startColumnIndex + 3 }],
           booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Yes' }] }, format: { textFormat: { foregroundColor: { red: 0, green: 0.4, blue: 0 } } } }
         },
         index: 2
@@ -1993,7 +1994,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 13, endColumnIndex: 14 }],
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 2, endColumnIndex: startColumnIndex + 3 }],
           booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'No' }] }, format: { textFormat: { foregroundColor: { red: 0.8, green: 0, blue: 0 } } } }
         },
         index: 3
@@ -2002,7 +2003,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 13, endColumnIndex: 14 }],
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 2, endColumnIndex: startColumnIndex + 3 }],
           booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Unknown' }] }, format: { textFormat: { foregroundColor: { red: 0.4, green: 0.4, blue: 0.4 } } } }
         },
         index: 4
@@ -2011,7 +2012,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 15, endColumnIndex: 16 }],
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 4, endColumnIndex: startColumnIndex + 5 }],
           booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'True' }] }, format: { backgroundColor: { red: 0.83, green: 0.92, blue: 0.83 } } }
         },
         index: 5
@@ -2020,7 +2021,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid) => {
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: 15, endColumnIndex: 16 }],
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 4, endColumnIndex: startColumnIndex + 5 }],
           booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'False' }] }, format: { backgroundColor: { red: 1, green: 0.88, blue: 0.7 } } }
         },
         index: 6
@@ -2097,6 +2098,14 @@ const getAnalysisStatus = async (req, res) => {
   }
 };
 
+const columnLetterToIndex = (letter) => {
+  let index = 0;
+  for (let i = 0; i < letter.length; i++) {
+    index *= 26;
+    index += letter.charCodeAt(i) - 'A'.charCodeAt(0) + 1;
+  }
+  return index - 1; // Google Sheets columns are 0-based
+};
 // Экспортируем все функции
 module.exports = {
   registerUser,
