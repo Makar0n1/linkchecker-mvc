@@ -95,7 +95,7 @@ const loadPendingTasks = async () => {
                 return project.save();
               })
               .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
-              .then(() => processLinksInBatches(links, 20))
+              .then(() => processLinksInBatches(links, 20, task.projectId, task.req?.wss)) // Передаём projectId и wss
               .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
               .then(updatedLinks => {
                 console.log(`Finished link check for project ${task.projectId}`);
@@ -158,7 +158,7 @@ const loadPendingTasks = async () => {
               })
               .then(() => {
                 cancelAnalysis = false;
-                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks);
+                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.req?.wss); // Передаём projectId и wss
               })
               .then(() => {
                 if (cancelAnalysis) {
@@ -537,7 +537,6 @@ const checkLinks = async (req, res) => {
 
   console.log(`Adding checkLinks task to queue for project ${projectId} with ${links.length} links`);
 
-  // Сохраняем задачу в базу
   const task = new AnalysisTask({
     projectId,
     type: 'checkLinks',
@@ -564,7 +563,7 @@ const checkLinks = async (req, res) => {
           return project.save();
         })
         .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
-        .then(() => processLinksInBatches(links, 20))
+        .then(() => processLinksInBatches(links, 20, task.projectId, task.req.wss)) // Передаём projectId и wss
         .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
         .then(updatedLinks => {
           console.log(`Finished link check for project ${task.projectId}`);
@@ -729,7 +728,6 @@ const runSpreadsheetAnalysis = async (req, res) => {
 
   console.log(`Adding runSpreadsheetAnalysis task to queue for spreadsheet ${spreadsheetId} in project ${projectId}`);
 
-  // Сохраняем задачу в базу
   const task = new AnalysisTask({
     projectId,
     type: 'runSpreadsheetAnalysis',
@@ -760,7 +758,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
         })
         .then(() => {
           cancelAnalysis = false;
-          return analyzeSpreadsheet(spreadsheet, maxLinks);
+          return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.req.wss); // Передаём projectId и wss
         })
         .then(() => {
           if (cancelAnalysis) {
@@ -1690,13 +1688,15 @@ const checkLinkStatus = async (link) => {
   }
 };
 
-const processLinksInBatches = async (links, batchSize = 20) => {
-  const { default: pLimitModule } = await import('p-limit'); // Загружаем p-limit здесь
+const processLinksInBatches = async (links, batchSize = 20, projectId, wss) => {
+  const { default: pLimitModule } = await import('p-limit');
   const pLimit = pLimitModule;
   const results = [];
   const totalLinks = links.length;
 
   const limit = pLimit(10);
+  let processedLinks = 0;
+  let totalProcessingTime = 0;
 
   for (let i = 0; i < totalLinks; i += batchSize) {
     const batch = links.slice(i, i + batchSize);
@@ -1705,6 +1705,7 @@ const processLinksInBatches = async (links, batchSize = 20) => {
     const memoryUsage = process.memoryUsage();
     console.log(`Memory usage before batch: RSS=${(memoryUsage.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
 
+    const startTime = Date.now();
     const batchResults = await Promise.all(
       batch.map(link => limit(async () => {
         console.log(`Starting analysis for link: ${link.url}`);
@@ -1722,6 +1723,32 @@ const processLinksInBatches = async (links, batchSize = 20) => {
         }
       }))
     );
+
+    processedLinks += batchResults.length;
+    const batchTime = Date.now() - startTime;
+    totalProcessingTime += batchTime;
+
+    // Вычисляем прогресс и примерное время до окончания
+    const progress = Math.round((processedLinks / totalLinks) * 100);
+    const avgTimePerLink = totalProcessingTime / processedLinks;
+    const remainingLinks = totalLinks - processedLinks;
+    const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000); // в секундах
+
+    // Отправляем прогресс через WebSocket
+    if (wss) {
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN && client.projectId === projectId) {
+          client.send(JSON.stringify({
+            type: 'analysisProgress',
+            projectId,
+            progress,
+            processedLinks,
+            totalLinks,
+            estimatedTimeRemaining,
+          }));
+        }
+      });
+    }
 
     results.push(...batchResults);
     console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
@@ -1748,7 +1775,7 @@ const processLinksInBatches = async (links, batchSize = 20) => {
   return results;
 };
 
-const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
+const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss) => {
   const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId });
   if (!existingSpreadsheet) {
     throw new Error('Spreadsheet not found');
@@ -1766,7 +1793,6 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
     throw new Error(`Link limit exceeded for your plan (${maxLinks} links)`);
   }
 
-  // Преобразуем объекты в Mongoose документы
   const dbLinks = await Promise.all(
     links.map(async link => {
       const newLink = new FrontendLink({
@@ -1775,7 +1801,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
         userId: spreadsheet.userId,
         projectId: spreadsheet.projectId,
         spreadsheetId: spreadsheet.spreadsheetId,
-        source: 'google_sheets', // Указываем источник
+        source: 'google_sheets',
         status: 'pending',
         rowIndex: link.rowIndex,
       });
@@ -1784,7 +1810,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks) => {
     })
   );
 
-  const updatedLinks = await processLinksInBatches(dbLinks, 20);
+  const updatedLinks = await processLinksInBatches(dbLinks, 20, projectId, wss);
 
   if (cancelAnalysis) {
     throw new Error('Analysis cancelled');

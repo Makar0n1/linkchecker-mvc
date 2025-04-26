@@ -26,6 +26,7 @@ const GoogleSheets = ({
   });
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
+  const [progressData, setProgressData] = useState({}); // Для хранения прогресса по spreadsheetId
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -58,6 +59,7 @@ const GoogleSheets = ({
         fetchSpreadsheets();
         setRunningIds([]);
         setLoading(false);
+        setProgressData({}); // Сбрасываем прогресс
       }
     } catch (err) {
       console.error('Error fetching analysis status:', err);
@@ -75,12 +77,24 @@ const GoogleSheets = ({
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       console.log('WebSocket message received:', data);
+      if (data.type === 'analysisProgress' && data.projectId === projectId) {
+        setProgressData(prev => ({
+          ...prev,
+          [data.spreadsheetId || projectId]: {
+            progress: data.progress,
+            processedLinks: data.processedLinks,
+            totalLinks: data.totalLinks,
+            estimatedTimeRemaining: data.estimatedTimeRemaining,
+          },
+        }));
+      }
       if (data.type === 'analysisComplete' && data.projectId === projectId) {
         console.log(`Analysis completed for project ${projectId}, fetching updated spreadsheets`);
         fetchSpreadsheets();
         setRunningIds([]);
         setLoading(false);
         setIsProjectAnalyzing(false);
+        setProgressData({}); // Сбрасываем прогресс
       }
     };
 
@@ -102,7 +116,6 @@ const GoogleSheets = ({
 
     const ws = connectWebSocket();
 
-    // Проверяем статус анализа каждые 10 секунд
     const statusInterval = setInterval(fetchAnalysisStatus, 10000);
 
     return () => {
@@ -204,6 +217,11 @@ const GoogleSheets = ({
       setSpreadsheets(updated.data);
       setRunningIds(runningIds.filter(id => id !== spreadsheetId));
       setError(null);
+      setProgressData(prev => {
+        const newProgress = { ...prev };
+        delete newProgress[spreadsheetId];
+        return newProgress;
+      });
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to cancel analysis');
     } finally {
@@ -294,56 +312,74 @@ const GoogleSheets = ({
       <ul>
         {spreadsheets.map((s) => {
           const isRunning = runningIds.includes(s._id);
+          const progress = progressData[s._id] || {};
           return (
             <motion.li
               key={s._id}
-              className="mb-4 p-3 bg-gray-50 rounded-lg shadow-sm hover:bg-gray-100 transition-colors flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+              className="mb-4 p-3 bg-gray-50 rounded-lg shadow-sm hover:bg-gray-100 transition-colors flex flex-col gap-2"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.3 }}
             >
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <span className={`w-4 h-4 rounded-full ${statusColor(s.status, isRunning)} flex-shrink-0`}></span>
-                  <span className="text-gray-700 break-all">
-                    {s.spreadsheetId} - {s.targetDomain} - Every {s.intervalHours} hours
-                  </span>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-4 h-4 rounded-full ${statusColor(s.status, isRunning)} flex-shrink-0`}></span>
+                    <span className="text-gray-700 break-all">
+                      {s.spreadsheetId} - {s.targetDomain} - Every {s.intervalHours} hours
+                    </span>
+                  </div>
+                  <div className="text-gray-600 text-sm">
+                    <p>Scans: {s.scanCount || 0}</p>
+                    <p>Last Scan: {s.lastRun ? new Date(s.lastRun).toLocaleString() : 'Never'}</p>
+                    <p>Next Scan In: {timers[s._id] || 'Calculating...'}</p>
+                  </div>
                 </div>
-                <div className="text-gray-600 text-sm">
-                  <p>Scans: {s.scanCount || 0}</p>
-                  <p>Last Scan: {s.lastRun ? new Date(s.lastRun).toLocaleString() : 'Never'}</p>
-                  <p>Next Scan In: {timers[s._id] || 'Calculating...'}</p>
+                <div className="flex gap-2 sm:ml-auto">
+                  {s.status === 'checking' ? (
+                    <>
+                      <button
+                        onClick={() => cancelAnalysis(s._id)}
+                        className="bg-red-500 text-white px-4 py-1 rounded-lg hover:bg-red-600 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => runAnalysis(s._id)}
+                        disabled={isRunning || isProjectAnalyzing}
+                        className={`bg-green-500 text-white px-4 py-1 rounded-lg ${isRunning || isProjectAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
+                      >
+                        {isRunning ? 'Running...' : 'Run'}
+                      </button>
+                      <button
+                        onClick={() => deleteSpreadsheet(s._id)}
+                        disabled={isRunning || isProjectAnalyzing}
+                        className={`bg-red-500 text-white px-4 py-1 rounded-lg ${isRunning || isProjectAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
-              <div className="flex gap-2 sm:ml-auto">
-                {s.status === 'checking' ? (
-                  <>
-                    <button
-                      onClick={() => cancelAnalysis(s._id)}
-                      className="bg-red-500 text-white px-4 py-1 rounded-lg hover:bg-red-600 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => runAnalysis(s._id)}
-                      disabled={isRunning || isProjectAnalyzing}
-                      className={`bg-green-500 text-white px-4 py-1 rounded-lg ${isRunning || isProjectAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
-                    >
-                      {isRunning ? 'Running...' : 'Run'}
-                    </button>
-                    <button
-                      onClick={() => deleteSpreadsheet(s._id)}
-                      disabled={isRunning || isProjectAnalyzing}
-                      className={`bg-red-500 text-white px-4 py-1 rounded-lg ${isRunning || isProjectAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
-                    >
-                      Delete
-                    </button>
-                  </>
-                )}
-              </div>
+              {isRunning && progress.progress !== undefined && (
+                <div className="flex flex-col gap-2">
+                  <div className="w-full bg-gray-200 rounded-full h-4">
+                    <div
+                      className="bg-green-500 h-4 rounded-full"
+                      style={{ width: `${progress.progress}%`, transition: 'width 0.5s ease-in-out' }}
+                    ></div>
+                  </div>
+                  <div className="text-gray-600 text-sm">
+                    <p>Progress: {progress.progress}%</p>
+                    <p>Processed: {progress.processedLinks} of {progress.totalLinks} links</p>
+                    <p>Estimated time remaining: {progress.estimatedTimeRemaining} seconds</p>
+                  </div>
+                </div>
+              )}
             </motion.li>
           );
         })}
