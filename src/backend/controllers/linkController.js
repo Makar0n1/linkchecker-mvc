@@ -1242,19 +1242,17 @@ const checkLinkStatus = async (link, browser) => {
 
       try {
         console.log(`Navigating to ${link.url}`);
-        const navigationPromise = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }); // Поменяли networkidle0 на domcontentloaded
         response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await navigationPromise;
         finalUrl = await page.url();
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
       } catch (error) {
         console.error(`Navigation failed for ${link.url}:`, error.message);
-        link.status = 'broken';
+        link.status = 'timeout'; // Возвращаем старое поведение: тайм-аут записывается в таблицу
         link.errorDetails = error.message;
         link.isIndexable = false;
-        link.indexabilityStatus = 'navigation-failed';
-        link.responseCode = 'Error';
+        link.indexabilityStatus = 'timeout';
+        link.responseCode = 'Timeout';
         await link.save();
         return link; // Прерываем попытки и возвращаем ссылку
       }

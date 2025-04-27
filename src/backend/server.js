@@ -113,5 +113,12 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 module.exports = { app, wss };
