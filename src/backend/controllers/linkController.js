@@ -1241,7 +1241,8 @@ const checkLinkStatus = async (link, browser) => {
       let finalUrl = link.url;
 
       try {
-        const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+        console.log(`Navigating to ${link.url}`);
+        const navigationPromise = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }); // Поменяли networkidle0 на domcontentloaded
         response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await navigationPromise;
         finalUrl = await page.url();
