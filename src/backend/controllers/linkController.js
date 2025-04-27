@@ -240,6 +240,7 @@ const sheets = google.sheets({
 const initializeBrowser = async () => {
   console.log('Initializing new browser for task...');
   const browser = await puppeteer.launch({
+    executablePath: '/usr/bin/chromium-browser',
     headless: true,
     args: [
       '--no-sandbox',
@@ -253,6 +254,7 @@ const initializeBrowser = async () => {
       '--no-zygote',
       '--disable-accelerated-2d-canvas',
     ],
+    ignoreHTTPSErrors: true,
     timeout: 60000,
   });
   console.log('New browser initialized');
