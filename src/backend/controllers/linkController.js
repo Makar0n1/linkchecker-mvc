@@ -13,6 +13,7 @@ const { google } = require('googleapis');
 const path = require('path');
 const async = require('async');
 const { URL } = require('url');
+const dns = require('dns').promises;
 //const { wss } = require('../server');
 
 let pLimit;
@@ -1009,16 +1010,35 @@ const checkLinkStatus = async (link, browser) => {
   let page;
   let attempt = 0;
   const maxAttempts = 3;
+  console.log(`Starting analysis for link: ${link.url}`);
 
   // Валидация URL перед началом обработки
   try {
-    new URL(link.url); // Проверяем, является ли URL валидным
+    new URL(link.url);
   } catch (error) {
     console.error(`Invalid URL detected: ${link.url}`);
     link.status = 'broken';
     link.errorDetails = `Invalid URL: ${link.url}`;
     link.isIndexable = false;
     link.indexabilityStatus = 'invalid-url';
+    link.responseCode = 'Error';
+    link.overallStatus = 'Problem';
+    link.lastChecked = new Date();
+    await link.save();
+    return link;
+  }
+
+  // Проверка доступности домена через DNS
+  const domain = new URL(link.url).hostname;
+  try {
+    await dns.lookup(domain);
+    console.log(`DNS resolved successfully for ${domain}`);
+  } catch (error) {
+    console.error(`DNS resolution failed for ${domain}: ${error.message}`);
+    link.status = 'broken';
+    link.errorDetails = `DNS resolution failed: ${error.message}`;
+    link.isIndexable = false;
+    link.indexabilityStatus = 'dns-error';
     link.responseCode = 'Error';
     link.overallStatus = 'Problem';
     link.lastChecked = new Date();
@@ -1229,13 +1249,13 @@ const checkLinkStatus = async (link, browser) => {
         link.responseCode = response ? response.status().toString() : 'Timeout';
       } catch (error) {
         console.error(`Navigation failed for ${link.url}:`, error.message);
-        link.status = 'timeout';
+        link.status = 'broken';
         link.errorDetails = error.message;
         link.isIndexable = false;
-        link.indexabilityStatus = 'timeout';
-        link.responseCode = 'Timeout';
+        link.indexabilityStatus = 'navigation-failed';
+        link.responseCode = 'Error';
         await link.save();
-        return link; // Возвращаем ссылку и прерываем попытки
+        return link; // Прерываем попытки и возвращаем ссылку
       }
       const loadTime = Date.now() - startTime;
       link.loadTime = loadTime;
@@ -1374,29 +1394,26 @@ const checkLinkStatus = async (link, browser) => {
         try {
           const currentPageUrl = await page.url();
           console.log(`Current page URL after redirects: ${currentPageUrl}`);
-
-          // Функция для прямого запроса к API 2Captcha
+      
           const solveCaptcha = async (task, maxRetries = 2) => {
             let retry = 0;
             while (retry <= maxRetries) {
               try {
-                // Создаём задачу
                 const createTaskResponse = await axios.post('https://api.2captcha.com/createTask', {
                   clientKey: process.env.TWOCAPTCHA_API_KEY,
                   task: task,
                 });
                 console.log(`2Captcha createTask response:`, createTaskResponse.data);
-
+      
                 if (createTaskResponse.data.errorId !== 0) {
                   throw new Error(`2Captcha createTask error: ${createTaskResponse.data.errorDescription}`);
                 }
-
+      
                 const taskId = createTaskResponse.data.taskId;
-
-                // Ожидаем результат
+      
                 let result;
                 while (true) {
-                  await new Promise(resolve => setTimeout(resolve, 5000)); // Ждём 5 секунд перед проверкой
+                  await new Promise(resolve => setTimeout(resolve, 5000));
                   const resultResponse = await axios.post('https://api.2captcha.com/getTaskResult', {
                     clientKey: process.env.TWOCAPTCHA_API_KEY,
                     taskId: taskId,
@@ -1408,11 +1425,11 @@ const checkLinkStatus = async (link, browser) => {
                     throw new Error(`2Captcha task failed: ${result.errorDescription || 'Unknown error'}`);
                   }
                 }
-
+      
                 if (!result.solution) {
                   throw new Error('No solution returned from 2Captcha');
                 }
-
+      
                 return result.solution;
               } catch (error) {
                 retry++;
