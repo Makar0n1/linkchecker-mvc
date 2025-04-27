@@ -1244,19 +1244,24 @@ const checkLinkStatus = async (link, browser) => {
 
       try {
         console.log(`Navigating to ${link.url}`);
-        response = await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        response = await page.goto(link.url, { 
+          waitUntil: 'domcontentloaded', 
+          timeout: 60000, 
+          ignoreHTTPSErrors: true 
+        });
         finalUrl = await page.url();
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
       } catch (error) {
         console.error(`Navigation failed for ${link.url}:`, error.message);
-        link.status = 'timeout'; // Возвращаем старое поведение: тайм-аут записывается в таблицу
+        link.status = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout'; // Уточняем статус для ошибок SSL
         link.errorDetails = error.message;
         link.isIndexable = false;
-        link.indexabilityStatus = 'timeout';
-        link.responseCode = 'Timeout';
+        link.indexabilityStatus = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout';
+        link.responseCode = 'Error';
+        link.overallStatus = 'Problem'; // Устанавливаем overallStatus
         await link.save();
-        return link; // Прерываем попытки и возвращаем ссылку
+        return link;
       }
       const loadTime = Date.now() - startTime;
       link.loadTime = loadTime;
