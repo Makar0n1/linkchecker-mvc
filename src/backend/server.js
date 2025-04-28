@@ -5,6 +5,8 @@ const dotenv = require('dotenv');
 const path = require('path');
 const linkRoutes = require('./routes/linkRoutes');
 const WebSocket = require('ws');
+const Spreadsheet = require('./models/Spreadsheet');
+const Project = require('./models/Project');
 
 // Загружаем .env в зависимости от окружения
 const envPath = process.env.NODE_ENV === 'production'
@@ -24,7 +26,36 @@ const port = process.env.BACKEND_PORT || 3000;
 // Настройка подключения к MongoDB
 mongoose.set('strictQuery', true);
 mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
-  .then(() => console.log('Connected to MongoDB'))
+  .then(async () => {
+    console.log('Connected to MongoDB');
+
+    // Проверка и исправление данных в базе
+    console.log('Checking database for missing userId in Spreadsheets and Projects...');
+    const spreadsheetsWithoutUserId = await Spreadsheet.find({ userId: { $exists: false } });
+    if (spreadsheetsWithoutUserId.length > 0) {
+      console.log(`Found ${spreadsheetsWithoutUserId.length} Spreadsheets without userId`);
+      for (const spreadsheet of spreadsheetsWithoutUserId) {
+        const project = await Project.findById(spreadsheet.projectId);
+        if (project && project.userId) {
+          spreadsheet.userId = project.userId;
+          await spreadsheet.save();
+          console.log(`Updated Spreadsheet ${spreadsheet._id} with userId=${spreadsheet.userId}`);
+        } else {
+          console.error(`Cannot update Spreadsheet ${spreadsheet._id}: Project ${spreadsheet.projectId} not found or missing userId`);
+        }
+      }
+    } else {
+      console.log('All Spreadsheets have userId');
+    }
+
+    const projectsWithoutUserId = await Project.find({ userId: { $exists: false } });
+    if (projectsWithoutUserId.length > 0) {
+      console.error(`Found ${projectsWithoutUserId.length} Projects without userId:`, projectsWithoutUserId);
+      // Здесь можно добавить логику для исправления, но это может потребовать ручного вмешательства
+    } else {
+      console.log('All Projects have userId');
+    }
+  })
   .catch(err => {
     console.error('MongoDB connection error:', err);
     process.exit(1);
@@ -41,7 +72,7 @@ const corsOptions = {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log(`CORS: Origin ${origin} not allowed. Allowed origins: ${allowedOrigins}`); // Логируем только ошибки
+      console.log(`CORS: Origin ${origin} not allowed. Allowed origins: ${allowedOrigins}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -113,6 +144,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
+
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
 });

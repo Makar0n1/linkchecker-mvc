@@ -6,8 +6,8 @@ const frontendLinkSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true },
   spreadsheetId: { type: String },
-  rowIndex: { type: Number }, // Для Google Sheets
-  source: { type: String, enum: ['manual', 'google_sheets'], default: 'manual' }, // Новое поле
+  rowIndex: { type: Number },
+  source: { type: String, enum: ['manual', 'google_sheets'], default: 'manual' },
   status: { type: String, default: 'pending' },
   responseCode: { type: String },
   loadTime: { type: Number },
@@ -17,7 +17,7 @@ const frontendLinkSchema = new mongoose.Schema({
   linkType: { type: String },
   anchorText: { type: String },
   canonicalUrl: { type: String },
-  redirectUrl: { type: String }, // Новое поле для хранения конечного URL после перенаправления
+  redirectUrl: { type: String },
   overallStatus: { type: String },
   errorDetails: { type: String },
   lastChecked: { type: Date },
@@ -25,9 +25,14 @@ const frontendLinkSchema = new mongoose.Schema({
 
 // Для обратной совместимости: если используется targetDomain, конвертируем в targetDomains
 frontendLinkSchema.pre('save', function(next) {
+  console.log(`FrontendLink pre-save: userId=${this.userId}, url=${this.url}`);
   if (this.targetDomain && !this.targetDomains) {
     this.targetDomains = [this.targetDomain];
     this.targetDomain = undefined;
+  }
+  if (!this.userId) {
+    console.error(`FrontendLink pre-save: userId is missing for URL ${this.url}`);
+    throw new Error('userId is required in pre-save hook');
   }
   next();
 });

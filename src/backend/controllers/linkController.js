@@ -14,6 +14,7 @@ const path = require('path');
 const async = require('async');
 const { URL } = require('url');
 const dns = require('dns').promises;
+const mongoose = require('mongoose');
 //const { wss } = require('../server');
 
 let pLimit;
@@ -24,7 +25,7 @@ let pLimit;
 
 const MAX_CONCURRENT_ANALYSES = 2;
 const analysisQueue = async.queue((task, callback) => {
-  console.log(`Starting queued analysis for project ${task.projectId}, type: ${task.type}`);
+  console.log(`Starting queued analysis for project ${task.projectId}, type: ${task.type}, taskId: ${task.taskId}, userId: ${task.userId}`);
   if (typeof task.handler !== 'function') {
     console.error(`Handler is not a function for task type ${task.type}`);
     return callback(new Error('Handler is not a function'));
@@ -80,6 +81,11 @@ const loadPendingTasks = async () => {
           await AnalysisTask.findByIdAndUpdate(task._id, { $set: { status: 'failed', error: 'Project not found' } });
           continue;
         }
+        if (!project.userId) {
+          console.error(`loadPendingTasks: Project ${task.projectId} has no userId, marking task as failed`);
+          await AnalysisTask.findByIdAndUpdate(task._id, { $set: { status: 'failed', error: 'Project missing userId' } });
+          continue;
+        }
         const links = await FrontendLink.find({ projectId: task.projectId, source: 'manual' });
         analysisQueue.push({
           taskId: task._id,
@@ -90,6 +96,7 @@ const loadPendingTasks = async () => {
           userId: task.data.userId,
           wss: null,
           handler: (task, callback) => {
+            console.log(`checkLinks handler: Starting for task ${task.taskId}, userId=${task.userId}, type=${typeof task.userId}`);
             let project;
             Project.findOne({ _id: task.projectId, userId: task.userId })
               .then(proj => {
@@ -140,16 +147,49 @@ const loadPendingTasks = async () => {
           await AnalysisTask.findByIdAndUpdate(task._id, { $set: { status: 'failed', error: 'Spreadsheet not found' } });
           continue;
         }
+
+        // Проверяем userId
+        let userId = task.data.userId;
+        console.log(`loadPendingTasks: Processing runSpreadsheetAnalysis task ${task._id}, initial userId=${userId}, type=${typeof userId}`);
+        if (!userId) {
+          console.log(`loadPendingTasks: userId not found in task.data for task ${task._id}, attempting to retrieve from project`);
+          const project = await Project.findById(task.projectId);
+          if (project && project.userId) {
+            userId = project.userId;
+            console.log(`loadPendingTasks: Retrieved userId=${userId}, type=${typeof userId} from project ${task.projectId}`);
+          } else {
+            console.log(`loadPendingTasks: Could not retrieve userId for task ${task._id}, marking as failed`);
+            await AnalysisTask.findByIdAndUpdate(task._id, { $set: { status: 'failed', error: 'userId not found' } });
+            continue;
+          }
+        }
+
+        // Дополнительно проверяем spreadsheet.userId
+        if (!spreadsheet.userId) {
+          console.error(`loadPendingTasks: Spreadsheet ${spreadsheet._id} has no userId, attempting to set from project`);
+          const project = await Project.findById(task.projectId);
+          if (project && project.userId) {
+            spreadsheet.userId = project.userId;
+            await spreadsheet.save();
+            console.log(`loadPendingTasks: Updated spreadsheet ${spreadsheet._id} with userId=${spreadsheet.userId}`);
+          } else {
+            console.error(`loadPendingTasks: Could not set userId for spreadsheet ${spreadsheet._id}, marking task as failed`);
+            await AnalysisTask.findByIdAndUpdate(task._id, { $set: { status: 'failed', error: 'Spreadsheet missing userId' } });
+            continue;
+          }
+        }
+
         analysisQueue.push({
           taskId: task._id,
           projectId: task.projectId,
           type: task.type,
           req: null,
           res: null,
-          userId: task.data.userId,
+          userId: userId,
           wss: null,
           spreadsheetId: task.data.spreadsheetId,
           handler: (task, callback) => {
+            console.log(`loadPendingTasks handler: Processing runSpreadsheetAnalysis task ${task.taskId}, userId=${task.userId}, type=${typeof task.userId}`);
             let project;
             Project.findOne({ _id: task.projectId, userId: task.userId })
               .then(proj => {
@@ -164,7 +204,8 @@ const loadPendingTasks = async () => {
               })
               .then(() => {
                 cancelAnalysis = false;
-                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss, task.taskId);
+                console.log(`loadPendingTasks: Calling analyzeSpreadsheet with userId=${task.userId} for task ${task._id}`);
+                return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss, task.taskId, task.userId);
               })
               .then(() => {
                 if (cancelAnalysis) {
@@ -240,7 +281,7 @@ const sheets = google.sheets({
 const initializeBrowser = async () => {
   console.log('Initializing new browser for task...');
   const browser = await puppeteer.launch({
-    executablePath: '/usr/bin/chromium-browser',
+    //executablePath: '/usr/bin/chromium-browser',
     headless: true,
     args: [
       '--no-sandbox',
@@ -283,13 +324,14 @@ const authMiddleware = (req, res, next) => {
   }
 
   if (!token) {
-    console.log('authMiddleware: No token provided');
+    console.log('authMiddleware: No token provided in request');
     return res.status(401).json({ error: 'No token provided' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
+    console.log(`authMiddleware: Successfully decoded token, userId=${req.userId}`);
     next();
   } catch (error) {
     console.log('authMiddleware: Invalid token', error.message);
@@ -716,14 +758,28 @@ let cancelAnalysis = false;
 
 const runSpreadsheetAnalysis = async (req, res) => {
   const { projectId, spreadsheetId } = req.params;
+  console.log(`runSpreadsheetAnalysis: Starting for project ${projectId}, spreadsheet ${spreadsheetId}, userId=${req.userId}, type=${typeof req.userId}`);
+
+  if (!req.userId) {
+    console.error(`runSpreadsheetAnalysis: req.userId is missing`);
+    return res.status(401).json({ error: 'User authentication required' });
+  }
+
   const user = await User.findById(req.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) {
+    console.error(`runSpreadsheetAnalysis: User not found for userId=${req.userId}`);
+    return res.status(404).json({ error: 'User not found' });
+  }
   if (!user.isSuperAdmin && user.plan === 'free') {
+    console.log(`runSpreadsheetAnalysis: Google Sheets integration is not available on Free plan for user ${req.userId}`);
     return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
   }
 
   const project = await Project.findOne({ _id: projectId, userId: req.userId });
-  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!project) {
+    console.error(`runSpreadsheetAnalysis: Project ${projectId} not found for user ${req.userId}`);
+    return res.status(404).json({ error: 'Project not found' });
+  }
 
   if (project.isAnalyzing) {
     console.log(`runSpreadsheetAnalysis: Analysis already in progress for project ${projectId}, rejecting request`);
@@ -731,7 +787,10 @@ const runSpreadsheetAnalysis = async (req, res) => {
   }
 
   const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId: req.userId });
-  if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
+  if (!spreadsheet) {
+    console.error(`runSpreadsheetAnalysis: Spreadsheet ${spreadsheetId} not found for project ${projectId}, user ${req.userId}`);
+    return res.status(404).json({ error: 'Spreadsheet not found' });
+  }
 
   const planLinkLimits = {
     basic: 1000,
@@ -741,7 +800,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
   };
   const maxLinks = user.isSuperAdmin ? 50000 : planLinkLimits[user.plan];
 
-  console.log(`Adding runSpreadsheetAnalysis task to queue for spreadsheet ${spreadsheetId} in project ${projectId}`);
+  console.log(`Adding runSpreadsheetAnalysis task to queue for spreadsheet ${spreadsheetId} in project ${projectId} with userId=${req.userId}`);
 
   const task = new AnalysisTask({
     projectId,
@@ -765,6 +824,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
     wss: req.wss,
     spreadsheetId,
     handler: (task, callback) => {
+      console.log(`runSpreadsheetAnalysis handler: Processing task ${task.taskId} for project ${task.projectId}, userId=${task.userId}, type=${typeof task.userId}`);
       let project;
       Project.findOne({ _id: task.projectId, userId: task.userId })
         .then(proj => {
@@ -779,7 +839,8 @@ const runSpreadsheetAnalysis = async (req, res) => {
         })
         .then(() => {
           cancelAnalysis = false;
-          return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.wss, task.taskId);
+          console.log(`runSpreadsheetAnalysis handler: Calling analyzeSpreadsheet with userId=${task.userId}`);
+          return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.wss, task.taskId, task.userId);
         })
         .then(() => {
           if (cancelAnalysis) {
@@ -2649,7 +2710,8 @@ const checkLinkStatus = async (link, browser) => {
           link.anchorText = 'not found';
           link.errorDetails = link.errorDetails || '';
         }
-        link.overallStatus = link.isIndexable ? 'OK' : 'Problem';
+        // Исправляем логику: код 304 считается таким же успешным, как 200
+        link.overallStatus = (link.responseCode === '200' || link.responseCode === '304') && link.isIndexable && isLinkFound ? 'OK' : 'Problem';
       } else {
         link.status = 'broken';
         link.rel = 'not found';
@@ -2661,26 +2723,8 @@ const checkLinkStatus = async (link, browser) => {
 
       link.lastChecked = new Date();
       await link.save();
+      console.log(`Finished analysis for link: ${link.url}, status: ${link.status}, overallStatus: ${link.overallStatus}`);
       return link;
-    } catch (error) {
-      console.error(`Critical error in checkLinkStatus for ${link.url} on attempt ${attempt + 1}:`, error);
-      attempt += 1;
-      if (page) {
-        await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
-      }
-      if (attempt === maxAttempts) {
-        link.status = 'broken';
-        link.errorDetails = `Failed after ${maxAttempts} attempts: ${error.message}`;
-        link.rel = 'error';
-        link.linkType = 'unknown';
-        link.anchorText = 'error';
-        link.isIndexable = false;
-        link.indexabilityStatus = `check failed: ${error.message}`;
-        link.responseCode = 'Error';
-        link.overallStatus = 'Problem';
-        await link.save();
-        return link;
-      }
       await new Promise(resolve => setTimeout(resolve, 2000));
     } finally {
       if (page) {
@@ -2787,6 +2831,12 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
   if (pendingLinks.length > 0) {
     console.log(`Found ${pendingLinks.length} links still in "checking" status after analysis. Updating...`);
     await Promise.all(pendingLinks.map(async (link) => {
+      console.log(`Processing pending link: ${link.url}, userId=${link.userId}`);
+      if (!link.userId) {
+        console.error(`Link ${link.url} has no userId, deleting to avoid validation error`);
+        await FrontendLink.deleteOne({ _id: link._id });
+        return;
+      }
       link.status = 'broken';
       link.errorDetails = 'Analysis incomplete: status not updated';
       link.overallStatus = 'Problem';
@@ -2798,12 +2848,60 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
   return results;
 };
 
-const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId) => {
+const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId, userId) => {
   try {
+    console.log(`analyzeSpreadsheet: Entering function for spreadsheet ${spreadsheet._id}, project ${projectId}, task ${taskId}`);
+    console.log(`analyzeSpreadsheet: Received userId=${userId}, spreadsheet.userId=${spreadsheet.userId}, spreadsheetId=${spreadsheet._id}`);
+
     const existingSpreadsheet = await Spreadsheet.findOne({ _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId });
     if (!existingSpreadsheet) {
+      console.error(`analyzeSpreadsheet: Spreadsheet ${spreadsheet._id} not found in database`);
       throw new Error('Spreadsheet not found');
     }
+
+    // Очистка существующих ссылок с некорректным userId
+    console.log(`analyzeSpreadsheet: Cleaning up invalid FrontendLinks for spreadsheet ${spreadsheet._id}`);
+    const invalidLinks = await FrontendLink.deleteMany({
+      spreadsheetId: spreadsheet.spreadsheetId,
+      $or: [
+        { userId: { $exists: false } },
+        { userId: null },
+      ],
+    });
+    console.log(`analyzeSpreadsheet: Deleted ${invalidLinks.deletedCount} invalid FrontendLinks`);
+
+    // Строгая проверка userId
+    console.log(`analyzeSpreadsheet: Checking userId: userId=${userId}, spreadsheet.userId=${spreadsheet.userId}`);
+    if (!userId && !spreadsheet.userId) {
+      console.error(`analyzeSpreadsheet: userId is missing for spreadsheet ${spreadsheet._id}`);
+      throw new Error('userId is required but missing');
+    }
+    const effectiveUserId = userId || spreadsheet.userId;
+    console.log(`analyzeSpreadsheet: Computed effectiveUserId=${effectiveUserId}, type=${typeof effectiveUserId}`);
+    if (!effectiveUserId || effectiveUserId === '' || effectiveUserId === null) {
+      console.error(`analyzeSpreadsheet: effectiveUserId is invalid for spreadsheet ${spreadsheet._id}, userId=${userId}, spreadsheet.userId=${spreadsheet.userId}`);
+      throw new Error('effectiveUserId is invalid (undefined, null, or empty)');
+    }
+
+    // Проверяем, является ли effectiveUserId валидным ObjectId
+    let finalUserId;
+    console.log(`analyzeSpreadsheet: Starting ObjectId validation for effectiveUserId=${effectiveUserId}`);
+    try {
+      const isValidObjectId = mongoose.isValidObjectId(effectiveUserId);
+      console.log(`analyzeSpreadsheet: mongoose.isValidObjectId returned ${isValidObjectId} for effectiveUserId=${effectiveUserId}`);
+      if (isValidObjectId) {
+        console.log(`analyzeSpreadsheet: effectiveUserId=${effectiveUserId} is a valid ObjectId`);
+        finalUserId = mongoose.Types.ObjectId(effectiveUserId);
+        console.log(`analyzeSpreadsheet: Converted effectiveUserId to ObjectId: ${finalUserId}`);
+      } else {
+        console.error(`analyzeSpreadsheet: effectiveUserId=${effectiveUserId} is not a valid ObjectId`);
+        throw new Error('Invalid userId format: not a valid ObjectId');
+      }
+    } catch (error) {
+      console.error(`analyzeSpreadsheet: Error during ObjectId validation for effectiveUserId=${effectiveUserId}: ${error.message}`);
+      throw new Error(`ObjectId validation failed: ${error.message}`);
+    }
+    console.log(`analyzeSpreadsheet: Using userId=${finalUserId} for spreadsheet ${spreadsheet._id}`);
 
     const { links, sheetName } = await importFromGoogleSheets(
       spreadsheet.spreadsheetId,
@@ -2819,16 +2917,18 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId)
 
     const dbLinks = await Promise.all(
       links.map(async link => {
+        console.log(`Creating FrontendLink for URL ${link.url} with userId=${finalUserId}`);
         const newLink = new FrontendLink({
           url: link.url,
           targetDomains: link.targetDomains,
-          userId: spreadsheet.userId,
+          userId: finalUserId,
           projectId: spreadsheet.projectId,
           spreadsheetId: spreadsheet.spreadsheetId,
           source: 'google_sheets',
           status: 'pending',
           rowIndex: link.rowIndex,
         });
+        console.log(`FrontendLink object before save: ${JSON.stringify(newLink.toObject())}`);
         await newLink.save();
         return newLink;
       })
@@ -2841,7 +2941,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId)
     }
 
     const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
-      { _id: spreadsheet._id, userId: spreadsheet.userId, projectId: spreadsheet.projectId },
+      { _id: spreadsheet._id, userId: finalUserId, projectId: spreadsheet.projectId },
       {
         $set: {
           links: updatedLinks.map(link => ({
@@ -2865,18 +2965,19 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId)
       throw new Error('Spreadsheet not found during update');
     }
 
-    const { default: pLimitModule } = await import('p-limit');
-    const pLimit = pLimitModule;
-
-    const limit = pLimit(5);
-    await Promise.all(updatedLinks.map(link =>
-      limit(() => exportLinkToGoogleSheets(spreadsheet.spreadsheetId, link, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd, sheetName))
-    ));
+    // Экспортируем все ссылки одним batch-запросом
+    await exportLinksToGoogleSheetsBatch(
+      spreadsheet.spreadsheetId,
+      updatedLinks,
+      spreadsheet.resultRangeStart,
+      spreadsheet.resultRangeEnd,
+      sheetName
+    );
 
     await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd);
   } catch (error) {
     console.error(`Critical error in analyzeSpreadsheet for spreadsheet ${spreadsheet._id}:`, error);
-    throw error; // Передаем ошибку в очередь для корректной обработки
+    throw error;
   }
 };
 
@@ -2921,43 +3022,88 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
   }
 };
 
-const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, resultRangeEnd, sheetName) => {
-  const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
-  const isLinkFound = link.status === 'active' && link.rel !== 'not found';
-  const value = [
-    responseCode === '200' && link.isIndexable && isLinkFound ? 'OK' : 'Problem',
-    responseCode,
-    link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
-    link.isIndexable === false ? link.indexabilityStatus : '',
-    isLinkFound ? 'True' : 'False',
-  ];
-  const range = `${sheetName}!${resultRangeStart}${link.rowIndex}:${resultRangeEnd}${link.rowIndex}`;
-  console.log(`Exporting to ${range} (${spreadsheetId}): ${value}`);
+const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeStart, resultRangeEnd, sheetName) => {
+  try {
+    // Подготовка данных для экспорта
+    const data = links.map(link => {
+      const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
+      const isLinkFound = link.status === 'active' && link.rel !== 'not found';
+      return [
+        (responseCode === '200' || responseCode === '304') && link.isIndexable && isLinkFound ? 'OK' : 'Problem',
+        responseCode,
+        link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
+        link.isIndexable === false ? link.indexabilityStatus : '',
+        isLinkFound ? 'True' : 'False',
+      ];
+    });
 
-  let attempt = 1;
-  while (true) {
-    try {
-      const response = await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range,
+    // Определяем диапазон для записи
+    const startRow = Math.min(...links.map(link => link.rowIndex));
+    const endRow = Math.max(...links.map(link => link.rowIndex));
+    const range = `${sheetName}!${resultRangeStart}${startRow}:${resultRangeEnd}${endRow}`;
+    console.log(`Exporting to ${range} (${spreadsheetId}): ${data.length} rows`);
+
+    // Формируем batch-запрос
+    const request = {
+      spreadsheetId,
+      resource: {
         valueInputOption: 'RAW',
-        resource: { values: [value] },
-      });
-      console.log(`Successfully exported to ${range}: ${JSON.stringify(response.data)}`);
-      return;
-    } catch (error) {
-      if (error.code === 429) {
-        const delay = 30 * 1000;
-        console.log(`Rate limit exceeded for ${range}, retrying in ${delay}ms (attempt ${attempt})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        attempt++;
-        continue;
-      }
-      console.error(`Error exporting to ${range} (${spreadsheetId}):`, error.response ? error.response.data : error.message);
-      throw error;
-    }
+        data: [
+          {
+            range: range,
+            values: data,
+          },
+        ],
+      },
+    };
+
+    // Отправляем batch-запрос
+    const response = await sheets.spreadsheets.values.batchUpdate(request);
+    console.log(`Successfully updated ${response.data.totalUpdatedCells} cells in Google Sheets`);
+  } catch (error) {
+    console.error(`Error exporting to Google Sheets (${spreadsheetId}):`, error.message);
+    throw error;
   }
 };
+
+
+// const exportLinkToGoogleSheets = async (spreadsheetId, link, resultRangeStart, resultRangeEnd, sheetName) => {
+//   const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
+//   const isLinkFound = link.status === 'active' && link.rel !== 'not found';
+//   const value = [
+//     responseCode === '200' && link.isIndexable && isLinkFound ? 'OK' : 'Problem',
+//     responseCode,
+//     link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
+//     link.isIndexable === false ? link.indexabilityStatus : '',
+//     isLinkFound ? 'True' : 'False',
+//   ];
+//   const range = `${sheetName}!${resultRangeStart}${link.rowIndex}:${resultRangeEnd}${link.rowIndex}`;
+//   console.log(`Exporting to ${range} (${spreadsheetId}): ${value}`);
+
+//   let attempt = 1;
+//   while (true) {
+//     try {
+//       const response = await sheets.spreadsheets.values.update({
+//         spreadsheetId,
+//         range,
+//         valueInputOption: 'RAW',
+//         resource: { values: [value] },
+//       });
+//       console.log(`Successfully exported to ${range}: ${JSON.stringify(response.data)}`);
+//       return;
+//     } catch (error) {
+//       if (error.code === 429) {
+//         const delay = 30 * 1000;
+//         console.log(`Rate limit exceeded for ${range}, retrying in ${delay}ms (attempt ${attempt})`);
+//         await new Promise(resolve => setTimeout(resolve, delay));
+//         attempt++;
+//         continue;
+//       }
+//       console.error(`Error exporting to ${range} (${spreadsheetId}):`, error.response ? error.response.data : error.message);
+//       throw error;
+//     }
+//   }
+// };
 
 const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, resultRangeEnd) => {
   console.log(`Formatting sheet ${spreadsheetId} (gid: ${gid})...`);
@@ -3082,6 +3228,15 @@ const scheduleSpreadsheetAnalysis = async (spreadsheet) => {
           return;
         }
 
+        // Получаем userId из проекта
+        if (!project.userId) {
+          console.error(`scheduleSpreadsheetAnalysis: userId is missing in project ${spreadsheet.projectId}`);
+          reject(new Error('userId is missing in project'));
+          return;
+        }
+        const userId = project.userId;
+        console.log(`scheduleSpreadsheetAnalysis: Using userId=${userId} for spreadsheet ${spreadsheet.spreadsheetId}`);
+
         project.isAnalyzing = true;
         await project.save();
 
@@ -3089,7 +3244,8 @@ const scheduleSpreadsheetAnalysis = async (spreadsheet) => {
           spreadsheet.status = 'checking';
           await spreadsheet.save();
 
-          await analyzeSpreadsheet(spreadsheet);
+          const maxLinks = 50000; // Устанавливаем максимум для scheduled анализа
+          await analyzeSpreadsheet(spreadsheet, maxLinks, spreadsheet.projectId, null, null, userId); // Передаём userId из проекта
           spreadsheet.status = 'completed';
           spreadsheet.lastRun = new Date();
           spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
@@ -3110,6 +3266,7 @@ const scheduleSpreadsheetAnalysis = async (spreadsheet) => {
     });
   });
 };
+
 const getAnalysisStatus = async (req, res) => {
   const { projectId } = req.params;
   try {
@@ -3218,6 +3375,16 @@ const getUserTasks = async (req, res) => {
     res.status(500).json({ error: 'Error fetching user tasks', details: error.message });
   }
 };
+const getActiveTasks = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const tasks = await AnalysisTask.find({ projectId, status: { $in: ['pending', 'processing'] } });
+    res.json({ activeTasks: tasks });
+  } catch (error) {
+    console.error('getActiveTasks: Error fetching active tasks', error);
+    res.status(500).json({ error: 'Error fetching active tasks', details: error.message });
+  }
+};
 // Экспортируем все функции
 module.exports = {
   registerUser,
@@ -3245,6 +3412,7 @@ module.exports = {
   getTaskProgress: [authMiddleware, getTaskProgress],
   getTaskProgressSSE: [authMiddleware, getTaskProgressSSE],
   getUserTasks: [authMiddleware, getUserTasks],
+  getActiveTasks: [authMiddleware, getActiveTasks],
   checkLinkStatus,
   analyzeSpreadsheet,
   scheduleSpreadsheetAnalysis,

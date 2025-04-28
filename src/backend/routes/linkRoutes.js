@@ -23,6 +23,7 @@ router.post('/:projectId/links/check', linkController.checkLinks);
 router.delete('/:projectId/links/:id', linkController.deleteLink);
 
 // Google Sheets (в рамках проекта)
+router.get('/projects/:projectId/activeTasks', linkController.getActiveTasks);
 router.post('/:projectId/spreadsheets', linkController.addSpreadsheet);
 router.get('/:projectId/spreadsheets', linkController.getSpreadsheets);
 router.post('/:projectId/spreadsheets/:spreadsheetId/run', linkController.runSpreadsheetAnalysis);
