@@ -244,6 +244,7 @@ const initializeBrowser = async () => {
     headless: true,
     args: [
       '--no-sandbox',
+      '--ignore-certificate-errors',
       '--disable-setuid-sandbox',
       '--disable-web-security',
       '--disable-features=IsolateOrigins,site-per-process',
@@ -253,6 +254,7 @@ const initializeBrowser = async () => {
       '--single-process',
       '--no-zygote',
       '--disable-accelerated-2d-canvas',
+      '--allow-running-insecure-content',
     ],
     ignoreHTTPSErrors: true,
     timeout: 60000,
