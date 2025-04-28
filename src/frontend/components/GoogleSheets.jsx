@@ -60,13 +60,27 @@ const GoogleSheets = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       const serverTaskIds = response.data.activeTasks || {};
-      setTaskIds(prev => {
-        const updatedTaskIds = { ...prev, ...serverTaskIds };
-        localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(updatedTaskIds));
-        return updatedTaskIds;
-      });
+      // Полностью перезаписываем taskIds
+      setTaskIds(serverTaskIds);
+      localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(serverTaskIds));
+      // Если активных задач нет, сбрасываем состояние анализа
+      if (Object.keys(serverTaskIds).length === 0) {
+        setIsProjectAnalyzing(false);
+        setIsAnalyzing(false);
+        setRunningIds([]);
+        setProgressData({});
+        localStorage.setItem(`progressData-${projectId}`, JSON.stringify({}));
+      }
     } catch (err) {
       console.error('Error fetching user tasks:', err);
+      // В случае ошибки сбрасываем taskIds
+      setTaskIds({});
+      localStorage.setItem(`taskIds-${projectId}`, JSON.stringify({}));
+      setIsProjectAnalyzing(false);
+      setIsAnalyzing(false);
+      setRunningIds([]);
+      setProgressData({});
+      localStorage.setItem(`progressData-${projectId}`, JSON.stringify({}));
     }
   };
 
@@ -106,7 +120,7 @@ const GoogleSheets = ({
           return updatedProgress;
         });
         setIsProjectAnalyzing(false);
-        setIsAnalyzing(false); // Сбрасываем состояние анализа
+        setIsAnalyzing(false);
         fetchSpreadsheets();
       }
     } catch (err) {
@@ -126,7 +140,7 @@ const GoogleSheets = ({
           return updatedProgress;
         });
         setIsProjectAnalyzing(false);
-        setIsAnalyzing(false); // Сбрасываем состояние анализа
+        setIsAnalyzing(false);
         fetchSpreadsheets();
       }
     }
@@ -466,6 +480,29 @@ const GoogleSheets = ({
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
   };
+
+  useEffect(() => {
+    const clearStaleTasks = async () => {
+      const token = localStorage.getItem('token');
+      try {
+        await axios.post(`${apiBaseUrl}/user/clear-stale-tasks`, {}, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (err) {
+        console.error('Error clearing stale tasks:', err);
+      }
+    };
+  
+    clearStaleTasks();
+    fetchSpreadsheets();
+    fetchUserTasks();
+  
+    const statusInterval = setInterval(fetchAnalysisStatus, 10000);
+  
+    return () => {
+      clearInterval(statusInterval);
+    };
+  }, [projectId, setSpreadsheets, setError, runningIds, setLoading]);
 
   return (
     <motion.div

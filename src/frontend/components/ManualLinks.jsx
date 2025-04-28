@@ -152,6 +152,28 @@ const ManualLinks = ({
   const handleMouseLeaveCanonical = () => {
     setHoveredCanonicalId(null);
   };
+  
+  useEffect(() => {
+    const clearStaleTasks = async () => {
+      const token = localStorage.getItem('token');
+      try {
+        await axios.post(`${apiBaseUrl}/user/clear-stale-tasks`, {}, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (err) {
+        console.error('Error clearing stale tasks:', err);
+      }
+    };
+  
+    clearStaleTasks();
+    fetchLinks();
+  
+    const ws = connectWebSocket();
+  
+    return () => {
+      ws.close();
+    };
+  }, [projectId]);
 
   return (
     <motion.div

@@ -36,5 +36,45 @@ router.post('/process-payment', linkController.processPayment);
 router.put('/profile', linkController.updateProfile);
 router.post('/cancel-subscription', linkController.cancelSubscription);
 router.delete('/account', linkController.deleteAccount);
+router.post('/user/clear-stale-tasks', authMiddleware, async (req, res) => {
+    try {
+      const userId = req.userId;
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+  
+      const activeTasks = user.activeTasks || new Map();
+      const projectIds = Array.from(activeTasks.keys());
+      const tasksToRemove = [];
+  
+      // Проверяем каждую задачу
+      for (const projectId of projectIds) {
+        const taskId = activeTasks.get(projectId);
+        const task = await AnalysisTask.findById(taskId);
+        if (!task || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+          tasksToRemove.push(projectId);
+        }
+      }
+  
+      // Удаляем устаревшие задачи
+      for (const projectId of tasksToRemove) {
+        activeTasks.delete(projectId);
+        const project = await Project.findOne({ _id: projectId, userId });
+        if (project) {
+          project.isAnalyzing = false;
+          await project.save();
+        }
+      }
+  
+      user.activeTasks = activeTasks;
+      await user.save();
+  
+      res.json({ message: 'Stale tasks cleared' });
+    } catch (error) {
+      console.error('Error clearing stale tasks:', error);
+      res.status(500).json({ error: 'Failed to clear stale tasks' });
+    }
+  });
 
 module.exports = router;
