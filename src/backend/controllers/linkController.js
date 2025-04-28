@@ -597,7 +597,7 @@ const checkLinks = async (req, res) => {
 
     // Добавляем taskId во все FrontendLink перед анализом
     await FrontendLink.updateMany(
-      { projectId, userId, taskId: { $exists: false } }, // Обновляем только те ссылки, у которых нет taskId
+      { projectId, userId, taskId: { $exists: false } },
       { $set: { taskId: task._id } }
     );
     console.log(`Updated FrontendLinks with taskId=${task._id} for project ${projectId}`);
@@ -615,7 +615,10 @@ const checkLinks = async (req, res) => {
       wss: req.wss,
       handler: async (task, callback) => {
         console.log(`checkLinks handler: Starting analysis for project ${projectId}`);
+        let project;
         try {
+          project = await Project.findOne({ _id: task.projectId, userId: task.userId });
+          if (!project) throw new Error('Project not found in handler');
           project.isAnalyzing = true;
           await project.save();
 
@@ -627,12 +630,22 @@ const checkLinks = async (req, res) => {
           console.error(`Error in checkLinks for project ${projectId}:`, error);
           callback(error);
         } finally {
-          project.isAnalyzing = false;
-          await project.save();
-          console.log(`checkLinks handler: Set isAnalyzing to false for project ${projectId}`);
+          if (project) {
+            project.isAnalyzing = false;
+            await project.save();
+            console.log(`checkLinks handler: Set isAnalyzing to false for project ${projectId}`);
+          }
           const user = await User.findById(task.userId);
-          user.activeTasks.delete(projectId);
-          await user.save();
+          if (user) {
+            user.activeTasks.delete(projectId);
+            await user.save();
+            console.log(`Cleared active task for project ${projectId} from user ${task.userId}`);
+          } else {
+            console.error(`User ${task.userId} not found during cleanup in checkLinks`);
+          }
+          // Удаляем задачу из AnalysisTask
+          await AnalysisTask.findByIdAndDelete(task.taskId);
+          console.log(`Deleted AnalysisTask ${task.taskId} after completion`);
         }
       },
     });
@@ -865,7 +878,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
                 if (!task.res.headersSent) {
                   task.res.json({ message: 'Analysis cancelled' });
                 }
-                callback(null); // Завершаем без ошибки
+                callback(null);
               });
           } else {
             console.error(`Error analyzing spreadsheet ${spreadsheetId} in project ${projectId}:`, error);
@@ -880,18 +893,23 @@ const runSpreadsheetAnalysis = async (req, res) => {
               });
           }
         })
-        .finally(() => {
+        .finally(async () => {
           if (project) {
             project.isAnalyzing = false;
-            project.save()
-              .then(async () => {
-                console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`);
-                const user = await User.findById(task.userId);
-                user.activeTasks.delete(projectId);
-                await user.save();
-              })
-              .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
+            await project.save();
+            console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`);
           }
+          const user = await User.findById(task.userId);
+          if (user) {
+            user.activeTasks.delete(projectId);
+            await user.save();
+            console.log(`Cleared active task for project ${projectId} from user ${task.userId}`);
+          } else {
+            console.error(`User ${task.userId} not found during cleanup in runSpreadsheetAnalysis`);
+          }
+          // Удаляем задачу из AnalysisTask
+          await AnalysisTask.findByIdAndDelete(task.taskId);
+          console.log(`Deleted AnalysisTask ${task.taskId} after completion`);
         });
     },
   });
@@ -953,6 +971,10 @@ const cancelSpreadsheetAnalysis = async (req, res) => {
     const user = await User.findById(userId);
     user.activeTasks.delete(projectId);
     await user.save();
+
+    // Удаляем задачу из AnalysisTask
+    await AnalysisTask.findByIdAndDelete(task._id);
+    console.log(`Deleted AnalysisTask ${task._id} after cancellation`);
 
     res.json({ message: 'Analysis cancelled' });
   } catch (error) {

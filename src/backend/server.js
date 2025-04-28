@@ -7,6 +7,8 @@ const linkRoutes = require('./routes/linkRoutes');
 const WebSocket = require('ws');
 const Spreadsheet = require('./models/Spreadsheet');
 const Project = require('./models/Project');
+const User = require('./models/User');
+const AnalysisTask = require('./models/AnalysisTask');
 
 // Загружаем .env в зависимости от окружения
 const envPath = process.env.NODE_ENV === 'production'
@@ -51,10 +53,43 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
     const projectsWithoutUserId = await Project.find({ userId: { $exists: false } });
     if (projectsWithoutUserId.length > 0) {
       console.error(`Found ${projectsWithoutUserId.length} Projects without userId:`, projectsWithoutUserId);
-      // Здесь можно добавить логику для исправления, но это может потребовать ручного вмешательства
     } else {
       console.log('All Projects have userId');
     }
+
+    // Очистка устаревших задач при старте сервера
+    console.log('Cleaning up stale tasks on server startup...');
+    const users = await User.find();
+    for (const user of users) {
+      const activeTasks = user.activeTasks || new Map();
+      const projectIds = Array.from(activeTasks.keys());
+      const tasksToRemove = [];
+
+      for (const projectId of projectIds) {
+        const taskId = activeTasks.get(projectId);
+        const task = await AnalysisTask.findById(taskId);
+        if (!task || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+          tasksToRemove.push(projectId);
+        }
+      }
+
+      for (const projectId of tasksToRemove) {
+        const taskId = activeTasks.get(projectId);
+        activeTasks.delete(projectId);
+        const project = await Project.findOne({ _id: projectId, userId: user._id });
+        if (project) {
+          project.isAnalyzing = false;
+          await project.save();
+          console.log(`Cleared isAnalyzing for project ${projectId} on startup`);
+        }
+        await AnalysisTask.findByIdAndDelete(taskId);
+        console.log(`Deleted stale AnalysisTask ${taskId} for project ${projectId} on startup`);
+      }
+
+      user.activeTasks = activeTasks;
+      await user.save();
+    }
+    console.log('Stale tasks cleanup completed on server startup');
   })
   .catch(err => {
     console.error('MongoDB connection error:', err);

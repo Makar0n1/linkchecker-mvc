@@ -36,6 +36,18 @@ const ManualLinks = ({
     ? `wss://api.link-check-pro.top`
     : `ws://localhost:${import.meta.env.VITE_BACKEND_PORT}`;
 
+  const clearStaleTasks = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      await axios.post(`${apiBaseUrl}/user/clear-stale-tasks`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      console.log('Stale tasks cleared');
+    } catch (err) {
+      console.error('Error clearing stale tasks:', err);
+    }
+  };
+
   const fetchLinks = async () => {
     const token = localStorage.getItem('token');
     try {
@@ -62,7 +74,7 @@ const ManualLinks = ({
         fetchLinks();
         setLoading(false);
         setCheckingLinks(new Set());
-        setIsAnalyzing(false); // Сбрасываем состояние анализа
+        setIsAnalyzing(false);
       }
     };
 
@@ -79,7 +91,12 @@ const ManualLinks = ({
   };
 
   useEffect(() => {
-    fetchLinks();
+    const initialize = async () => {
+      await clearStaleTasks();
+      await fetchLinks();
+    };
+
+    initialize();
 
     const ws = connectWebSocket();
 
@@ -152,28 +169,6 @@ const ManualLinks = ({
   const handleMouseLeaveCanonical = () => {
     setHoveredCanonicalId(null);
   };
-  
-  useEffect(() => {
-    const clearStaleTasks = async () => {
-      const token = localStorage.getItem('token');
-      try {
-        await axios.post(`${apiBaseUrl}/user/clear-stale-tasks`, {}, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch (err) {
-        console.error('Error clearing stale tasks:', err);
-      }
-    };
-  
-    clearStaleTasks();
-    fetchLinks();
-  
-    const ws = connectWebSocket();
-  
-    return () => {
-      ws.close();
-    };
-  }, [projectId]);
 
   return (
     <motion.div

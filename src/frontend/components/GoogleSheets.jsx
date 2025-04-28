@@ -40,6 +40,18 @@ const GoogleSheets = ({
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
+  const clearStaleTasks = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      await axios.post(`${apiBaseUrl}/user/clear-stale-tasks`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      console.log('Stale tasks cleared');
+    } catch (err) {
+      console.error('Error clearing stale tasks:', err);
+    }
+  };
+
   const fetchSpreadsheets = async () => {
     const token = localStorage.getItem('token');
     try {
@@ -247,10 +259,26 @@ const GoogleSheets = ({
   };
 
   useEffect(() => {
-    fetchSpreadsheets();
-    fetchUserTasks();
+    const initialize = async () => {
+      // Сначала очищаем устаревшие задачи
+      await clearStaleTasks();
+      // Затем загружаем данные
+      await fetchSpreadsheets();
+      await fetchUserTasks();
+    };
 
-    const statusInterval = setInterval(fetchAnalysisStatus, 10000);
+    initialize();
+
+    const statusInterval = setInterval(async () => {
+      // Проверяем, есть ли активные задачи
+      const currentTaskIds = JSON.parse(localStorage.getItem(`taskIds-${projectId}`)) || {};
+      if (Object.keys(currentTaskIds).length === 0) {
+        setIsProjectAnalyzing(false);
+        setIsAnalyzing(false);
+        return; // Прерываем вызов, если задач нет
+      }
+      await fetchAnalysisStatus();
+    }, 15000); // Увеличиваем интервал до 15 секунд
 
     return () => {
       clearInterval(statusInterval);
@@ -481,29 +509,6 @@ const GoogleSheets = ({
     visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
   };
 
-  useEffect(() => {
-    const clearStaleTasks = async () => {
-      const token = localStorage.getItem('token');
-      try {
-        await axios.post(`${apiBaseUrl}/user/clear-stale-tasks`, {}, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch (err) {
-        console.error('Error clearing stale tasks:', err);
-      }
-    };
-  
-    clearStaleTasks();
-    fetchSpreadsheets();
-    fetchUserTasks();
-  
-    const statusInterval = setInterval(fetchAnalysisStatus, 10000);
-  
-    return () => {
-      clearInterval(statusInterval);
-    };
-  }, [projectId, setSpreadsheets, setError, runningIds, setLoading]);
-
   return (
     <motion.div
       className="max-w-full mx-auto"
@@ -565,7 +570,7 @@ const GoogleSheets = ({
 
       <ul>
         {Array.isArray(spreadsheets) && spreadsheets.length > 0 ? (
-          spreadsheets.map((s) => {
+          spreadsheets.wrapp((s) => {
             const isRunning = runningIds.includes(s._id) || s.status === 'checking';
             const progress = progressData[s._id] || { progress: 0, processedLinks: 0, totalLinks: 0, estimatedTimeRemaining: 0, status: 'pending' };
             return (

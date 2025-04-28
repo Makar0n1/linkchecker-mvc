@@ -1,13 +1,38 @@
 const express = require('express');
 const router = express.Router();
 const linkController = require('../controllers/linkController');
+const User = require('../models/User');
+const Project = require('../models/Project');
+const AnalysisTask = require('../models/AnalysisTask');
+
+const authMiddleware = (req, res, next) => {
+  let token = req.headers.authorization?.split(' ')[1]; // Проверяем заголовок Authorization: Bearer <token>
+  if (!token) {
+    token = req.query.token; // Если в заголовке нет, проверяем query-параметр token
+  }
+
+  if (!token) {
+    console.log('authMiddleware: No token provided in request');
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.userId = decoded.userId;
+    console.log(`authMiddleware: Successfully decoded token, userId=${req.userId}`);
+    next();
+  } catch (error) {
+    console.log('authMiddleware: Invalid token', error.message);
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+};
 
 router.post('/register', linkController.registerUser);
 router.post('/login', linkController.loginUser);
 router.get('/user', linkController.getUserInfo);
 router.get('/user/tasks', linkController.getUserTasks);
 router.get('/:projectId/analysis-status', linkController.getAnalysisStatus);
-router.get('/:projectId/task-progress/:taskId', linkController.getTaskProgress); // Удаляем inline-обработчик
+router.get('/:projectId/task-progress/:taskId', linkController.getTaskProgress);
 router.get('/:projectId/task-progress-sse/:taskId', linkController.getTaskProgressSSE);
 
 // Проекты
@@ -36,45 +61,51 @@ router.post('/process-payment', linkController.processPayment);
 router.put('/profile', linkController.updateProfile);
 router.post('/cancel-subscription', linkController.cancelSubscription);
 router.delete('/account', linkController.deleteAccount);
+
 router.post('/user/clear-stale-tasks', authMiddleware, async (req, res) => {
-    try {
-      const userId = req.userId;
-      const user = await User.findById(userId);
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-  
-      const activeTasks = user.activeTasks || new Map();
-      const projectIds = Array.from(activeTasks.keys());
-      const tasksToRemove = [];
-  
-      // Проверяем каждую задачу
-      for (const projectId of projectIds) {
-        const taskId = activeTasks.get(projectId);
-        const task = await AnalysisTask.findById(taskId);
-        if (!task || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
-          tasksToRemove.push(projectId);
-        }
-      }
-  
-      // Удаляем устаревшие задачи
-      for (const projectId of tasksToRemove) {
-        activeTasks.delete(projectId);
-        const project = await Project.findOne({ _id: projectId, userId });
-        if (project) {
-          project.isAnalyzing = false;
-          await project.save();
-        }
-      }
-  
-      user.activeTasks = activeTasks;
-      await user.save();
-  
-      res.json({ message: 'Stale tasks cleared' });
-    } catch (error) {
-      console.error('Error clearing stale tasks:', error);
-      res.status(500).json({ error: 'Failed to clear stale tasks' });
+  try {
+    const userId = req.userId;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
     }
-  });
+
+    const activeTasks = user.activeTasks || new Map();
+    const projectIds = Array.from(activeTasks.keys());
+    const tasksToRemove = [];
+
+    // Проверяем каждую задачу
+    for (const projectId of projectIds) {
+      const taskId = activeTasks.get(projectId);
+      const task = await AnalysisTask.findById(taskId);
+      if (!task || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+        tasksToRemove.push(projectId);
+      }
+    }
+
+    // Удаляем устаревшие задачи
+    for (const projectId of tasksToRemove) {
+      const taskId = activeTasks.get(projectId);
+      activeTasks.delete(projectId);
+      const project = await Project.findOne({ _id: projectId, userId });
+      if (project) {
+        project.isAnalyzing = false;
+        await project.save();
+        console.log(`Cleared isAnalyzing for project ${projectId}`);
+      }
+      // Удаляем задачу из AnalysisTask
+      await AnalysisTask.findByIdAndDelete(taskId);
+      console.log(`Deleted stale AnalysisTask ${taskId} for project ${projectId}`);
+    }
+
+    user.activeTasks = activeTasks;
+    await user.save();
+
+    res.json({ message: 'Stale tasks cleared' });
+  } catch (error) {
+    console.error('Error clearing stale tasks:', error);
+    res.status(500).json({ error: 'Failed to clear stale tasks' });
+  }
+});
 
 module.exports = router;

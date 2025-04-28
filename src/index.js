@@ -5,6 +5,7 @@ const schedule = require('node-schedule');
 const mongoose = require('mongoose');
 const Spreadsheet = require('./backend/models/Spreadsheet');
 const Project = require('./backend/models/Project');
+const AnalysisTask = require('./backend/models/AnalysisTask');
 const linkController = require('./backend/controllers/linkController');
 
 // Загружаем .env в зависимости от окружения
@@ -55,7 +56,25 @@ frontend.on('error', (err) => console.error('Frontend error:', err));
 
 // Подключение к MongoDB
 mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
-  .then(() => console.log('MongoDB connected'))
+  .then(async () => {
+    console.log('MongoDB connected');
+
+    // Очистка устаревших задач AnalysisTask
+    console.log('Cleaning up stale AnalysisTasks on startup...');
+    const staleTasks = await AnalysisTask.find({
+      status: { $in: ['pending', 'processing'] }
+    });
+    for (const task of staleTasks) {
+      const project = await Project.findById(task.projectId);
+      if (project) {
+        project.isAnalyzing = false;
+        await project.save();
+        console.log(`Cleared isAnalyzing for project ${task.projectId} on startup`);
+      }
+      await AnalysisTask.findByIdAndDelete(task._id);
+      console.log(`Deleted stale AnalysisTask ${task._id} on startup`);
+    }
+  })
   .catch(err => console.error('MongoDB connection error:', err));
 
 // Очищаем все существующие задачи при перезапуске
