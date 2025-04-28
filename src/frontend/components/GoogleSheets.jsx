@@ -12,6 +12,7 @@ const GoogleSheets = ({
   setLoading,
   setError,
   isAnalyzing,
+  setIsAnalyzing,
 }) => {
   const navigate = useNavigate();
   const [form, setForm] = useState({
@@ -105,12 +106,12 @@ const GoogleSheets = ({
           return updatedProgress;
         });
         setIsProjectAnalyzing(false);
+        setIsAnalyzing(false); // Сбрасываем состояние анализа
         fetchSpreadsheets();
       }
     } catch (err) {
       console.error(`Error fetching progress for task ${taskId}:`, err);
       if (err.response?.status === 404) {
-        // Если задача не найдена, сбрасываем её
         setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
         setTaskIds(prev => {
           const newTaskIds = { ...prev };
@@ -125,6 +126,7 @@ const GoogleSheets = ({
           return updatedProgress;
         });
         setIsProjectAnalyzing(false);
+        setIsAnalyzing(false); // Сбрасываем состояние анализа
         fetchSpreadsheets();
       }
     }
@@ -137,6 +139,7 @@ const GoogleSheets = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       setIsProjectAnalyzing(response.data.isAnalyzing);
+      setIsAnalyzing(response.data.isAnalyzing);
       if (!response.data.isAnalyzing) {
         await fetchSpreadsheets();
         setRunningIds([]);
@@ -167,7 +170,6 @@ const GoogleSheets = ({
       if (data.error) {
         console.error(data.error);
         eventSource.close();
-        // Если ошибка "Task not found", сбрасываем задачу
         if (data.error.includes('Task not found')) {
           setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
           setTaskIds(prev => {
@@ -183,6 +185,7 @@ const GoogleSheets = ({
             return updatedProgress;
           });
           setIsProjectAnalyzing(false);
+          setIsAnalyzing(false);
           fetchSpreadsheets();
         }
         return;
@@ -216,6 +219,7 @@ const GoogleSheets = ({
           return updatedProgress;
         });
         setIsProjectAnalyzing(false);
+        setIsAnalyzing(false);
         fetchSpreadsheets();
         eventSource.close();
       }
@@ -326,6 +330,8 @@ const GoogleSheets = ({
     const token = localStorage.getItem('token');
     setRunningIds([...runningIds, spreadsheetId]);
     setLoading(true);
+    setIsProjectAnalyzing(true);
+    setIsAnalyzing(true);
     setProgressData(prev => ({
       ...prev,
       [spreadsheetId]: {
@@ -367,6 +373,8 @@ const GoogleSheets = ({
         localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
         return newTaskIds;
       });
+      setIsProjectAnalyzing(false);
+      setIsAnalyzing(false);
     }
   };
 
@@ -395,6 +403,7 @@ const GoogleSheets = ({
         return newTaskIds;
       });
       setIsProjectAnalyzing(false);
+      setIsAnalyzing(false);
       setError(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to cancel analysis');
@@ -436,6 +445,7 @@ const GoogleSheets = ({
     setTaskIds({});
     setProgressData({});
     setIsProjectAnalyzing(false);
+    setIsAnalyzing(false);
     localStorage.removeItem(`taskIds-${projectId}`);
     localStorage.removeItem(`progressData-${projectId}`);
     fetchSpreadsheets();
