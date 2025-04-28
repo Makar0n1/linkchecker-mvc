@@ -7,7 +7,7 @@ router.post('/login', linkController.loginUser);
 router.get('/user', linkController.getUserInfo);
 router.get('/user/tasks', linkController.getUserTasks);
 router.get('/:projectId/analysis-status', linkController.getAnalysisStatus);
-router.get('/:projectId/task-progress/:taskId', linkController.getTaskProgress);
+router.get('/:projectId/task-progress/:taskId', linkController.getTaskProgress); // Удаляем inline-обработчик
 router.get('/:projectId/task-progress-sse/:taskId', linkController.getTaskProgressSSE);
 
 // Проекты
@@ -28,7 +28,7 @@ router.post('/:projectId/spreadsheets', linkController.addSpreadsheet);
 router.get('/:projectId/spreadsheets', linkController.getSpreadsheets);
 router.post('/:projectId/spreadsheets/:spreadsheetId/run', linkController.runSpreadsheetAnalysis);
 router.delete('/:projectId/spreadsheets/:spreadsheetId', linkController.deleteSpreadsheet);
-router.post('/:projectId/spreadsheets/:spreadsheetId/cancel', linkController.cancelSpreadsheetAnalysis); // Новый эндпоинт
+router.post('/:projectId/spreadsheets/:spreadsheetId/cancel', linkController.cancelSpreadsheetAnalysis);
 
 // Профиль и подписка
 router.post('/select-plan', linkController.selectPlan);

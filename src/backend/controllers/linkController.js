@@ -566,92 +566,82 @@ const deleteAllLinks = async (req, res) => {
 
 const checkLinks = async (req, res) => {
   const { projectId } = req.params;
-  const user = await User.findById(req.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  const userId = req.userId;
 
-  const project = await Project.findOne({ _id: projectId, userId: req.userId });
-  if (!project) return res.status(404).json({ error: 'Project not found' });
+  try {
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
 
-  if (project.isAnalyzing) {
-    console.log(`checkLinks: Analysis already in progress for project ${projectId}, rejecting request`);
-    return res.status(409).json({ error: 'Analysis is already in progress for this project' });
-  }
+    if (project.isAnalyzing) {
+      return res.status(409).json({ error: 'Analysis is already in progress for this project' });
+    }
 
-  const links = await FrontendLink.find({ projectId, source: 'manual' });
+    const links = await FrontendLink.find({ projectId, userId });
+    if (links.length === 0) {
+      return res.status(400).json({ error: 'No links found to analyze' });
+    }
 
-  const planLinkCheckLimits = {
-    free: 20,
-    basic: 50,
-    pro: 100,
-    premium: 200,
-    enterprise: 500,
-  };
-  const maxLinksToCheck = user.isSuperAdmin ? planLinkCheckLimits.enterprise : planLinkCheckLimits[user.plan];
-  if (links.length > maxLinksToCheck) {
-    return res.status(403).json({ error: `Too many links to check at once. Your plan allows checking up to ${maxLinksToCheck} links at a time.` });
-  }
+    const task = new AnalysisTask({
+      projectId,
+      type: 'checkLinks',
+      status: 'pending',
+      data: { userId, projectId },
+    });
+    await task.save();
 
-  console.log(`Adding checkLinks task to queue for project ${projectId} with ${links.length} links`);
+    const user = await User.findById(userId);
+    user.activeTasks.set(projectId, task._id.toString());
+    await user.save();
 
-  const task = new AnalysisTask({
-    projectId,
-    type: 'checkLinks',
-    status: 'pending',
-    data: { userId: req.userId },
-  });
-  await task.save();
+    // Добавляем taskId во все FrontendLink перед анализом
+    await FrontendLink.updateMany(
+      { projectId, userId, taskId: { $exists: false } }, // Обновляем только те ссылки, у которых нет taskId
+      { $set: { taskId: task._id } }
+    );
+    console.log(`Updated FrontendLinks with taskId=${task._id} for project ${projectId}`);
 
-  analysisQueue.push({
-    taskId: task._id,
-    projectId,
-    type: 'checkLinks',
-    req,
-    res,
-    userId: req.userId,
-    wss: req.wss,
-    handler: (task, callback) => {
-      console.log(`checkLinks handler: Starting analysis for project ${task.projectId}`);
-      let project;
-      Project.findOne({ _id: task.projectId, userId: task.userId })
-        .then(proj => {
-          if (!proj) throw new Error('Project not found in handler');
-          project = proj;
+    // Перезагружаем ссылки, чтобы убедиться, что у них есть taskId
+    const updatedLinks = await FrontendLink.find({ projectId, userId });
+
+    analysisQueue.push({
+      taskId: task._id,
+      projectId,
+      type: 'checkLinks',
+      req,
+      res,
+      userId,
+      wss: req.wss,
+      handler: async (task, callback) => {
+        console.log(`checkLinks handler: Starting analysis for project ${projectId}`);
+        try {
           project.isAnalyzing = true;
-          return project.save();
-        })
-        .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
-        .then(() => processLinksInBatches(links, 20, task.projectId, task.wss, null, task.taskId))
-        .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
-        .then(updatedLinks => {
-          console.log(`Finished link check for project ${task.projectId}`);
-          if (!task.res.headersSent) {
-            task.res.json(updatedLinks);
-          }
-          const wssLocal = task.wss;
-          wssLocal.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
-              client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId }));
-            }
-          });
-          callback(null, updatedLinks);
-        })
-        .catch(error => {
-          console.error(`Error in checkLinks for project ${task.projectId}:`, error);
-          if (!task.res.headersSent) {
-            task.res.status(500).json({ error: 'Error checking links', details: error.message });
-          }
+          await project.save();
+
+          const processedLinks = await processLinksInBatches(updatedLinks, 20, projectId, task.wss, null, task.taskId);
+
+          console.log(`Finished link check for project ${projectId}`);
+          callback(null);
+        } catch (error) {
+          console.error(`Error in checkLinks for project ${projectId}:`, error);
           callback(error);
-        })
-        .finally(() => {
-          if (project) {
-            project.isAnalyzing = false;
-            project.save()
-              .then(() => console.log(`checkLinks handler: Set isAnalyzing to false for project ${task.projectId}`))
-              .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
-          }
-        });
-    },
-  });
+        } finally {
+          project.isAnalyzing = false;
+          await project.save();
+          console.log(`checkLinks handler: Set isAnalyzing to false for project ${projectId}`);
+          const user = await User.findById(task.userId);
+          user.activeTasks.delete(projectId);
+          await user.save();
+        }
+      },
+    });
+
+    res.json({ taskId: task._id });
+  } catch (error) {
+    console.error('Error starting link check:', error);
+    res.status(500).json({ error: 'Failed to start link check' });
+  }
 };
 
 // Функции для работы с Google Sheets (в рамках проекта)
@@ -802,6 +792,13 @@ const runSpreadsheetAnalysis = async (req, res) => {
 
   console.log(`Adding runSpreadsheetAnalysis task to queue for spreadsheet ${spreadsheetId} in project ${projectId} with userId=${req.userId}`);
 
+  if (user.activeTasks.has(projectId)) {
+    console.log(`runSpreadsheetAnalysis: Found existing task for project ${projectId}, removing it`);
+    await AnalysisTask.findByIdAndDelete(user.activeTasks.get(projectId));
+    user.activeTasks.delete(projectId);
+    await user.save();
+  }
+
   const task = new AnalysisTask({
     projectId,
     type: 'runSpreadsheetAnalysis',
@@ -810,7 +807,6 @@ const runSpreadsheetAnalysis = async (req, res) => {
   });
   await task.save();
 
-  // Сохраняем taskId в activeTasks пользователя
   user.activeTasks.set(projectId, task._id.toString());
   await user.save();
 
@@ -838,14 +834,9 @@ const runSpreadsheetAnalysis = async (req, res) => {
           return spreadsheet.save();
         })
         .then(() => {
-          cancelAnalysis = false;
-          console.log(`runSpreadsheetAnalysis handler: Calling analyzeSpreadsheet with userId=${task.userId}`);
           return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.wss, task.taskId, task.userId);
         })
         .then(() => {
-          if (cancelAnalysis) {
-            throw new Error('Analysis cancelled');
-          }
           spreadsheet.status = 'completed';
           spreadsheet.lastRun = new Date();
           spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
@@ -865,20 +856,29 @@ const runSpreadsheetAnalysis = async (req, res) => {
           callback(null);
         })
         .catch(error => {
-          console.error(`Error analyzing spreadsheet ${spreadsheetId} in project ${projectId}:`, error);
-          spreadsheet.status = error.message === 'Analysis cancelled' ? 'pending' : 'error';
-          spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
-          spreadsheet.save()
-            .then(() => {
-              if (!task.res.headersSent) {
-                if (error.message === 'Analysis cancelled') {
+          if (error.name === 'DocumentNotFoundError') {
+            console.log(`runSpreadsheetAnalysis: Analysis for spreadsheet ${spreadsheetId} was likely cancelled`);
+            spreadsheet.status = 'pending';
+            spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
+            spreadsheet.save()
+              .then(() => {
+                if (!task.res.headersSent) {
                   task.res.json({ message: 'Analysis cancelled' });
-                } else {
+                }
+                callback(null); // Завершаем без ошибки
+              });
+          } else {
+            console.error(`Error analyzing spreadsheet ${spreadsheetId} in project ${projectId}:`, error);
+            spreadsheet.status = 'error';
+            spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
+            spreadsheet.save()
+              .then(() => {
+                if (!task.res.headersSent) {
                   task.res.status(500).json({ error: 'Error analyzing spreadsheet', details: error.message });
                 }
-              }
-              callback(error);
-            });
+                callback(error);
+              });
+          }
         })
         .finally(() => {
           if (project) {
@@ -886,7 +886,6 @@ const runSpreadsheetAnalysis = async (req, res) => {
             project.save()
               .then(async () => {
                 console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`);
-                // Удаляем taskId из activeTasks после завершения
                 const user = await User.findById(task.userId);
                 user.activeTasks.delete(projectId);
                 await user.save();
@@ -902,40 +901,63 @@ const runSpreadsheetAnalysis = async (req, res) => {
 
 const cancelSpreadsheetAnalysis = async (req, res) => {
   const { projectId, spreadsheetId } = req.params;
+  const userId = req.userId;
+
   try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    if (!user.isSuperAdmin && user.plan === 'free') {
-      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId });
+    if (!spreadsheet) {
+      return res.status(404).json({ error: 'Spreadsheet not found' });
     }
 
-    const project = await Project.findOne({ _id: projectId, userId: req.userId });
-    if (!project) return res.status(404).json({ error: 'Project not found' });
-
-    const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId: req.userId });
-    if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
-
-    if (spreadsheet.status !== 'checking') {
-      return res.status(400).json({ error: 'No analysis in progress to cancel' });
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
     }
 
-    cancelAnalysis = true;
+    if (!project.isAnalyzing) {
+      return res.status(400).json({ error: 'No analysis is currently running for this project' });
+    }
 
+    // Обновляем статус задачи на cancelled
+    const task = await AnalysisTask.findOneAndUpdate(
+      { projectId, status: { $in: ['pending', 'processing'] } },
+      { $set: { status: 'cancelled', error: 'Analysis cancelled by user' } },
+      { new: true }
+    );
+
+    if (!task) {
+      return res.status(404).json({ error: 'No active task found to cancel' });
+    }
+
+    // Даём время processLinksInBatches завершить текущие операции
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Удаляем все связанные ссылки (FrontendLink)
+    await FrontendLink.deleteMany({
+      spreadsheetId: spreadsheet.spreadsheetId,
+      projectId,
+    });
+    console.log(`Deleted all FrontendLinks for spreadsheet ${spreadsheetId}`);
+
+    // Обновляем статус таблицы
     spreadsheet.status = 'pending';
-    spreadsheet.links = [];
+    spreadsheet.lastRun = null;
+    spreadsheet.scanCount = 0;
     await spreadsheet.save();
 
+    // Сбрасываем статус проекта
     project.isAnalyzing = false;
     await project.save();
 
-    // Удаляем taskId из activeTasks
+    // Удаляем taskId из activeTasks пользователя
+    const user = await User.findById(userId);
     user.activeTasks.delete(projectId);
     await user.save();
 
-    res.json({ message: 'Analysis cancelled and data cleared' });
+    res.json({ message: 'Analysis cancelled' });
   } catch (error) {
-    console.error('cancelSpreadsheetAnalysis: Error cancelling analysis', error);
-    res.status(500).json({ error: 'Error cancelling analysis', details: error.message });
+    console.error('Error cancelling spreadsheet analysis:', error);
+    res.status(500).json({ error: 'Failed to cancel analysis' });
   }
 };
 
@@ -1077,6 +1099,13 @@ const checkLinkStatus = async (link, browser) => {
   const maxAttempts = 3;
   console.log(`Starting analysis for link: ${link.url}`);
 
+  // Проверяем статус задачи перед началом обработки
+  const task = await AnalysisTask.findById(link.taskId);
+  if (!task || task.status === 'cancelled') {
+    console.log(`checkLinkStatus: Task ${link.taskId} cancelled, skipping link ${link.url}`);
+    return link; // Прерываем обработку ссылки, если анализ отменён
+  }
+
   // Валидация URL перед началом обработки
   try {
     new URL(link.url);
@@ -1089,7 +1118,15 @@ const checkLinkStatus = async (link, browser) => {
     link.responseCode = 'Error';
     link.overallStatus = 'Problem';
     link.lastChecked = new Date();
-    await link.save();
+    try {
+      await link.save();
+    } catch (saveError) {
+      if (saveError.name === 'DocumentNotFoundError') {
+        console.log(`checkLinkStatus: FrontendLink ${link._id} not found, likely deleted during cancellation`);
+        return link;
+      }
+      throw saveError;
+    }
     return link;
   }
 
@@ -1107,7 +1144,15 @@ const checkLinkStatus = async (link, browser) => {
     link.responseCode = 'Error';
     link.overallStatus = 'Problem';
     link.lastChecked = new Date();
-    await link.save();
+    try {
+      await link.save();
+    } catch (saveError) {
+      if (saveError.name === 'DocumentNotFoundError') {
+        console.log(`checkLinkStatus: FrontendLink ${link._id} not found, likely deleted during cancellation`);
+        return link;
+      }
+      throw saveError;
+    }
     return link;
   }
 
@@ -1119,7 +1164,7 @@ const checkLinkStatus = async (link, browser) => {
       }
 
       page = await browser.newPage();
-      await page.setDefaultNavigationTimeout(60000);
+      await page.setDefaultNavigationTimeout(60000); // Увеличиваем таймаут до 60 секунд
 
       const userAgents = [
       {
@@ -2742,22 +2787,42 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
 
   console.log(`Starting processLinksInBatches: taskId=${taskId}, totalLinks=${totalLinks}`);
 
-  const limit = pLimit(10); // Ограничиваем параллельные проверки
+  const limit = pLimit(10);
   let processedLinks = 0;
   let totalProcessingTime = 0;
 
-  // Инициализируем прогресс
+  if (!taskId) {
+    console.log('processLinksInBatches: Task ID is missing, cancelling analysis');
+    return results;
+  }
+
+  const task = await AnalysisTask.findById(taskId);
+  if (!task) {
+    console.log(`processLinksInBatches: Task ${taskId} not found during initialization, cancelling analysis`);
+    return results;
+  }
+
   await AnalysisTask.findByIdAndUpdate(taskId, {
     $set: {
-      totalLinks,
-      processedLinks: 0,
       progress: 0,
+      processedLinks: 0,
+      totalLinks,
       estimatedTimeRemaining: 0,
     },
   });
   console.log(`Initialized progress for task ${taskId}: totalLinks=${totalLinks}`);
 
   for (let i = 0; i < totalLinks; i += batchSize) {
+    const task = await AnalysisTask.findById(taskId);
+    if (!task) {
+      console.log(`processLinksInBatches: Task ${taskId} not found - analysis likely cancelled`);
+      return results;
+    }
+    if (task.status === 'cancelled') {
+      console.log(`processLinksInBatches: Task ${taskId} status is cancelled, stopping analysis`);
+      return results;
+    }
+
     const batch = links.slice(i, i + batchSize);
     console.log(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalLinks / batchSize)}: links ${i + 1} to ${Math.min(i + batchSize, totalLinks)}`);
 
@@ -2769,7 +2834,6 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
       browser = await initializeBrowser();
       const startTime = Date.now();
 
-      // Обрабатываем ссылки в батче параллельно
       const batchResults = await Promise.all(
         batch.map(link => limit(async () => {
           console.log(`Starting analysis for link: ${link.url}`);
@@ -2782,13 +2846,28 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
             link.status = 'broken';
             link.errorDetails = `Failed during analysis: ${error.message}`;
             link.overallStatus = 'Problem';
-            await link.save();
+
+            // Проверяем статус задачи перед сохранением
+            const currentTask = await AnalysisTask.findById(taskId);
+            if (!currentTask || currentTask.status === 'cancelled') {
+              console.log(`processLinksInBatches: Task ${taskId} cancelled during link processing, skipping save for ${link.url}`);
+              return link; // Пропускаем сохранение
+            }
+
+            try {
+              await link.save();
+            } catch (saveError) {
+              if (saveError.name === 'DocumentNotFoundError') {
+                console.log(`processLinksInBatches: FrontendLink ${link._id} not found, likely deleted during cancellation`);
+                return link; // Игнорируем ошибку
+              }
+              throw saveError; // Перебрасываем другие ошибки
+            }
             return link;
           }
         }))
       );
 
-      // Обновляем прогресс после всего батча
       processedLinks += batchResults.length;
       const batchTime = Date.now() - startTime;
       totalProcessingTime += batchTime;
@@ -2796,6 +2875,13 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
       const remainingLinks = totalLinks - processedLinks;
       const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
       const progress = Math.round((processedLinks / totalLinks) * 100);
+
+      // Проверяем статус задачи перед обновлением прогресса
+      const currentTask = await AnalysisTask.findById(taskId);
+      if (!currentTask || currentTask.status === 'cancelled') {
+        console.log(`processLinksInBatches: Task ${taskId} cancelled, skipping progress update`);
+        return results;
+      }
 
       await AnalysisTask.findByIdAndUpdate(taskId, {
         $set: {
@@ -2813,17 +2899,16 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
       const memoryUsageAfter = process.memoryUsage();
       console.log(`Memory usage after batch: RSS=${(memoryUsageAfter.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsageAfter.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsageAfter.heapUsed / 1024 / 1024).toFixed(2)}MB`);
 
-      // Закрываем браузер и очищаем память
       await closeBrowser(browser);
-      browser = null; // Помогаем сборщику мусора
-      global.gc && global.gc(); // Принудительно вызываем сборку мусора, если доступно
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Уменьшаем задержку до 1 секунды
+      browser = null;
+      global.gc && global.gc();
+      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
       console.error(`Critical error in processLinksInBatches for batch ${Math.floor(i / batchSize) + 1}:`, error);
       if (browser) {
         await closeBrowser(browser);
       }
-      throw error; // Передаём ошибку в очередь для корректной обработки
+      throw error;
     }
   }
 
@@ -2840,7 +2925,15 @@ const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spre
       link.status = 'broken';
       link.errorDetails = 'Analysis incomplete: status not updated';
       link.overallStatus = 'Problem';
-      await link.save();
+      try {
+        await link.save();
+      } catch (saveError) {
+        if (saveError.name === 'DocumentNotFoundError') {
+          console.log(`processLinksInBatches: FrontendLink ${link._id} not found during pending link update, likely deleted`);
+        } else {
+          throw saveError;
+        }
+      }
       console.log(`Updated link ${link.url} to status: broken`);
     }));
   }
@@ -2859,7 +2952,6 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
       throw new Error('Spreadsheet not found');
     }
 
-    // Очистка существующих ссылок с некорректным userId
     console.log(`analyzeSpreadsheet: Cleaning up invalid FrontendLinks for spreadsheet ${spreadsheet._id}`);
     const invalidLinks = await FrontendLink.deleteMany({
       spreadsheetId: spreadsheet.spreadsheetId,
@@ -2870,7 +2962,6 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
     });
     console.log(`analyzeSpreadsheet: Deleted ${invalidLinks.deletedCount} invalid FrontendLinks`);
 
-    // Строгая проверка userId
     console.log(`analyzeSpreadsheet: Checking userId: userId=${userId}, spreadsheet.userId=${spreadsheet.userId}`);
     if (!userId && !spreadsheet.userId) {
       console.error(`analyzeSpreadsheet: userId is missing for spreadsheet ${spreadsheet._id}`);
@@ -2883,7 +2974,6 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
       throw new Error('effectiveUserId is invalid (undefined, null, or empty)');
     }
 
-    // Проверяем, является ли effectiveUserId валидным ObjectId
     let finalUserId;
     console.log(`analyzeSpreadsheet: Starting ObjectId validation for effectiveUserId=${effectiveUserId}`);
     try {
@@ -2927,6 +3017,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
           source: 'google_sheets',
           status: 'pending',
           rowIndex: link.rowIndex,
+          taskId, // Сохраняем taskId в FrontendLink
         });
         console.log(`FrontendLink object before save: ${JSON.stringify(newLink.toObject())}`);
         await newLink.save();
@@ -2936,8 +3027,9 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
 
     const updatedLinks = await processLinksInBatches(dbLinks, 20, projectId, wss, spreadsheet.spreadsheetId, taskId);
 
-    if (cancelAnalysis) {
-      throw new Error('Analysis cancelled');
+    if (updatedLinks.length === 0) {
+      console.log(`analyzeSpreadsheet: Analysis for spreadsheet ${spreadsheet._id} was cancelled`);
+      return;
     }
 
     const updatedSpreadsheet = await Spreadsheet.findOneAndUpdate(
@@ -2965,7 +3057,6 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
       throw new Error('Spreadsheet not found during update');
     }
 
-    // Экспортируем все ссылки одним batch-запросом
     await exportLinksToGoogleSheetsBatch(
       spreadsheet.spreadsheetId,
       updatedLinks,
@@ -2976,6 +3067,10 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
 
     await formatGoogleSheet(spreadsheet.spreadsheetId, Math.max(...updatedLinks.map(link => link.rowIndex)) + 1, spreadsheet.gid, spreadsheet.resultRangeStart, spreadsheet.resultRangeEnd);
   } catch (error) {
+    if (error.name === 'DocumentNotFoundError') {
+      console.log(`analyzeSpreadsheet: Document not found, likely cancelled for spreadsheet ${spreadsheet._id}`);
+      return;
+    }
     console.error(`Critical error in analyzeSpreadsheet for spreadsheet ${spreadsheet._id}:`, error);
     throw error;
   }
@@ -3290,22 +3385,22 @@ const columnLetterToIndex = (letter) => {
   return index - 1; // Google Sheets columns are 0-based
 };
 const getTaskProgress = async (req, res) => {
-  const { projectId, taskId } = req.params;
   try {
-    const task = await AnalysisTask.findOne({ _id: taskId, projectId });
+    const { taskId } = req.params;
+    const task = await AnalysisTask.findById(taskId);
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
     res.json({
-      progress: task.progress,
-      processedLinks: task.processedLinks,
-      totalLinks: task.totalLinks,
-      estimatedTimeRemaining: task.estimatedTimeRemaining,
-      status: task.status,
+      progress: task.progress || 0,
+      processedLinks: task.processedLinks || 0,
+      totalLinks: task.totalLinks || 0,
+      estimatedTimeRemaining: task.estimatedTimeRemaining || 0,
+      status: task.status || 'pending',
     });
   } catch (error) {
-    console.error('getTaskProgress: Error fetching task progress', error);
-    res.status(500).json({ error: 'Error fetching task progress', details: error.message });
+    console.error('Error fetching task progress:', error);
+    res.status(500).json({ error: 'Failed to fetch task progress', details: error.message });
   }
 };
 const getTaskProgressSSE = async (req, res) => {
@@ -3387,6 +3482,8 @@ const getActiveTasks = async (req, res) => {
 };
 // Экспортируем все функции
 module.exports = {
+  getTaskProgress,
+  getTaskProgressSSE,
   registerUser,
   loginUser,
   getUserInfo: [authMiddleware, getUserInfo],
@@ -3409,8 +3506,8 @@ module.exports = {
   deleteAccount: [authMiddleware, deleteAccount],
   updateProfile: [authMiddleware, updateProfile],
   getAnalysisStatus: [authMiddleware, getAnalysisStatus], // Добавляем новый маршрут
-  getTaskProgress: [authMiddleware, getTaskProgress],
-  getTaskProgressSSE: [authMiddleware, getTaskProgressSSE],
+  //getTaskProgress: [authMiddleware, getTaskProgress],
+  //getTaskProgressSSE: [authMiddleware, getTaskProgressSSE],
   getUserTasks: [authMiddleware, getUserTasks],
   getActiveTasks: [authMiddleware, getActiveTasks],
   checkLinkStatus,

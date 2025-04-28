@@ -26,10 +26,15 @@ const GoogleSheets = ({
   });
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
-  const [progressData, setProgressData] = useState({});
-  const [taskIds, setTaskIds] = useState({});
+  const [progressData, setProgressData] = useState(() => {
+    const savedProgress = localStorage.getItem(`progressData-${projectId}`);
+    return savedProgress ? JSON.parse(savedProgress) : {};
+  });
+  const [taskIds, setTaskIds] = useState(() => {
+    const savedTaskIds = localStorage.getItem(`taskIds-${projectId}`);
+    return savedTaskIds ? JSON.parse(savedTaskIds) : {};
+  });
 
-  // Исправляем формирование apiBaseUrl
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
@@ -52,9 +57,75 @@ const GoogleSheets = ({
       const response = await axios.get(`${apiBaseUrl}/user/tasks`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setTaskIds(response.data.activeTasks || {});
+      const serverTaskIds = response.data.activeTasks || {};
+      setTaskIds(prev => {
+        const updatedTaskIds = { ...prev, ...serverTaskIds };
+        localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(updatedTaskIds));
+        return updatedTaskIds;
+      });
     } catch (err) {
       console.error('Error fetching user tasks:', err);
+    }
+  };
+
+  const fetchProgress = async (spreadsheetId, taskId) => {
+    const token = localStorage.getItem('token');
+    try {
+      const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = response.data;
+      setProgressData(prev => {
+        const updatedProgress = {
+          ...prev,
+          [spreadsheetId]: {
+            progress: data.progress || 0,
+            processedLinks: data.processedLinks || 0,
+            totalLinks: data.totalLinks || 0,
+            estimatedTimeRemaining: data.estimatedTimeRemaining || 0,
+            status: data.status || 'pending',
+          },
+        };
+        localStorage.setItem(`progressData-${projectId}`, JSON.stringify(updatedProgress));
+        return updatedProgress;
+      });
+      if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+        setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
+        setTaskIds(prev => {
+          const newTaskIds = { ...prev };
+          delete newTaskIds[spreadsheetId];
+          localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
+          return newTaskIds;
+        });
+        setProgressData(prev => {
+          const updatedProgress = { ...prev };
+          delete updatedProgress[spreadsheetId];
+          localStorage.setItem(`progressData-${projectId}`, JSON.stringify(updatedProgress));
+          return updatedProgress;
+        });
+        setIsProjectAnalyzing(false);
+        fetchSpreadsheets();
+      }
+    } catch (err) {
+      console.error(`Error fetching progress for task ${taskId}:`, err);
+      if (err.response?.status === 404) {
+        // Если задача не найдена, считаем, что анализ завершён или отменён
+        setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
+        setTaskIds(prev => {
+          const newTaskIds = { ...prev };
+          delete newTaskIds[spreadsheetId];
+          localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
+          return newTaskIds;
+        });
+        setProgressData(prev => {
+          const updatedProgress = { ...prev };
+          delete updatedProgress[spreadsheetId];
+          localStorage.setItem(`progressData-${projectId}`, JSON.stringify(updatedProgress));
+          return updatedProgress;
+        });
+        setIsProjectAnalyzing(false);
+        fetchSpreadsheets();
+      }
     }
   };
 
@@ -69,9 +140,17 @@ const GoogleSheets = ({
         fetchSpreadsheets();
         setRunningIds([]);
         setLoading(false);
-        setProgressData({});
-        setTaskIds({});
-        await fetchUserTasks(); // Обновляем taskIds с сервера
+        setProgressData(prev => {
+          const updatedProgress = {};
+          localStorage.setItem(`progressData-${projectId}`, JSON.stringify(updatedProgress));
+          return updatedProgress;
+        });
+        setTaskIds(prev => {
+          const newTaskIds = {};
+          localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
+          return newTaskIds;
+        });
+        await fetchUserTasks();
       }
     } catch (err) {
       console.error('Error fetching analysis status:', err);
@@ -80,7 +159,6 @@ const GoogleSheets = ({
 
   const startSSE = (spreadsheetId, taskId) => {
     const token = localStorage.getItem('token');
-    console.log(`Starting SSE for spreadsheet ${spreadsheetId}, task ${taskId}`);
     const eventSource = new EventSource(`${apiBaseUrl}/${projectId}/task-progress-sse/${taskId}?token=${token}`);
 
     eventSource.onmessage = (event) => {
@@ -90,21 +168,33 @@ const GoogleSheets = ({
         eventSource.close();
         return;
       }
-      setProgressData(prev => ({
-        ...prev,
-        [spreadsheetId]: {
-          progress: data.progress,
-          processedLinks: data.processedLinks,
-          totalLinks: data.totalLinks,
-          estimatedTimeRemaining: data.estimatedTimeRemaining,
-        },
-      }));
-      if (data.status === 'completed' || data.status === 'failed') {
+      setProgressData(prev => {
+        const updatedProgress = {
+          ...prev,
+          [spreadsheetId]: {
+            progress: data.progress || 0,
+            processedLinks: data.processedLinks || 0,
+            totalLinks: data.totalLinks || 0,
+            estimatedTimeRemaining: data.estimatedTimeRemaining || 0,
+            status: data.status || 'pending',
+          },
+        };
+        localStorage.setItem(`progressData-${projectId}`, JSON.stringify(updatedProgress));
+        return updatedProgress;
+      });
+      if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
         setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
         setTaskIds(prev => {
           const newTaskIds = { ...prev };
           delete newTaskIds[spreadsheetId];
+          localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
           return newTaskIds;
+        });
+        setProgressData(prev => {
+          const updatedProgress = { ...prev };
+          delete updatedProgress[spreadsheetId];
+          localStorage.setItem(`progressData-${projectId}`, JSON.stringify(updatedProgress));
+          return updatedProgress;
         });
         setIsProjectAnalyzing(false);
         fetchSpreadsheets();
@@ -122,27 +212,29 @@ const GoogleSheets = ({
   // Первый useEffect для начальной загрузки данных
   useEffect(() => {
     fetchSpreadsheets();
-    fetchUserTasks(); // Загружаем taskIds один раз при монтировании
+    fetchUserTasks();
 
     const statusInterval = setInterval(fetchAnalysisStatus, 10000);
 
     return () => {
       clearInterval(statusInterval);
     };
-  }, [projectId, setSpreadsheets, setError, runningIds, setLoading]); // Убираем taskIds из зависимостей
+  }, [projectId, setSpreadsheets, setError, runningIds, setLoading]);
 
-  // Второй useEffect для управления SSE на основе taskIds
+  // Второй useEffect для управления SSE и получения начального прогресса
   useEffect(() => {
     const eventSources = {};
+
     Object.keys(taskIds).forEach(spreadsheetId => {
       const taskId = taskIds[spreadsheetId];
+      fetchProgress(spreadsheetId, taskId);
       eventSources[spreadsheetId] = startSSE(spreadsheetId, taskId);
     });
 
     return () => {
       Object.values(eventSources).forEach(eventSource => eventSource.close());
     };
-  }, [taskIds]); // Зависимость только от taskIds
+  }, [taskIds]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -186,37 +278,15 @@ const GoogleSheets = ({
         setLoading(false);
         return;
       }
-    
-      // Загружаем данные из Google Sheets (предположим, что это делается через API)
+
       const response = await axios.post(
         `${apiBaseUrl}/${projectId}/spreadsheets`,
         { ...form, gid: parseInt(form.gid), intervalHours: parseInt(form.intervalHours) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-    
-      // После добавления таблицы можно загрузить ссылки и проверить их
-      const linksResponse = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets/${response.data._id}/links`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    
-      const links = linksResponse.data;
-      const invalidLinks = links.filter(link => {
-        try {
-          new URL(link.url);
-          return false;
-        } catch (error) {
-          return true;
-        }
-      });
-    
-      if (invalidLinks.length > 0) {
-        console.warn('Found invalid URLs:', invalidLinks.map(link => link.url));
-        setError(`Found ${invalidLinks.length} invalid URLs. Please fix them in the spreadsheet.`);
-        setLoading(false);
-        return;
-      }
-    
-      setSpreadsheets([...spreadsheets, { ...response.data, status: 'pending' }]);
+
+      await fetchSpreadsheets();
+
       setForm({
         spreadsheetId: '',
         gid: '',
@@ -233,7 +303,7 @@ const GoogleSheets = ({
     } finally {
       setLoading(false);
     }
-    };
+  };
 
   const runAnalysis = async (spreadsheetId) => {
     const token = localStorage.getItem('token');
@@ -246,6 +316,7 @@ const GoogleSheets = ({
         processedLinks: 0,
         totalLinks: 0,
         estimatedTimeRemaining: 0,
+        status: 'pending',
       },
     }));
     try {
@@ -270,6 +341,7 @@ const GoogleSheets = ({
       setProgressData(prev => {
         const newProgress = { ...prev };
         delete newProgress[spreadsheetId];
+        localStorage.setItem(`progressData-${projectId}`, JSON.stringify(newProgress));
         return newProgress;
       });
       setTaskIds(prev => {
@@ -285,7 +357,7 @@ const GoogleSheets = ({
     const token = localStorage.getItem('token');
     setLoading(true);
     try {
-      await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/cancel`, {}, {
+      const response = await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/cancel`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
@@ -293,10 +365,10 @@ const GoogleSheets = ({
       });
       setSpreadsheets(updated.data);
       setRunningIds(runningIds.filter(id => id !== spreadsheetId));
-      setError(null);
       setProgressData(prev => {
         const newProgress = { ...prev };
         delete newProgress[spreadsheetId];
+        localStorage.setItem(`progressData-${projectId}`, JSON.stringify(newProgress));
         return newProgress;
       });
       setTaskIds(prev => {
@@ -305,6 +377,8 @@ const GoogleSheets = ({
         localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
         return newTaskIds;
       });
+      setIsProjectAnalyzing(false);
+      setError(null); // Очищаем ошибку, так как отмена успешна
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to cancel analysis');
     } finally {
@@ -321,6 +395,18 @@ const GoogleSheets = ({
       });
       setSpreadsheets(spreadsheets.filter(s => s._id !== spreadsheetId));
       setError(null);
+      setProgressData(prev => {
+        const newProgress = { ...prev };
+        delete newProgress[spreadsheetId];
+        localStorage.setItem(`progressData-${projectId}`, JSON.stringify(newProgress));
+        return newProgress;
+      });
+      setTaskIds(prev => {
+        const newTaskIds = { ...prev };
+        delete newTaskIds[spreadsheetId];
+        localStorage.setItem(`taskIds-${projectId}`, JSON.stringify(newTaskIds));
+        return newTaskIds;
+      });
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to delete spreadsheet');
     } finally {
@@ -395,7 +481,7 @@ const GoogleSheets = ({
       <ul>
         {spreadsheets.map((s) => {
           const isRunning = runningIds.includes(s._id) || s.status === 'checking';
-          const progress = progressData[s._id] || { progress: 0, processedLinks: 0, totalLinks: 0, estimatedTimeRemaining: 0 };
+          const progress = progressData[s._id] || { progress: 0, processedLinks: 0, totalLinks: 0, estimatedTimeRemaining: 0, status: 'pending' };
           return (
             <motion.li
               key={s._id}
@@ -419,7 +505,7 @@ const GoogleSheets = ({
                   </div>
                 </div>
                 <div className="flex gap-2 sm:ml-auto">
-                  {s.status === 'checking' ? (
+                  {(s.status === 'checking' || isRunning) && isProjectAnalyzing ? (
                     <>
                       <button
                         onClick={() => cancelAnalysis(s._id)}
@@ -448,7 +534,7 @@ const GoogleSheets = ({
                   )}
                 </div>
               </div>
-              {isRunning && isProjectAnalyzing && (
+              {(isRunning || progress.status === 'pending') && isProjectAnalyzing && (
                 <div className="flex flex-col gap-2">
                   <div className="w-full bg-gray-200 rounded-full h-4">
                     <div
