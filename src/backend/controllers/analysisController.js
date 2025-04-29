@@ -10,6 +10,7 @@ const AnalysisTask = require('../models/AnalysisTask');
 const Spreadsheet = require('../models/Spreadsheet');
 const { google } = require('googleapis');
 const path = require('path');
+const WebSocket = require('ws');
 const { calculateProgress } = require('../utils/calculateProgress'); // Новый импорт
 
 const sheets = google.sheets({

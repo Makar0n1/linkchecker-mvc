@@ -16,8 +16,8 @@ const {
 const { createProject, getProjects, deleteProject } = require('../controllers/projectController');
 const { addLinks, getLinks, deleteLink, deleteAllLinks } = require('../controllers/linkController');
 const { addSpreadsheet, getSpreadsheets, deleteSpreadsheet } = require('../controllers/spreadsheetController');
-const { checkLinks, runSpreadsheetAnalysis, cancelSpreadsheetAnalysis, getTaskProgressSSE } = require('../controllers/analysisController');
-const { getUserTasks, getAnalysisStatus, getTaskProgress } = require('../controllers/taskController');
+const { checkLinks, runSpreadsheetAnalysis, cancelSpreadsheetAnalysis } = require('../controllers/analysisController');
+const { getUserTasks, getAnalysisStatus, getTaskProgress, getTaskProgressSSE } = require('../controllers/taskController');
 const User = require('../models/User');
 const Project = require('../models/Project');
 const AnalysisTask = require('../models/AnalysisTask');
