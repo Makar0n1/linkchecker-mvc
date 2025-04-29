@@ -1,7 +1,7 @@
 const AnalysisTask = require('../models/AnalysisTask');
 const Project = require('../models/Project');
 const User = require('../models/User');
-const { calculateProgress } = require('./analysisController');
+const { calculateProgress } = require('../utils/calculateProgress'); // Импорт из нового файла
 
 const getUserTasks = async (req, res) => {
   try {
@@ -9,7 +9,7 @@ const getUserTasks = async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ activeTasks: user.activeTasks });
   } catch (error) {
-    console.error('getUserTasks: Error fetching user tasks', error);
+    console.error('getUserTasks: Error fetching user tasks:', error);
     res.status(500).json({ error: 'Error fetching user tasks', details: error.message });
   }
 };
@@ -21,7 +21,7 @@ const getAnalysisStatus = async (req, res) => {
     if (!project) return res.status(404).json({ error: 'Project not found' });
     res.json({ isAnalyzing: project.isAnalyzing });
   } catch (error) {
-    console.error('getAnalysisStatus: Error fetching analysis status', error);
+    console.error('getAnalysisStatus: Error fetching analysis status:', error);
     res.status(500).json({ error: 'Error fetching analysis status', details: error.message });
   }
 };
@@ -32,7 +32,7 @@ const getTaskProgress = async (req, res) => {
     const progressData = await calculateProgress(projectId, taskId);
     res.json(progressData);
   } catch (error) {
-    console.error('getTaskProgress: Error fetching task progress', error);
+    console.error('getTaskProgress: Error fetching task progress:', error);
     res.status(500).json({ error: 'Error fetching task progress', details: error.message });
   }
 };
@@ -54,7 +54,7 @@ const getTaskProgressSSE = (req, res) => {
         res.end();
       }
     } catch (error) {
-      console.error('getTaskProgressSSE: Error sending progress update', error);
+      console.error('getTaskProgressSSE: Error sending progress update:', error);
       res.write(`data: ${JSON.stringify({ error: 'Error fetching progress', details: error.message })}\n\n`);
       clearInterval(intervalId);
       res.end();
