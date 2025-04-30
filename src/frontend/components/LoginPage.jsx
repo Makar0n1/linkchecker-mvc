@@ -1,16 +1,13 @@
-import React, { useState, useContext } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
-import { CookieContext } from './CookieContext';
 
 const LoginPage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const navigate = useNavigate();
-  const context = useContext(CookieContext);
-  const hasCookieConsent = context ? context.hasCookieConsent : true;
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -18,16 +15,13 @@ const LoginPage = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!hasCookieConsent) {
-      setError('You must accept cookies to use this feature.');
-      return;
-    }
-
     try {
-      await axios.post(`${apiBaseUrl}/login`, { username, password }, {
-        withCredentials: true,
-      });
-
+      const response = await axios.post(`${apiBaseUrl}/login`, { username, password });
+      
+      const { token, refreshToken } = response.data;
+      localStorage.setItem('token', token);
+      localStorage.setItem('refreshToken', refreshToken);
+      
       setTimeout(() => {
         navigate('/app');
       }, 100);

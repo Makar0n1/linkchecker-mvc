@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import ManualLinks from './ManualLinks';
 import GoogleSheets from './GoogleSheets';
-import { CookieContext } from './CookieContext';
 
 const ProjectDetails = () => {
   const { projectId } = useParams();
@@ -15,30 +14,24 @@ const ProjectDetails = () => {
   const [isServerBusy, setIsServerBusy] = useState(false);
   const [isAnalyzingManual, setIsAnalyzingManual] = useState(false);
   const [isAnalyzingSpreadsheet, setIsAnalyzingSpreadsheet] = useState(false);
+
   const [links, setLinks] = useState([]);
   const [urlList, setUrlList] = useState('');
   const [targetDomain, setTargetDomain] = useState('');
   const [loading, setLoading] = useState(false);
   const [spreadsheets, setSpreadsheets] = useState([]);
   const [runningIds, setRunningIds] = useState([]);
-  const context = useContext(CookieContext);
-const hasCookieConsent = context ? context.hasCookieConsent : true;
-  const [cookieError, setCookieError] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
-    if (!hasCookieConsent) {
-      setCookieError('You must accept cookies to use this feature.');
-      return;
-    }
-
+    const token = localStorage.getItem('token');
     const fetchProject = async () => {
       try {
         const response = await axios.get(`${apiBaseUrl}/projects`, {
-          withCredentials: true,
+          headers: { Authorization: `Bearer ${token}` },
         });
         const project = response.data.find((proj) => proj._id === projectId);
         if (project) {
@@ -57,7 +50,7 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
     const fetchAnalysisStatus = async () => {
       try {
         const response = await axios.get(`${apiBaseUrl}/${projectId}/analysis-status`, {
-          withCredentials: true,
+          headers: { Authorization: `Bearer ${token}` },
         });
         setIsAnalyzingManual(response.data.isAnalyzingManual);
         setIsAnalyzingSpreadsheet(response.data.isAnalyzingSpreadsheet);
@@ -73,22 +66,18 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
   }, [projectId, navigate]);
 
   const handleAddLinks = async (e, projectId) => {
-    if (!hasCookieConsent) {
-      setCookieError('You must accept cookies to use this feature.');
-      return;
-    }
-
     e.preventDefault();
     if (!urlList || !targetDomain) return;
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
       const urls = urlList.split('\n').map(url => url.trim()).filter(url => url);
       const linksData = urls.map(url => ({
         url,
         targetDomain,
       }));
       const response = await axios.post(`${apiBaseUrl}/${projectId}/links`, linksData, {
-        withCredentials: true,
+        headers: { Authorization: `Bearer ${token}` },
       });
       setLinks([...links, ...response.data]);
       setUrlList('');
@@ -106,15 +95,11 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
   };
 
   const handleCheckLinks = async (projectId) => {
-    if (!hasCookieConsent) {
-      setCookieError('You must accept cookies to use this feature.');
-      return;
-    }
-
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
       const response = await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
-        withCredentials: true,
+        headers: { Authorization: `Bearer ${token}` },
       });
       setError(null);
       setIsServerBusy(false);
@@ -133,15 +118,11 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
   };
 
   const handleDeleteLink = async (id, projectId) => {
-    if (!hasCookieConsent) {
-      setCookieError('You must accept cookies to use this feature.');
-      return;
-    }
-
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
       await axios.delete(`${apiBaseUrl}/${projectId}/links/${id}`, {
-        withCredentials: true,
+        headers: { Authorization: `Bearer ${token}` },
       });
       setLinks(links.filter(link => link._id !== id));
       setError(null);
@@ -157,15 +138,11 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
   };
 
   const handleDeleteAllLinks = async (projectId) => {
-    if (!hasCookieConsent) {
-      setCookieError('You must accept cookies to use this feature.');
-      return;
-    }
-
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
       await axios.delete(`${apiBaseUrl}/${projectId}/links`, {
-        withCredentials: true,
+        headers: { Authorization: `Bearer ${token}` },
       });
       setLinks([]);
       setError(null);
@@ -200,17 +177,6 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
           {error}
           <button
             onClick={() => setError(null)}
-            className="ml-2 text-red-900 underline"
-          >
-            Close
-          </button>
-        </div>
-      )}
-      {cookieError && (
-        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
-          {cookieError}
-          <button
-            onClick={() => setCookieError(null)}
             className="ml-2 text-red-900 underline"
           >
             Close

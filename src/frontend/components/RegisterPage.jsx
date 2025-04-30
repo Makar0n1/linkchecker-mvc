@@ -1,32 +1,22 @@
-import React, { useState, useContext } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
-import { CookieContext } from './CookieContext';
 
 const RegisterPage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const navigate = useNavigate();
-  const context = useContext(CookieContext);
-const hasCookieConsent = context ? context.hasCookieConsent : true;
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
-    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
+    ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links` // В продакшене без порта
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    if (!hasCookieConsent) {
-      setError('You must accept cookies to use this feature.');
-      return;
-    }
-
     try {
-      await axios.post(`${apiBaseUrl}/register`, { username, password }, {
-        withCredentials: true,
-      });
+      await axios.post(`${apiBaseUrl}/register`, { username, password });
       alert('Registration successful! Please login.');
       navigate('/login');
     } catch (err) {

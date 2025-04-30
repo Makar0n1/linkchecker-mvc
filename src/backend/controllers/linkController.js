@@ -15,6 +15,7 @@ const async = require('async');
 const { URL } = require('url');
 const dns = require('dns').promises;
 const mongoose = require('mongoose');
+//const { wss } = require('../server');
 
 let pLimit;
 (async () => {
@@ -315,23 +316,23 @@ const restartBrowser = async () => {
 };
 
 const authMiddleware = (req, res, next) => {
-  const token = req.cookies.token; // Извлекаем токен из куки
+  let token = req.headers.authorization?.split(' ')[1]; // Проверяем заголовок Authorization: Bearer <token>
+  if (!token) {
+    token = req.query.token; // Проверяем query-параметр token
+  }
 
   if (!token) {
-    console.error(`authMiddleware: No token provided in cookies, headers: ${JSON.stringify(req.headers)}, cookies: ${JSON.stringify(req.cookies)}`);
-    return res.status(401).json({ 
-      error: 'No token provided', 
-      details: 'Cookies are required for authentication. Please accept cookies to proceed.' 
-    });
+    console.error(`authMiddleware: No token provided in request, headers: ${JSON.stringify(req.headers)}, query: ${JSON.stringify(req.query)}, method: ${req.method}, url: ${req.url}`);
+    return res.status(401).json({ error: 'No token provided' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
-    console.log(`authMiddleware: Successfully decoded token, userId=${req.userId}`);
+    console.log(`authMiddleware: Successfully decoded token, userId=${req.userId}, method: ${req.method}, url: ${req.url}, token: ${token.substring(0, 10)}...`);
     next();
   } catch (error) {
-    console.error(`authMiddleware: Invalid token, error: ${error.message}, token: ${token.substring(0, 10)}...`);
+    console.error(`authMiddleware: Invalid token, error: ${error.message}, token: ${token.substring(0, 10)}..., method: ${req.method}, url: ${req.url}, JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'not set'}`);
     return res.status(401).json({ error: 'Invalid token' });
   }
 };
@@ -378,27 +379,12 @@ const loginUser = async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    const refreshToken = jwt.sign({ userId: user._id }, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
-
-    user.refreshToken = refreshToken;
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' }); // Возвращаем срок действия к 1 часу
+    const refreshToken = jwt.sign({ userId: user._id }, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' }); // Refresh token на 7 дней
+    user.refreshToken = refreshToken; // Сохраняем refresh token в базе данных
     await user.save();
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 60 * 60 * 1000,
-    });
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.json({ message: 'Login successful' });
+    res.json({ token, refreshToken });
   } catch (error) {
     console.error('Error logging in:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -595,7 +581,6 @@ const checkLinks = async (req, res) => {
       type: 'checkLinks',
       status: 'pending',
       data: { userId, projectId },
-      progressKey,
     });
     await task.save();
 
@@ -835,9 +820,6 @@ const runSpreadsheetAnalysis = async (req, res) => {
   );
   console.log(`Updated FrontendLinks with taskId=${task._id} for spreadsheet ${spreadsheetId} in project ${projectId}`);
 
-  // Генерируем progressKey
-  const progressKey = crypto.randomBytes(16).toString('hex');
-
   analysisQueue.push({
     taskId: task._id,
     projectId,
@@ -924,7 +906,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
     },
   });
 
-  res.json({ taskId: task._id, progressKey }); // Добавляем progressKey в ответ
+  res.json({ taskId: task._id });
 };
 
 const cancelSpreadsheetAnalysis = async (req, res) => {
@@ -3535,7 +3517,7 @@ const getActiveSpreadsheetTasks = async (req, res) => {
       userId,
       type: 'runSpreadsheetAnalysis',
       status: { $in: ['pending', 'processing'] },
-    }).select('_id data.spreadsheetId progress processedLinks totalLinks estimatedTimeRemaining status progressKey');
+    }).select('_id data.spreadsheetId progress processedLinks totalLinks estimatedTimeRemaining status');
 
     res.json(tasks.map(task => ({
       taskId: task._id,
@@ -3545,7 +3527,6 @@ const getActiveSpreadsheetTasks = async (req, res) => {
       totalLinks: task.totalLinks || 0,
       estimatedTimeRemaining: task.estimatedTimeRemaining || 0,
       status: task.status || 'pending',
-      progressKey: task.progressKey, // Убедимся, что возвращаем progressKey
     })));
   } catch (error) {
     console.error('getActiveSpreadsheetTasks: Error fetching active spreadsheet tasks', error);
@@ -3553,7 +3534,7 @@ const getActiveSpreadsheetTasks = async (req, res) => {
   }
 };
 const refreshToken = async (req, res) => {
-  const refreshToken = req.cookies.refreshToken; // Извлекаем refresh-токен из куки
+  const { refreshToken } = req.body;
 
   if (!refreshToken) {
     console.error('refreshToken: No refresh token provided');
@@ -3569,16 +3550,8 @@ const refreshToken = async (req, res) => {
     }
 
     const newToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-    res.cookie('token', newToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 60 * 60 * 1000,
-    });
-
     console.log(`refreshToken: New token generated for user ${user._id}, token: ${newToken.substring(0, 10)}..., JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'not set'}`);
-    res.json({ message: 'Token refreshed successfully' });
+    res.json({ token: newToken });
   } catch (error) {
     console.error('refreshToken: Error refreshing token:', error.message, `provided refreshToken: ${refreshToken.substring(0, 10)}..., JWT_REFRESH_SECRET: ${process.env.JWT_REFRESH_SECRET ? 'set' : 'not set'}`);
     return res.status(403).json({ error: 'Invalid refresh token' });
