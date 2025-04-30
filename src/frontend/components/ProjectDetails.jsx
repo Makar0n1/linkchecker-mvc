@@ -12,7 +12,8 @@ const ProjectDetails = () => {
   const [activeTab, setActiveTab] = useState('manual');
   const [error, setError] = useState(null);
   const [isServerBusy, setIsServerBusy] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isManualAnalyzing, setIsManualAnalyzing] = useState(false); // Для Manual Links
+  const [isSheetsAnalyzing, setIsSheetsAnalyzing] = useState(false); // Для Google Sheets
 
   // Состояния для Manual Links
   const [links, setLinks] = useState([]);
@@ -38,7 +39,8 @@ const ProjectDetails = () => {
         const project = response.data.find((proj) => proj._id === projectId);
         if (project) {
           setProjectName(project.name);
-          setIsAnalyzing(project.isAnalyzing);
+          setIsManualAnalyzing(project.isAnalyzing);
+          setIsSheetsAnalyzing(project.isAnalyzing);
         } else {
           setError('Project not found');
           navigate('/app/projects');
@@ -53,12 +55,16 @@ const ProjectDetails = () => {
 
   const handleAddLinks = async (e, projectId) => {
     e.preventDefault();
-    if (!urlList || !targetDomain) return;
+    if (!urlList || !targetDomain) {
+      setError('Both URLs and Target Domain are required');
+      return;
+    }
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const urls = urlList.split('\n').map(url => url.trim()).filter(url => url);
-      const linksData = { urls, targetDomains: [targetDomain] }; // Обновляем формат данных
+      // Формат данных, ожидаемый API: { urls: [], targetDomains: [] }
+      const linksData = { urls, targetDomains: [targetDomain] };
       const response = await axios.post(`${apiBaseUrl}/${projectId}/links`, linksData, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -79,6 +85,7 @@ const ProjectDetails = () => {
 
   const handleCheckLinks = async (projectId) => {
     setLoading(true);
+    setIsManualAnalyzing(true); // Устанавливаем для Manual Links
     try {
       const token = localStorage.getItem('token');
       await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
@@ -86,13 +93,14 @@ const ProjectDetails = () => {
       });
       setError(null);
       setIsServerBusy(false);
-      setIsAnalyzing(true); // Устанавливаем isAnalyzing в true во время анализа
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to check links');
+      setIsManualAnalyzing(false); // Сбрасываем в случае ошибки
       if (err.response?.status === 429 || err.response?.status === 409 || err.message.includes('Network Error')) {
         setIsServerBusy(true);
-        setIsAnalyzing(true);
       }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -215,6 +223,8 @@ const ProjectDetails = () => {
           handleCheckLinks={handleCheckLinks}
           handleDeleteLink={handleDeleteLink}
           handleDeleteAllLinks={handleDeleteAllLinks}
+          isAnalyzing={isManualAnalyzing}
+          setIsAnalyzing={setIsManualAnalyzing}
         />
       )}
 
@@ -227,7 +237,8 @@ const ProjectDetails = () => {
           setRunningIds={setRunningIds}
           setLoading={setLoading}
           setError={setError}
-          isAnalyzing={isAnalyzing}
+          isAnalyzing={isSheetsAnalyzing}
+          setIsAnalyzing={setIsSheetsAnalyzing}
         />
       )}
     </motion.div>
