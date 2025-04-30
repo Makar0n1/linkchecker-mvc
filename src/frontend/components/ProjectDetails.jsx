@@ -28,28 +28,29 @@ const ProjectDetails = () => {
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const fetchProject = async () => {
-      try {
-        const response = await axios.get(`${apiBaseUrl}/projects`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const project = response.data.find((proj) => proj._id === projectId);
-        if (project) {
-          setProjectName(project.name);
-          setIsAnalyzing(project.isAnalyzing);
-        } else {
-          setError('Project not found');
-          navigate('/app/projects');
+    useEffect(() => {
+      const token = localStorage.getItem('token');
+      const fetchProject = async () => {
+        try {
+          const response = await axios.get(`${apiBaseUrl}/projects`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const project = response.data.find((proj) => proj._id === projectId);
+          if (project) {
+            setProjectName(project.name);
+            // Устанавливаем isAnalyzing в зависимости от активной вкладки
+            setIsAnalyzing(activeTab === 'manual' ? project.isAnalyzingManual : project.isAnalyzingSpreadsheet);
+          } else {
+            setError('Project not found');
+            navigate('/app/projects');
+          }
+        } catch (err) {
+          setError(err.response?.data?.error || 'Failed to fetch project');
         }
-      } catch (err) {
-        setError(err.response?.data?.error || 'Failed to fetch project');
-      }
-    };
-
-    fetchProject();
-  }, [projectId, navigate]);
+      };
+    
+      fetchProject();
+    }, [projectId, navigate, activeTab]);
 
   const handleAddLinks = async (e, projectId) => {
     e.preventDefault();
@@ -90,13 +91,14 @@ const ProjectDetails = () => {
       });
       setError(null);
       setIsServerBusy(false);
-      setIsAnalyzing(true); // Устанавливаем isAnalyzing в true во время анализа
+      setIsAnalyzing(true);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to check links');
       if (err.response?.status === 429 || err.response?.status === 409 || err.message.includes('Network Error')) {
         setIsServerBusy(true);
         setIsAnalyzing(true);
       }
+      setLoading(false);
     }
   };
 

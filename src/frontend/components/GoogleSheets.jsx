@@ -135,8 +135,9 @@ const GoogleSheets = ({
       const response = await axios.get(`${apiBaseUrl}/${projectId}/analysis-status`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setIsProjectAnalyzing(response.data.isAnalyzing);
-      if (!response.data.isAnalyzing) {
+      // Используем isAnalyzingSpreadsheet для проверки статуса анализа Google Sheets
+      setIsProjectAnalyzing(response.data.isAnalyzingSpreadsheet);
+      if (!response.data.isAnalyzingSpreadsheet) {
         fetchSpreadsheets();
         setRunningIds([]);
         setLoading(false);
@@ -307,6 +308,11 @@ const GoogleSheets = ({
 
   const runAnalysis = async (spreadsheetId) => {
     const token = localStorage.getItem('token');
+    if (!token) {
+      setError('Authentication token missing. Please log in again.');
+      navigate('/login');
+      return;
+    }
     setRunningIds([...runningIds, spreadsheetId]);
     setLoading(true);
     setProgressData(prev => ({
@@ -335,7 +341,13 @@ const GoogleSheets = ({
       setSpreadsheets(updated.data);
       setError(null);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to run analysis');
+      const errorMessage = err.response?.data?.error || 'Failed to run analysis';
+      setError(errorMessage);
+      if (err.response?.status === 401) {
+        console.error('Unauthorized request, redirecting to login');
+        localStorage.removeItem('token');
+        navigate('/login');
+      }
       setRunningIds(runningIds.filter(id => id !== spreadsheetId));
       setLoading(false);
       setProgressData(prev => {

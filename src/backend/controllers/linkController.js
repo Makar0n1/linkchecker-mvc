@@ -102,10 +102,10 @@ const loadPendingTasks = async () => {
               .then(proj => {
                 if (!proj) throw new Error('Project not found in handler');
                 project = proj;
-                project.isAnalyzing = true;
+                project.isAnalyzingManual = true;
                 return project.save();
               })
-              .then(() => FrontendLink.updateMany({ projectId: task.projectId }, { $set: { status: 'checking' } }))
+              .then(() => FrontendLink.updateMany({ projectId: task.projectId, source: 'manual' }, { $set: { status: 'checking' } }))
               .then(() => processLinksInBatches(links, 20, task.projectId, task.wss, null, task.taskId))
               .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
               .then(updatedLinks => {
@@ -132,10 +132,10 @@ const loadPendingTasks = async () => {
               })
               .finally(() => {
                 if (project) {
-                  project.isAnalyzing = false;
+                  project.isAnalyzingManual = false;
                   project.save()
-                    .then(() => console.log(`checkLinks handler: Set isAnalyzing to false for project ${task.projectId}`))
-                    .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
+                    .then(() => console.log(`checkLinks handler: Set isAnalyzingManual to false for project ${task.projectId}`))
+                    .catch(err => console.error(`Error setting isAnalyzingManual to false for project ${task.projectId}:`, err));
                 }
               });
           },
@@ -148,7 +148,6 @@ const loadPendingTasks = async () => {
           continue;
         }
 
-        // Проверяем userId
         let userId = task.data.userId;
         console.log(`loadPendingTasks: Processing runSpreadsheetAnalysis task ${task._id}, initial userId=${userId}, type=${typeof userId}`);
         if (!userId) {
@@ -164,7 +163,6 @@ const loadPendingTasks = async () => {
           }
         }
 
-        // Дополнительно проверяем spreadsheet.userId
         if (!spreadsheet.userId) {
           console.error(`loadPendingTasks: Spreadsheet ${spreadsheet._id} has no userId, attempting to set from project`);
           const project = await Project.findById(task.projectId);
@@ -195,7 +193,7 @@ const loadPendingTasks = async () => {
               .then(proj => {
                 if (!proj) throw new Error('Project not found in handler');
                 project = proj;
-                project.isAnalyzing = true;
+                project.isAnalyzingSpreadsheet = true;
                 return project.save();
               })
               .then(() => {
@@ -249,10 +247,10 @@ const loadPendingTasks = async () => {
               })
               .finally(() => {
                 if (project) {
-                  project.isAnalyzing = false;
+                  project.isAnalyzingSpreadsheet = false;
                   project.save()
-                    .then(() => console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`))
-                    .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
+                    .then(() => console.log(`runSpreadsheetAnalysis handler: Set isAnalyzingSpreadsheet to false for project ${task.projectId}`))
+                    .catch(err => console.error(`Error setting isAnalyzingSpreadsheet to false for project ${task.projectId}:`, err));
                 }
               });
           },
@@ -320,11 +318,11 @@ const restartBrowser = async () => {
 const authMiddleware = (req, res, next) => {
   let token = req.headers.authorization?.split(' ')[1]; // Проверяем заголовок Authorization: Bearer <token>
   if (!token) {
-    token = req.query.token; // Если в заголовке нет, проверяем query-параметр token
+    token = req.query.token; // Проверяем query-параметр token
   }
 
   if (!token) {
-    console.log('authMiddleware: No token provided in request');
+    console.error(`authMiddleware: No token provided in request, headers: ${JSON.stringify(req.headers)}, query: ${JSON.stringify(req.query)}`);
     return res.status(401).json({ error: 'No token provided' });
   }
 
@@ -334,7 +332,7 @@ const authMiddleware = (req, res, next) => {
     console.log(`authMiddleware: Successfully decoded token, userId=${req.userId}`);
     next();
   } catch (error) {
-    console.log('authMiddleware: Invalid token', error.message);
+    console.error(`authMiddleware: Invalid token, error: ${error.message}, token: ${token}`);
     return res.status(401).json({ error: 'Invalid token' });
   }
 };
@@ -574,11 +572,12 @@ const checkLinks = async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    if (project.isAnalyzing) {
-      return res.status(409).json({ error: 'Analysis is already in progress for this project' });
+    // Проверяем, выполняется ли уже анализ ручных ссылок
+    if (project.isAnalyzingManual) {
+      return res.status(409).json({ error: 'Manual links analysis is already in progress for this project' });
     }
 
-    const links = await FrontendLink.find({ projectId, userId });
+    const links = await FrontendLink.find({ projectId, userId, source: 'manual' });
     if (links.length === 0) {
       return res.status(400).json({ error: 'No links found to analyze' });
     }
@@ -595,15 +594,14 @@ const checkLinks = async (req, res) => {
     user.activeTasks.set(projectId, task._id.toString());
     await user.save();
 
-    // Добавляем taskId во все FrontendLink перед анализом
+    // Обновляем taskId для всех ручных ссылок
     await FrontendLink.updateMany(
-      { projectId, userId, taskId: { $exists: false } }, // Обновляем только те ссылки, у которых нет taskId
+      { projectId, userId, source: 'manual' },
       { $set: { taskId: task._id } }
     );
     console.log(`Updated FrontendLinks with taskId=${task._id} for project ${projectId}`);
 
-    // Перезагружаем ссылки, чтобы убедиться, что у них есть taskId
-    const updatedLinks = await FrontendLink.find({ projectId, userId });
+    const updatedLinks = await FrontendLink.find({ projectId, userId, source: 'manual' });
 
     analysisQueue.push({
       taskId: task._id,
@@ -615,8 +613,11 @@ const checkLinks = async (req, res) => {
       wss: req.wss,
       handler: async (task, callback) => {
         console.log(`checkLinks handler: Starting analysis for project ${projectId}`);
+        let project;
         try {
-          project.isAnalyzing = true;
+          project = await Project.findOne({ _id: task.projectId, userId: task.userId });
+          if (!project) throw new Error('Project not found in handler');
+          project.isAnalyzingManual = true;
           await project.save();
 
           const processedLinks = await processLinksInBatches(updatedLinks, 20, projectId, task.wss, null, task.taskId);
@@ -627,12 +628,19 @@ const checkLinks = async (req, res) => {
           console.error(`Error in checkLinks for project ${projectId}:`, error);
           callback(error);
         } finally {
-          project.isAnalyzing = false;
-          await project.save();
-          console.log(`checkLinks handler: Set isAnalyzing to false for project ${projectId}`);
+          if (project) {
+            project.isAnalyzingManual = false;
+            await project.save();
+            console.log(`checkLinks handler: Set isAnalyzingManual to false for project ${projectId}`);
+          }
           const user = await User.findById(task.userId);
-          user.activeTasks.delete(projectId);
-          await user.save();
+          if (user) {
+            user.activeTasks.delete(projectId);
+            await user.save();
+            console.log(`Cleared active task for project ${projectId} from user ${task.userId}`);
+          }
+          await AnalysisTask.findByIdAndDelete(task.taskId);
+          console.log(`Deleted AnalysisTask ${task.taskId} after completion`);
         }
       },
     });
@@ -748,12 +756,14 @@ let cancelAnalysis = false;
 
 const runSpreadsheetAnalysis = async (req, res) => {
   const { projectId, spreadsheetId } = req.params;
-  console.log(`runSpreadsheetAnalysis: Starting for project ${projectId}, spreadsheet ${spreadsheetId}, userId=${req.userId}, type=${typeof req.userId}`);
 
+  // Проверяем наличие req.userId
   if (!req.userId) {
-    console.error(`runSpreadsheetAnalysis: req.userId is missing`);
-    return res.status(401).json({ error: 'User authentication required' });
+    console.error(`runSpreadsheetAnalysis: req.userId is missing, request headers: ${JSON.stringify(req.headers)}`);
+    return res.status(401).json({ error: 'User authentication required: missing userId' });
   }
+
+  console.log(`runSpreadsheetAnalysis: Starting for project ${projectId}, spreadsheet ${spreadsheetId}, userId=${req.userId}, type=${typeof req.userId}`);
 
   const user = await User.findById(req.userId);
   if (!user) {
@@ -771,9 +781,9 @@ const runSpreadsheetAnalysis = async (req, res) => {
     return res.status(404).json({ error: 'Project not found' });
   }
 
-  if (project.isAnalyzing) {
-    console.log(`runSpreadsheetAnalysis: Analysis already in progress for project ${projectId}, rejecting request`);
-    return res.status(409).json({ error: 'Analysis is already in progress for this project' });
+  if (project.isAnalyzingSpreadsheet) {
+    console.log(`runSpreadsheetAnalysis: Google Sheets analysis already in progress for project ${projectId}, rejecting request`);
+    return res.status(409).json({ error: 'Google Sheets analysis is already in progress for this project' });
   }
 
   const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId: req.userId });
@@ -810,6 +820,12 @@ const runSpreadsheetAnalysis = async (req, res) => {
   user.activeTasks.set(projectId, task._id.toString());
   await user.save();
 
+  await FrontendLink.updateMany(
+    { projectId, userId: req.userId, spreadsheetId, source: 'google_sheets' },
+    { $set: { taskId: task._id } }
+  );
+  console.log(`Updated FrontendLinks with taskId=${task._id} for spreadsheet ${spreadsheetId} in project ${projectId}`);
+
   analysisQueue.push({
     taskId: task._id,
     projectId,
@@ -826,7 +842,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
         .then(proj => {
           if (!proj) throw new Error('Project not found in handler');
           project = proj;
-          project.isAnalyzing = true;
+          project.isAnalyzingSpreadsheet = true;
           return project.save();
         })
         .then(() => {
@@ -865,7 +881,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
                 if (!task.res.headersSent) {
                   task.res.json({ message: 'Analysis cancelled' });
                 }
-                callback(null); // Завершаем без ошибки
+                callback(null);
               });
           } else {
             console.error(`Error analyzing spreadsheet ${spreadsheetId} in project ${projectId}:`, error);
@@ -882,15 +898,15 @@ const runSpreadsheetAnalysis = async (req, res) => {
         })
         .finally(() => {
           if (project) {
-            project.isAnalyzing = false;
+            project.isAnalyzingSpreadsheet = false;
             project.save()
               .then(async () => {
-                console.log(`runSpreadsheetAnalysis handler: Set isAnalyzing to false for project ${task.projectId}`);
+                console.log(`runSpreadsheetAnalysis handler: Set isAnalyzingSpreadsheet to false for project ${task.projectId}`);
                 const user = await User.findById(task.userId);
                 user.activeTasks.delete(projectId);
                 await user.save();
               })
-              .catch(err => console.error(`Error setting isAnalyzing to false for project ${task.projectId}:`, err));
+              .catch(err => console.error(`Error setting isAnalyzingSpreadsheet to false for project ${task.projectId}:`, err));
           }
         });
     },
@@ -914,11 +930,11 @@ const cancelSpreadsheetAnalysis = async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    if (!project.isAnalyzing) {
-      return res.status(400).json({ error: 'No analysis is currently running for this project' });
+    // Проверяем, выполняется ли анализ Google Sheets
+    if (!project.isAnalyzingSpreadsheet) {
+      return res.status(400).json({ error: 'No Google Sheets analysis is currently running for this project' });
     }
 
-    // Обновляем статус задачи на cancelled
     const task = await AnalysisTask.findOneAndUpdate(
       { projectId, status: { $in: ['pending', 'processing'] } },
       { $set: { status: 'cancelled', error: 'Analysis cancelled by user' } },
@@ -929,27 +945,22 @@ const cancelSpreadsheetAnalysis = async (req, res) => {
       return res.status(404).json({ error: 'No active task found to cancel' });
     }
 
-    // Даём время processLinksInBatches завершить текущие операции
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Удаляем все связанные ссылки (FrontendLink)
     await FrontendLink.deleteMany({
       spreadsheetId: spreadsheet.spreadsheetId,
       projectId,
     });
     console.log(`Deleted all FrontendLinks for spreadsheet ${spreadsheetId}`);
 
-    // Обновляем статус таблицы
     spreadsheet.status = 'pending';
     spreadsheet.lastRun = null;
     spreadsheet.scanCount = 0;
     await spreadsheet.save();
 
-    // Сбрасываем статус проекта
-    project.isAnalyzing = false;
+    project.isAnalyzingSpreadsheet = false;
     await project.save();
 
-    // Удаляем taskId из activeTasks пользователя
     const user = await User.findById(userId);
     user.activeTasks.delete(projectId);
     await user.save();
@@ -3369,7 +3380,12 @@ const getAnalysisStatus = async (req, res) => {
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
     const tasks = await AnalysisTask.find({ projectId, status: { $in: ['pending', 'processing'] } });
-    res.json({ isAnalyzing: project.isAnalyzing || tasks.length > 0 });
+    res.json({
+      isAnalyzing: project.isAnalyzing, // Для обратной совместимости
+      isAnalyzingManual: project.isAnalyzingManual,
+      isAnalyzingSpreadsheet: project.isAnalyzingSpreadsheet,
+      hasActiveTasks: tasks.length > 0,
+    });
   } catch (error) {
     console.error('getAnalysisStatus: Error fetching analysis status', error);
     res.status(500).json({ error: 'Error fetching analysis status', details: error.message });
