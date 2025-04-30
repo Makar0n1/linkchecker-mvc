@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { CookieContext } from './CookieContext';
 
-// Собственная функция debounce
 const debounce = (func, wait) => {
   let timeout;
   return (...args) => {
@@ -41,7 +40,7 @@ const GoogleSheets = ({
   const [progressKeys, setProgressKeys] = useState({});
   const [isTokenInvalid, setIsTokenInvalid] = useState(false);
   const context = useContext(CookieContext);
-const hasCookieConsent = context ? context.hasCookieConsent : true;
+  const hasCookieConsent = context ? context.hasCookieConsent : true;
   const [cookieError, setCookieError] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
@@ -88,9 +87,15 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
       });
       const tasks = response.data;
       const newTaskIds = {};
+      const newProgressKeys = {};
       const newProgressData = {};
+
       tasks.forEach(task => {
         newTaskIds[task.spreadsheetId] = task.taskId;
+        // Проверяем, есть ли progressKey для этой задачи
+        if (task.progressKey) {
+          newProgressKeys[task.spreadsheetId] = task.progressKey;
+        }
         newProgressData[task.spreadsheetId] = {
           progress: task.progress || 0,
           processedLinks: task.processedLinks || 0,
@@ -99,6 +104,7 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
           status: task.status || 'pending',
         };
       });
+
       setTaskIds(prev => {
         const updatedTaskIds = { ...newTaskIds };
         Object.keys(prev).forEach(spreadsheetId => {
@@ -109,6 +115,18 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
         });
         return updatedTaskIds;
       });
+
+      setProgressKeys(prev => {
+        const updatedProgressKeys = { ...newProgressKeys };
+        Object.keys(prev).forEach(spreadsheetId => {
+          if (!newProgressKeys[spreadsheetId]) {
+            console.log(`Progress key for spreadsheet ${spreadsheetId} removed`);
+            delete updatedProgressKeys[spreadsheetId];
+          }
+        });
+        return updatedProgressKeys;
+      });
+
       setProgressData(newProgressData);
       setRunningIds(Object.keys(newTaskIds));
       setIsProjectAnalyzing(Object.keys(newTaskIds).length > 0);
@@ -134,7 +152,9 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
     }
     console.log(`Fetching progress for task ${taskId} with progressKey: ${progressKey.substring(0, 10)}...`);
     try {
-      const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}?progressKey=${progressKey}`);
+      const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}?progressKey=${progressKey}`, {
+        withCredentials: true,
+      });
       const data = response.data;
       debouncedSetProgressData(prev => ({
         ...prev,
@@ -336,14 +356,19 @@ const hasCookieConsent = context ? context.hasCookieConsent : true;
       clearInterval(statusInterval);
       clearInterval(activeTasksInterval);
     };
-  }, [projectId]);
+  }, [projectId, hasCookieConsent]);
 
   useEffect(() => {
     const eventSources = {};
     Object.keys(taskIds).forEach(spreadsheetId => {
       const taskId = taskIds[spreadsheetId];
-      fetchProgress(spreadsheetId, taskId);
-      eventSources[spreadsheetId] = startSSE(spreadsheetId, taskId);
+      const progressKey = progressKeys[spreadsheetId];
+      if (progressKey) { // Проверяем наличие progressKey перед вызовом
+        fetchProgress(spreadsheetId, taskId);
+        eventSources[spreadsheetId] = startSSE(spreadsheetId, taskId);
+      } else {
+        console.warn(`Skipping fetchProgress and startSSE for spreadsheet ${spreadsheetId} due to missing progressKey`);
+      }
     });
     return () => {
       Object.values(eventSources).forEach(eventSource => eventSource?.close());

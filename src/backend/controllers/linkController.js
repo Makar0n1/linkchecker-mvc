@@ -834,6 +834,9 @@ const runSpreadsheetAnalysis = async (req, res) => {
   );
   console.log(`Updated FrontendLinks with taskId=${task._id} for spreadsheet ${spreadsheetId} in project ${projectId}`);
 
+  // Генерируем progressKey
+  const progressKey = crypto.randomBytes(16).toString('hex');
+
   analysisQueue.push({
     taskId: task._id,
     projectId,
@@ -920,7 +923,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
     },
   });
 
-  res.json({ taskId: task._id });
+  res.json({ taskId: task._id, progressKey }); // Добавляем progressKey в ответ
 };
 
 const cancelSpreadsheetAnalysis = async (req, res) => {
