@@ -27,6 +27,7 @@ const GoogleSheets = ({
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
   const [progressData, setProgressData] = useState({});
+  const [runningIds, setRunningIds] = useState([]);
   const [taskIds, setTaskIds] = useState({});
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
@@ -67,7 +68,9 @@ const GoogleSheets = ({
       });
   
       const progressResults = await Promise.all(progressPromises);
-      const newProgressData = { ...progressData }; // Сохраняем существующий прогресс
+      const newProgressData = { ...progressData };
+      const newRunningIds = [...runningIds];
+  
       progressResults.forEach(({ spreadsheetId, progress }) => {
         if (progress) {
           newProgressData[spreadsheetId] = {
@@ -76,13 +79,22 @@ const GoogleSheets = ({
             totalLinks: progress.totalLinks,
             estimatedTimeRemaining: progress.estimatedTimeRemaining,
           };
-          // Если задача завершена, оставляем прогресс, но не сбрасываем его
+          // Если задача активна (pending или processing), добавляем её в runningIds
+          if (progress.status === 'pending' || progress.status === 'processing') {
+            if (!newRunningIds.includes(spreadsheetId)) {
+              newRunningIds.push(spreadsheetId);
+            }
+            setIsProjectAnalyzing(true); // Устанавливаем isProjectAnalyzing, если есть активные задачи
+          }
+          // Если задача завершена, оставляем прогресс
           if (progress.status === 'completed' || progress.status === 'failed') {
             console.log(`Task ${spreadsheetId} is ${progress.status}, preserving progress: ${progress.progress}%`);
           }
         }
       });
+  
       setProgressData(newProgressData);
+      setRunningIds(newRunningIds);
     } catch (err) {
       console.error('Error fetching user tasks:', err);
     }
@@ -95,13 +107,9 @@ const GoogleSheets = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       setIsProjectAnalyzing(response.data.isAnalyzing);
-      if (!response.data.isAnalyzing) {
-        fetchSpreadsheets();
-        setRunningIds([]);
-        setProgressData({});
-        setTaskIds({});
-        await fetchUserTasks();
-      }
+      // Не сбрасываем runningIds и progressData автоматически
+      fetchSpreadsheets();
+      await fetchUserTasks(); // Убедимся, что taskIds обновлены
     } catch (err) {
       console.error('Error fetching analysis status:', err);
     }
@@ -111,7 +119,7 @@ const GoogleSheets = ({
     const token = localStorage.getItem('token');
     console.log(`Starting SSE for spreadsheet ${spreadsheetId}, task ${taskId}`);
     const eventSource = new EventSource(`${apiBaseUrl}/${projectId}/task-progress-sse/${taskId}?token=${token}`);
-
+  
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.error) {
@@ -129,7 +137,6 @@ const GoogleSheets = ({
         },
       }));
       if (data.status === 'completed' || data.status === 'failed') {
-        setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
         setTaskIds(prev => {
           const newTaskIds = { ...prev };
           delete newTaskIds[spreadsheetId];
@@ -140,11 +147,11 @@ const GoogleSheets = ({
         eventSource.close();
       }
     };
-
+  
     eventSource.onerror = (error) => {
       eventSource.close();
     };
-
+  
     return eventSource;
   };
 
