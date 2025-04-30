@@ -186,3 +186,63 @@ linkchecker/
 
 ## Лицензия
 MIT License — используй как хочешь, только упомяни автора!
+
+
+
+
+linkchecker-mvc/
+│
+├── src/
+│   ├── index.js                      # Точка входа для запуска фронтенда и бэкенда, настройка планировщика
+│   │
+│   ├── backend/
+│   │   ├── controllers/
+│   │   │   └── linkController.js     # Контроллер для обработки ссылок, проектов, таблиц Google Sheets
+│   │   ├── models/
+│   │   │   ├── AnalysisTask.js       # Модель для задач анализа
+│   │   │   ├── FrontendLink.js       # Модель для ссылок на фронтенде
+│   │   │   ├── Link.js               # Модель для ссылок (возможно устаревшая)
+│   │   │   ├── Project.js            # Модель для проектов
+│   │   │   ├── Spreadsheet.js        # Модель для Google Sheets
+│   │   │   └── User.js               # Модель для пользователей
+│   │   ├── routes/
+│   │   │   └── linkRoutes.js         # Маршруты для API
+│   │   └── server.js                 # Основной файл сервера
+│   │
+│   ├── frontend/
+│   │   ├── components/
+│   │   │   ├── Dashboard.jsx         # Компонент дашборда
+│   │   │   ├── GoogleSheets.jsx      # Компонент для работы с Google Sheets
+│   │   │   ├── LoginPage.jsx         # Компонент страницы логина
+│   │   │   ├── ManualLinks.jsx       # Компонент для ручного добавления ссылок
+│   │   │   ├── Profile.jsx           # Компонент профиля пользователя
+│   │   │   ├── ProjectDetails.jsx    # Компонент деталей проекта
+│   │   │   ├── Projects.jsx          # Компонент списка проектов
+│   │   │   ├── RegisterPage.jsx      # Компонент страницы регистрации
+│   │   │   └── StartPage.jsx         # Компонент стартовой страницы
+│   │   ├── App.jsx                   # Основной компонент приложения
+│   │   ├── main.jsx                  # Точка входа для фронтенда (роутинг)
+│   │   └── styles.css                # Основной файл стилей с Tailwind CSS
+│   │
+│   ├── assets/
+│   │   └── images/
+│   │       ├── accurate-analysis.png     # Изображение для точного анализа
+│   │       ├── automated-support.png     # Изображение для автоматизированной поддержки
+│   │       ├── link-analysis-illustration.jpg # Иллюстрация анализа ссылок
+│   │       ├── multi-user-support.png    # Изображение для поддержки нескольких пользователей
+│   │       └── workflow-illustration.png # Иллюстрация рабочего процесса
+│   │
+│   ├── .env                          # Файл окружения для разработки
+│   ├── .env.prod                     # Файл окружения для продакшена
+│   ├── .gitignore                    # Файл для исключения из Git
+│   ├── index.html                    # Главный HTML-файл для фронтенда
+│   ├── package.json                  # Файл с зависимостями и скриптами проекта
+│   ├── postcss.config.js             # Конфигурация PostCSS
+│   ├── README.md                     # Документация проекта
+│   ├── service-account.json          # Учётные данные для Google Sheets API
+│   ├── tailwind.config.js            # Конфигурация Tailwind CSS
+│   └── vite.config.js                # Конфигурация Vite
+│
+└── node_modules/                     # Зависимости проекта (не указаны в структуре, но предполагаются)
+    ├── serve/                        # Для раздачи dist в продакшене
+    └── vite/                         # Для разработки фронтенда

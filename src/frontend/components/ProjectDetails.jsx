@@ -12,8 +12,7 @@ const ProjectDetails = () => {
   const [activeTab, setActiveTab] = useState('manual');
   const [error, setError] = useState(null);
   const [isServerBusy, setIsServerBusy] = useState(false);
-  const [isManualAnalyzing, setIsManualAnalyzing] = useState(false); // Для Manual Links
-  const [isSheetsAnalyzing, setIsSheetsAnalyzing] = useState(false); // Для Google Sheets
+  const [isAnalyzing, setIsAnalyzing] = useState(false); // Новое состояние для анализа
 
   // Состояния для Manual Links
   const [links, setLinks] = useState([]);
@@ -39,8 +38,7 @@ const ProjectDetails = () => {
         const project = response.data.find((proj) => proj._id === projectId);
         if (project) {
           setProjectName(project.name);
-          setIsManualAnalyzing(project.isAnalyzing);
-          setIsSheetsAnalyzing(project.isAnalyzing);
+          setIsAnalyzing(project.isAnalyzing); // Устанавливаем статус анализа
         } else {
           setError('Project not found');
           navigate('/app/projects');
@@ -55,16 +53,12 @@ const ProjectDetails = () => {
 
   const handleAddLinks = async (e, projectId) => {
     e.preventDefault();
-    if (!urlList || !targetDomain) {
-      setError('Both URLs and Target Domain are required');
-      return;
-    }
+    if (!urlList || !targetDomain) return;
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const urls = urlList.split('\n').map(url => url.trim()).filter(url => url);
-      // Формат данных, ожидаемый API: { urls: [], targetDomains: [] }
-      const linksData = { urls, targetDomains: [targetDomain] };
+      const linksData = urls.map(url => ({ url, targetDomain }));
       const response = await axios.post(`${apiBaseUrl}/${projectId}/links`, linksData, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -85,19 +79,20 @@ const ProjectDetails = () => {
 
   const handleCheckLinks = async (projectId) => {
     setLoading(true);
-    setIsManualAnalyzing(true); // Устанавливаем для Manual Links
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
+      const response = await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      setLinks(response.data);
       setError(null);
       setIsServerBusy(false);
+      setIsAnalyzing(false); // Сбрасываем после успешного анализа
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to check links');
-      setIsManualAnalyzing(false); // Сбрасываем в случае ошибки
       if (err.response?.status === 429 || err.response?.status === 409 || err.message.includes('Network Error')) {
         setIsServerBusy(true);
+        setIsAnalyzing(true);
       }
     } finally {
       setLoading(false);
@@ -181,7 +176,7 @@ const ProjectDetails = () => {
           </button>
         </div>
       )}
-      <div className="border-b border-gray-200 mb-8">
+      <div className="border-b border-gray-200 mb-6">
         <nav className="flex space-x-4">
           <button
             onClick={() => setActiveTab('manual')}
@@ -215,7 +210,7 @@ const ProjectDetails = () => {
           setUrlList={setUrlList}
           targetDomain={targetDomain}
           setTargetDomain={setTargetDomain}
-          loading={loading}
+          loading={loading || isAnalyzing} // Учитываем isAnalyzing
           setLoading={setLoading}
           error={error}
           setError={setError}
@@ -223,8 +218,6 @@ const ProjectDetails = () => {
           handleCheckLinks={handleCheckLinks}
           handleDeleteLink={handleDeleteLink}
           handleDeleteAllLinks={handleDeleteAllLinks}
-          isAnalyzing={isManualAnalyzing}
-          setIsAnalyzing={setIsManualAnalyzing}
         />
       )}
 
@@ -237,8 +230,7 @@ const ProjectDetails = () => {
           setRunningIds={setRunningIds}
           setLoading={setLoading}
           setError={setError}
-          isAnalyzing={isSheetsAnalyzing}
-          setIsAnalyzing={setIsSheetsAnalyzing}
+          isAnalyzing={isAnalyzing} // Передаём статус анализа
         />
       )}
     </motion.div>

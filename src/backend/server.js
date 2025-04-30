@@ -7,10 +7,8 @@ const linkRoutes = require('./routes/linkRoutes');
 const WebSocket = require('ws');
 const Spreadsheet = require('./models/Spreadsheet');
 const Project = require('./models/Project');
-const User = require('./models/User');
-const AnalysisTask = require('./models/AnalysisTask');
-const { loadPendingTasks } = require('./controllers/analysisController');
 
+// Загружаем .env в зависимости от окружения
 const envPath = process.env.NODE_ENV === 'production'
   ? path.resolve(__dirname, '../../.env.prod')
   : path.resolve(__dirname, '../../.env');
@@ -25,11 +23,13 @@ console.log('Server.js - CORS origin:', process.env.FRONTEND_DOMAIN);
 const app = express();
 const port = process.env.BACKEND_PORT || 3000;
 
+// Настройка подключения к MongoDB
 mongoose.set('strictQuery', true);
 mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
   .then(async () => {
     console.log('Connected to MongoDB');
 
+    // Проверка и исправление данных в базе
     console.log('Checking database for missing userId in Spreadsheets and Projects...');
     const spreadsheetsWithoutUserId = await Spreadsheet.find({ userId: { $exists: false } });
     if (spreadsheetsWithoutUserId.length > 0) {
@@ -51,50 +51,17 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
     const projectsWithoutUserId = await Project.find({ userId: { $exists: false } });
     if (projectsWithoutUserId.length > 0) {
       console.error(`Found ${projectsWithoutUserId.length} Projects without userId:`, projectsWithoutUserId);
+      // Здесь можно добавить логику для исправления, но это может потребовать ручного вмешательства
     } else {
       console.log('All Projects have userId');
     }
-
-    console.log('Cleaning up stale tasks on server startup...');
-    const users = await User.find();
-    for (const user of users) {
-      const activeTasks = user.activeTasks || new Map();
-      const projectIds = Array.from(activeTasks.keys());
-      const tasksToRemove = [];
-
-      for (const projectId of projectIds) {
-        const taskId = activeTasks.get(projectId);
-        const task = await AnalysisTask.findById(taskId);
-        if (!task || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
-          tasksToRemove.push(projectId);
-        }
-      }
-
-      for (const projectId of tasksToRemove) {
-        const taskId = activeTasks.get(projectId);
-        activeTasks.delete(projectId);
-        const project = await Project.findOne({ _id: projectId, userId: user._id });
-        if (project) {
-          project.isAnalyzing = false;
-          await project.save();
-          console.log(`Cleared isAnalyzing for project ${projectId} on startup`);
-        }
-        await AnalysisTask.findByIdAndDelete(taskId);
-        console.log(`Deleted stale AnalysisTask ${taskId} for project ${projectId} on startup`);
-      }
-
-      user.activeTasks = activeTasks;
-      await user.save();
-    }
-    console.log('Stale tasks cleanup completed on server startup');
-
-    await loadPendingTasks();
   })
   .catch(err => {
     console.error('MongoDB connection error:', err);
     process.exit(1);
   });
 
+// Настройка CORS
 const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = [
@@ -115,6 +82,7 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
+// Обработка preflight запросов
 app.options('*', (req, res) => {
   console.log(`Handling OPTIONS request for ${req.url}`);
   res.set({
@@ -126,13 +94,16 @@ app.options('*', (req, res) => {
   res.status(204).send();
 });
 
+// Middleware для парсинга JSON
 app.use(express.json());
 
+// Логирование всех запросов для отладки
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} (Origin: ${req.headers.origin})`);
   next();
 });
 
+// Запуск HTTP сервера
 const server = app.listen(port, () => {
   const baseUrl = process.env.NODE_ENV === 'production'
     ? `https://api.link-check-pro.top`
@@ -140,19 +111,16 @@ const server = app.listen(port, () => {
   console.log(`Backend running at ${baseUrl}`);
 });
 
+// Настройка WebSocket сервера
 const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (ws) => {
   console.log('WebSocket client connected');
   ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message.toString());
-      if (data.type === 'subscribe' && data.projectId) {
-        ws.projectId = data.projectId;
-        console.log(`Client subscribed to project ${data.projectId}`);
-      }
-    } catch (error) {
-      console.error('WebSocket message parsing error:', error);
+    const data = JSON.parse(message.toString());
+    if (data.type === 'subscribe' && data.projectId) {
+      ws.projectId = data.projectId;
+      console.log(`Client subscribed to project ${data.projectId}`);
     }
   });
   ws.on('close', () => {
@@ -160,13 +128,16 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Middleware для добавления wss в req
 app.use((req, res, next) => {
   req.wss = wss;
   next();
 });
 
+// Маршруты API
 app.use('/api/links', linkRoutes);
 
+// Обработка ошибок
 app.use((err, req, res, next) => {
   console.error(`Server error: ${err.message}`);
   if (!res.headersSent) {

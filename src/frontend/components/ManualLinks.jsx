@@ -19,8 +19,6 @@ const ManualLinks = ({
   handleCheckLinks,
   handleDeleteLink,
   handleDeleteAllLinks,
-  isAnalyzing,
-  setIsAnalyzing,
 }) => {
   const navigate = useNavigate();
   const [copiedField, setCopiedField] = useState(null);
@@ -36,28 +34,16 @@ const ManualLinks = ({
     ? `wss://api.link-check-pro.top`
     : `ws://localhost:${import.meta.env.VITE_BACKEND_PORT}`;
 
-  const clearStaleTasks = async () => {
-    const token = localStorage.getItem('token');
-    try {
-      await axios.post(`${apiBaseUrl}/user/clear-stale-tasks`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      console.log('Stale tasks cleared');
-    } catch (err) {
-      console.error('Error clearing stale tasks:', err);
-    }
-  };
-
   const fetchLinks = async () => {
     const token = localStorage.getItem('token');
     try {
       const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setLinks(Array.isArray(response.data) ? response.data : []);
+      setLinks(response.data);
+      console.log('Fetched links:', response.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch links');
-      setLinks([]);
     }
   };
 
@@ -65,45 +51,42 @@ const ManualLinks = ({
     const ws = new WebSocket(wsBaseUrl);
 
     ws.onopen = () => {
+      console.log('Connected to WebSocket');
       ws.send(JSON.stringify({ type: 'subscribe', projectId }));
     };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      console.log('WebSocket message received:', data);
       if (data.type === 'analysisComplete' && data.projectId === projectId) {
         fetchLinks();
         setLoading(false);
         setCheckingLinks(new Set());
-        setIsAnalyzing(false);
       }
     };
 
     ws.onclose = () => {
-      setTimeout(connectWebSocket, 5000);
+      setTimeout(connectWebSocket, 5000); // Переподключаемся через 5 секунд
     };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      ws.close();
+      ws.close(); // Закрываем соединение, чтобы сработал onclose и переподключение
     };
 
     return ws;
   };
 
   useEffect(() => {
-    const initialize = async () => {
-      await clearStaleTasks();
-      await fetchLinks();
-    };
+    fetchLinks();
 
-    initialize();
-
+    // Подключение к WebSocket
     const ws = connectWebSocket();
 
     return () => {
       ws.close();
     };
-  }, [projectId]);
+  }, [projectId, setLinks, setError, loading, setLoading]);
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
@@ -137,10 +120,6 @@ const ManualLinks = ({
   };
 
   const wrappedHandleCheckLinks = async (projectId) => {
-    if (!Array.isArray(links) || links.length === 0) {
-      setError('No links to check');
-      return;
-    }
     const linkIds = links.map(link => link._id);
     setCheckingLinks(new Set(linkIds));
     setLoading(true);
@@ -150,7 +129,6 @@ const ManualLinks = ({
       setError(err.response?.data?.error || 'Failed to check links');
       setLoading(false);
       setCheckingLinks(new Set());
-      setIsAnalyzing(false);
     }
   };
 
@@ -193,7 +171,7 @@ const ManualLinks = ({
           onChange={(e) => setUrlList(e.target.value)}
           placeholder="Enter URLs (one per line)"
           className="w-full h-28 p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 resize-none text-sm sm:text-base"
-          disabled={loading || isAnalyzing}
+          disabled={loading}
         />
         <input
           type="text"
@@ -201,11 +179,11 @@ const ManualLinks = ({
           onChange={(e) => setTargetDomain(e.target.value)}
           placeholder="Target Domain (e.g., example.com)"
           className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 text-sm sm:text-base"
-          disabled={loading || isAnalyzing}
+          disabled={loading}
         />
         <button
           type="submit"
-          disabled={loading || isAnalyzing}
+          disabled={loading}
           className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
         >
           {loading ? 'Adding...' : 'Add Links'}
@@ -214,14 +192,14 @@ const ManualLinks = ({
       <div className="mb-6 flex flex-col sm:flex-row gap-3 sm:gap-4">
         <button
           onClick={() => wrappedHandleCheckLinks(projectId)}
-          disabled={loading || isAnalyzing || links.length === 0}
+          disabled={loading}
           className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
         >
           {loading ? 'Checking...' : 'Check All Links'}
         </button>
         <button
           onClick={() => handleDeleteAllLinks(projectId)}
-          disabled={loading || isAnalyzing || links.length === 0}
+          disabled={loading || links.length === 0}
           className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm sm:text-base"
         >
           {loading ? 'Deleting...' : 'Delete All Links'}
@@ -245,7 +223,7 @@ const ManualLinks = ({
             </tr>
           </thead>
           <tbody>
-            {!Array.isArray(links) || links.length === 0 ? (
+            {links.length === 0 ? (
               <tr>
                 <td colSpan="10" className="p-2 sm:p-3 text-center text-gray-500 text-sm sm:text-base">No links added yet</td>
               </tr>
@@ -377,7 +355,7 @@ const ManualLinks = ({
                     <td className="p-2 sm:p-3 whitespace-nowrap">
                       <button
                         onClick={() => handleDeleteLink(link._id, projectId)}
-                        disabled={loading || isAnalyzing}
+                        disabled={loading}
                         className="bg-red-500 text-white px-2 sm:px-3 py-1 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors text-sm sm:text-base"
                       >
                         Delete

@@ -1,103 +1,40 @@
 const express = require('express');
 const router = express.Router();
-const {
-  authMiddleware,
-  superAdminMiddleware,
-  registerUser,
-  loginUser,
-  refreshToken,
-  getUserInfo,
-  selectPlan,
-  processPayment,
-  cancelSubscription,
-  deleteAccount,
-  updateProfile,
-} = require('../controllers/authController');
-const { createProject, getProjects, deleteProject } = require('../controllers/projectController');
-const { addLinks, getLinks, deleteLink, deleteAllLinks } = require('../controllers/linkController');
-const { addSpreadsheet, getSpreadsheets, deleteSpreadsheet } = require('../controllers/spreadsheetController');
-const { checkLinks, runSpreadsheetAnalysis, cancelSpreadsheetAnalysis } = require('../controllers/analysisController');
-const { getUserTasks, getAnalysisStatus, getTaskProgress, getTaskProgressSSE } = require('../controllers/taskController');
-const User = require('../models/User');
-const Project = require('../models/Project');
-const AnalysisTask = require('../models/AnalysisTask');
+const linkController = require('../controllers/linkController');
 
-router.post('/register', superAdminMiddleware, registerUser);
-router.post('/login', loginUser);
-router.post('/refresh-token', refreshToken);
-router.get('/user', authMiddleware, getUserInfo);
-router.get('/user/tasks', authMiddleware, getUserTasks);
-router.get('/:projectId/analysis-status', authMiddleware, getAnalysisStatus);
-router.get('/:projectId/task-progress/:taskId', authMiddleware, getTaskProgress);
-router.get('/:projectId/task-progress-sse/:taskId', authMiddleware, getTaskProgressSSE);
+router.post('/register', linkController.registerUser);
+router.post('/login', linkController.loginUser);
+router.get('/user', linkController.getUserInfo);
+router.get('/user/tasks', linkController.getUserTasks);
+router.get('/:projectId/analysis-status', linkController.getAnalysisStatus);
+router.get('/:projectId/task-progress/:taskId', linkController.getTaskProgress);
+router.get('/:projectId/task-progress-sse/:taskId', linkController.getTaskProgressSSE);
 
 // Проекты
-router.post('/projects', authMiddleware, createProject);
-router.get('/projects', authMiddleware, getProjects);
-router.delete('/projects/:projectId', authMiddleware, deleteProject);
+router.post('/projects', linkController.createProject);
+router.get('/projects', linkController.getProjects);
+router.delete('/projects/:projectId', linkController.deleteProject);
 
 // Ссылки (в рамках проекта)
-router.post('/:projectId/links', authMiddleware, addLinks);
-router.get('/:projectId/links', authMiddleware, getLinks);
-router.delete('/:projectId/links', authMiddleware, deleteAllLinks);
-router.post('/:projectId/links/check', authMiddleware, checkLinks);
-router.delete('/:projectId/links/:id', authMiddleware, deleteLink);
+router.post('/:projectId/links', linkController.addLinks);
+router.get('/:projectId/links', linkController.getLinks);
+router.delete('/:projectId/links', linkController.deleteAllLinks);
+router.post('/:projectId/links/check', linkController.checkLinks);
+router.delete('/:projectId/links/:id', linkController.deleteLink);
 
 // Google Sheets (в рамках проекта)
-router.post('/:projectId/spreadsheets', authMiddleware, addSpreadsheet);
-router.get('/:projectId/spreadsheets', authMiddleware, getSpreadsheets);
-router.post('/:projectId/spreadsheets/:spreadsheetId/run', authMiddleware, runSpreadsheetAnalysis);
-router.delete('/:projectId/spreadsheets/:spreadsheetId', authMiddleware, deleteSpreadsheet);
-router.post('/:projectId/spreadsheets/:spreadsheetId/cancel', authMiddleware, cancelSpreadsheetAnalysis);
+router.get('/projects/:projectId/activeTasks', linkController.getActiveTasks);
+router.post('/:projectId/spreadsheets', linkController.addSpreadsheet);
+router.get('/:projectId/spreadsheets', linkController.getSpreadsheets);
+router.post('/:projectId/spreadsheets/:spreadsheetId/run', linkController.runSpreadsheetAnalysis);
+router.delete('/:projectId/spreadsheets/:spreadsheetId', linkController.deleteSpreadsheet);
+router.post('/:projectId/spreadsheets/:spreadsheetId/cancel', linkController.cancelSpreadsheetAnalysis); // Новый эндпоинт
 
 // Профиль и подписка
-router.post('/select-plan', authMiddleware, selectPlan);
-router.post('/process-payment', authMiddleware, processPayment);
-router.put('/profile', authMiddleware, updateProfile);
-router.post('/cancel-subscription', authMiddleware, cancelSubscription);
-router.delete('/account', authMiddleware, deleteAccount);
-
-router.post('/user/clear-stale-tasks', authMiddleware, async (req, res) => {
-  try {
-    const userId = req.userId;
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const activeTasks = user.activeTasks || new Map();
-    const projectIds = Array.from(activeTasks.keys());
-    const tasksToRemove = [];
-
-    for (const projectId of projectIds) {
-      const taskId = activeTasks.get(projectId);
-      const task = await AnalysisTask.findById(taskId);
-      if (!task || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
-        tasksToRemove.push(projectId);
-      }
-    }
-
-    for (const projectId of tasksToRemove) {
-      const taskId = activeTasks.get(projectId);
-      activeTasks.delete(projectId);
-      const project = await Project.findOne({ _id: projectId, userId });
-      if (project) {
-        project.isAnalyzing = false;
-        await project.save();
-        console.log(`Cleared isAnalyzing for project ${projectId}`);
-      }
-      await AnalysisTask.findByIdAndDelete(taskId);
-      console.log(`Deleted stale AnalysisTask ${taskId} for project ${projectId}`);
-    }
-
-    user.activeTasks = activeTasks;
-    await user.save();
-
-    res.json({ message: 'Stale tasks cleared' });
-  } catch (error) {
-    console.error('Error clearing stale tasks:', error);
-    res.status(500).json({ error: 'Failed to clear stale tasks' });
-  }
-});
+router.post('/select-plan', linkController.selectPlan);
+router.post('/process-payment', linkController.processPayment);
+router.put('/profile', linkController.updateProfile);
+router.post('/cancel-subscription', linkController.cancelSubscription);
+router.delete('/account', linkController.deleteAccount);
 
 module.exports = router;
