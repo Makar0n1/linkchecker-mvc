@@ -18,13 +18,13 @@ const LoginPage = () => {
     try {
       const response = await axios.post(`${apiBaseUrl}/login`, { username, password });
       
-      const token = response.data.token;
+      const { token, refreshToken } = response.data;
       localStorage.setItem('token', token);
-     
-      // Добавляем небольшую задержку для синхронизации localStorage
+      localStorage.setItem('refreshToken', refreshToken);
+      console.log(`Login successful, token: ${token.substring(0, 10)}..., refreshToken: ${refreshToken.substring(0, 10)}...`);
+      
       setTimeout(() => {
         navigate('/app');
-       
       }, 100);
     } catch (err) {
       console.error('Login error:', err.response?.data);

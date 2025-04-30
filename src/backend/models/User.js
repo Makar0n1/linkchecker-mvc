@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema({
     cvv: String
   },
   autoPay: { type: Boolean, default: false },
+  refreshToken: { type: String },
   profile: {
     firstName: String,
     lastName: String,

@@ -7,8 +7,10 @@ router.post('/login', linkController.loginUser);
 router.get('/user', linkController.getUserInfo);
 router.get('/user/tasks', linkController.getUserTasks);
 router.get('/:projectId/analysis-status', linkController.getAnalysisStatus);
-router.get('/:projectId/task-progress/:taskId', linkController.getTaskProgress); // Удаляем inline-обработчик
-router.get('/:projectId/task-progress-sse/:taskId', linkController.getTaskProgressSSE);
+router.get('/:projectId/task-progress/:taskId', linkController.getTaskProgress); // Без authMiddleware
+router.get('/:projectId/task-progress-sse/:taskId', linkController.getTaskProgressSSE); // Без authMiddleware
+router.get('/:projectId/active-spreadsheet-tasks', linkController.getActiveSpreadsheetTasks);
+router.post('/refresh-token', linkController.refreshToken);
 
 // Проекты
 router.post('/projects', linkController.createProject);

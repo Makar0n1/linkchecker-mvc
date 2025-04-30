@@ -322,17 +322,17 @@ const authMiddleware = (req, res, next) => {
   }
 
   if (!token) {
-    console.error(`authMiddleware: No token provided in request, headers: ${JSON.stringify(req.headers)}, query: ${JSON.stringify(req.query)}`);
+    console.error(`authMiddleware: No token provided in request, headers: ${JSON.stringify(req.headers)}, query: ${JSON.stringify(req.query)}, method: ${req.method}, url: ${req.url}`);
     return res.status(401).json({ error: 'No token provided' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
-    console.log(`authMiddleware: Successfully decoded token, userId=${req.userId}`);
+    console.log(`authMiddleware: Successfully decoded token, userId=${req.userId}, method: ${req.method}, url: ${req.url}, token: ${token.substring(0, 10)}...`);
     next();
   } catch (error) {
-    console.error(`authMiddleware: Invalid token, error: ${error.message}, token: ${token}`);
+    console.error(`authMiddleware: Invalid token, error: ${error.message}, token: ${token.substring(0, 10)}..., method: ${req.method}, url: ${req.url}, JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'not set'}`);
     return res.status(401).json({ error: 'Invalid token' });
   }
 };
@@ -366,34 +366,28 @@ const registerUser = async (req, res) => {
 };
 
 const loginUser = async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password required' });
-    }
+  const { username, password } = req.body;
 
+  try {
     const user = await User.findOne({ username });
     if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'Invalid username or password' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    if (!JWT_SECRET) {
-      console.error('loginUser: JWT_SECRET is not defined');
-      return res.status(500).json({ error: 'Server configuration error', details: 'JWT_SECRET is not defined' });
-    }
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' }); // Возвращаем срок действия к 1 часу
+    const refreshToken = jwt.sign({ userId: user._id }, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' }); // Refresh token на 7 дней
+    user.refreshToken = refreshToken; // Сохраняем refresh token в базе данных
+    await user.save();
 
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token, isSuperAdmin: user.isSuperAdmin, plan: user.plan });
+    res.json({ token, refreshToken });
   } catch (error) {
-    console.error('loginUser: Error logging in', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Login failed', details: error.message });
-    }
+    console.error('Error logging in:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -572,7 +566,6 @@ const checkLinks = async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Проверяем, выполняется ли уже анализ ручных ссылок
     if (project.isAnalyzingManual) {
       return res.status(409).json({ error: 'Manual links analysis is already in progress for this project' });
     }
@@ -584,6 +577,7 @@ const checkLinks = async (req, res) => {
 
     const task = new AnalysisTask({
       projectId,
+      userId, // Добавляем userId
       type: 'checkLinks',
       status: 'pending',
       data: { userId, projectId },
@@ -594,7 +588,6 @@ const checkLinks = async (req, res) => {
     user.activeTasks.set(projectId, task._id.toString());
     await user.save();
 
-    // Обновляем taskId для всех ручных ссылок
     await FrontendLink.updateMany(
       { projectId, userId, source: 'manual' },
       { $set: { taskId: task._id } }
@@ -757,7 +750,6 @@ let cancelAnalysis = false;
 const runSpreadsheetAnalysis = async (req, res) => {
   const { projectId, spreadsheetId } = req.params;
 
-  // Проверяем наличие req.userId
   if (!req.userId) {
     console.error(`runSpreadsheetAnalysis: req.userId is missing, request headers: ${JSON.stringify(req.headers)}`);
     return res.status(401).json({ error: 'User authentication required: missing userId' });
@@ -811,6 +803,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
 
   const task = new AnalysisTask({
     projectId,
+    userId: req.userId,
     type: 'runSpreadsheetAnalysis',
     status: 'pending',
     data: { userId: req.userId, spreadsheetId, maxLinks },
@@ -819,6 +812,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
 
   user.activeTasks.set(projectId, task._id.toString());
   await user.save();
+  console.log(`runSpreadsheetAnalysis: Updated activeTasks for user ${req.userId}, activeTasks: ${JSON.stringify(user.activeTasks)}`);
 
   await FrontendLink.updateMany(
     { projectId, userId: req.userId, spreadsheetId, source: 'google_sheets' },
@@ -3403,10 +3397,19 @@ const columnLetterToIndex = (letter) => {
 const getTaskProgress = async (req, res) => {
   try {
     const { taskId } = req.params;
+    const userId = req.userId;
+
     const task = await AnalysisTask.findById(taskId);
     if (!task) {
+      console.log(`getTaskProgress: Task ${taskId} not found`);
       return res.status(404).json({ error: 'Task not found' });
     }
+
+    if (task.userId.toString() !== userId) {
+      console.log(`getTaskProgress: Unauthorized access to task ${taskId} by user ${userId}`);
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     res.json({
       progress: task.progress || 0,
       processedLinks: task.processedLinks || 0,
@@ -3415,13 +3418,14 @@ const getTaskProgress = async (req, res) => {
       status: task.status || 'pending',
     });
   } catch (error) {
-    console.error('Error fetching task progress:', error);
+    console.error('getTaskProgress: Error fetching task progress:', error);
     res.status(500).json({ error: 'Failed to fetch task progress', details: error.message });
   }
 };
 const getTaskProgressSSE = async (req, res) => {
   const { projectId, taskId } = req.params;
-  console.log(`SSE request for project ${projectId}, task ${taskId}, userId: ${req.userId}`);
+  const userId = req.userId;
+  console.log(`SSE request for project ${projectId}, task ${taskId}, userId: ${userId}`);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -3430,8 +3434,15 @@ const getTaskProgressSSE = async (req, res) => {
 
   const task = await AnalysisTask.findOne({ _id: taskId, projectId });
   if (!task) {
-    console.log(`Task ${taskId} not found for project ${projectId}`);
+    console.log(`getTaskProgressSSE: Task ${taskId} not found for project ${projectId}`);
     res.write(`data: ${JSON.stringify({ error: 'Task not found' })}\n\n`);
+    res.end();
+    return;
+  }
+
+  if (task.userId.toString() !== userId) {
+    console.log(`getTaskProgressSSE: Unauthorized access to task ${taskId} by user ${userId}`);
+    res.write(`data: ${JSON.stringify({ error: 'Unauthorized' })}\n\n`);
     res.end();
     return;
   }
@@ -3447,7 +3458,7 @@ const getTaskProgressSSE = async (req, res) => {
   const intervalId = setInterval(async () => {
     const updatedTask = await AnalysisTask.findOne({ _id: taskId, projectId });
     if (!updatedTask) {
-      console.log(`Task ${taskId} no longer exists for project ${projectId}`);
+      console.log(`getTaskProgressSSE: Task ${taskId} no longer exists for project ${projectId}`);
       res.write(`data: ${JSON.stringify({ error: 'Task not found' })}\n\n`);
       clearInterval(intervalId);
       res.end();
@@ -3463,12 +3474,12 @@ const getTaskProgressSSE = async (req, res) => {
       status: updatedTask.status,
     })}\n\n`);
 
-    if (updatedTask.status === 'completed' || updatedTask.status === 'failed') {
+    if (updatedTask.status === 'completed' || updatedTask.status === 'failed' || updatedTask.status === 'cancelled') {
       console.log(`Task ${taskId} completed or failed, closing SSE connection`);
       clearInterval(intervalId);
       res.end();
     }
-  }, 1000); // Уменьшаем интервал до 1 секунды
+  }, 3000);
 
   req.on('close', () => {
     console.log(`SSE connection closed for task ${taskId}`);
@@ -3494,6 +3505,56 @@ const getActiveTasks = async (req, res) => {
   } catch (error) {
     console.error('getActiveTasks: Error fetching active tasks', error);
     res.status(500).json({ error: 'Error fetching active tasks', details: error.message });
+  }
+};
+const getActiveSpreadsheetTasks = async (req, res) => {
+  const { projectId } = req.params;
+  const userId = req.userId;
+
+  try {
+    const tasks = await AnalysisTask.find({
+      projectId,
+      userId,
+      type: 'runSpreadsheetAnalysis',
+      status: { $in: ['pending', 'processing'] },
+    }).select('_id data.spreadsheetId progress processedLinks totalLinks estimatedTimeRemaining status');
+
+    res.json(tasks.map(task => ({
+      taskId: task._id,
+      spreadsheetId: task.data.spreadsheetId,
+      progress: task.progress || 0,
+      processedLinks: task.processedLinks || 0,
+      totalLinks: task.totalLinks || 0,
+      estimatedTimeRemaining: task.estimatedTimeRemaining || 0,
+      status: task.status || 'pending',
+    })));
+  } catch (error) {
+    console.error('getActiveSpreadsheetTasks: Error fetching active spreadsheet tasks', error);
+    res.status(500).json({ error: 'Error fetching active spreadsheet tasks', details: error.message });
+  }
+};
+const refreshToken = async (req, res) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    console.error('refreshToken: No refresh token provided');
+    return res.status(401).json({ error: 'Refresh token required' });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const user = await User.findById(decoded.userId);
+    if (!user || user.refreshToken !== refreshToken) {
+      console.error(`refreshToken: Invalid refresh token for user ${decoded.userId}, stored refreshToken: ${user?.refreshToken}, provided refreshToken: ${refreshToken}`);
+      return res.status(403).json({ error: 'Invalid refresh token' });
+    }
+
+    const newToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    console.log(`refreshToken: New token generated for user ${user._id}, token: ${newToken.substring(0, 10)}..., JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'not set'}`);
+    res.json({ token: newToken });
+  } catch (error) {
+    console.error('refreshToken: Error refreshing token:', error.message, `provided refreshToken: ${refreshToken.substring(0, 10)}..., JWT_REFRESH_SECRET: ${process.env.JWT_REFRESH_SECRET ? 'set' : 'not set'}`);
+    return res.status(403).json({ error: 'Invalid refresh token' });
   }
 };
 // Экспортируем все функции
@@ -3522,10 +3583,12 @@ module.exports = {
   deleteAccount: [authMiddleware, deleteAccount],
   updateProfile: [authMiddleware, updateProfile],
   getAnalysisStatus: [authMiddleware, getAnalysisStatus], // Добавляем новый маршрут
-  //getTaskProgress: [authMiddleware, getTaskProgress],
-  //getTaskProgressSSE: [authMiddleware, getTaskProgressSSE],
+  getTaskProgress: [authMiddleware, getTaskProgress],
+  getTaskProgressSSE: [authMiddleware, getTaskProgressSSE],
   getUserTasks: [authMiddleware, getUserTasks],
   getActiveTasks: [authMiddleware, getActiveTasks],
+  getActiveSpreadsheetTasks: [authMiddleware, getActiveSpreadsheetTasks],
+  refreshToken: [refreshToken],
   checkLinkStatus,
   analyzeSpreadsheet,
   scheduleSpreadsheetAnalysis,

@@ -12,15 +12,13 @@ const ProjectDetails = () => {
   const [activeTab, setActiveTab] = useState('manual');
   const [error, setError] = useState(null);
   const [isServerBusy, setIsServerBusy] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isAnalyzingManual, setIsAnalyzingManual] = useState(false);
+  const [isAnalyzingSpreadsheet, setIsAnalyzingSpreadsheet] = useState(false);
 
-  // Состояния для Manual Links
   const [links, setLinks] = useState([]);
   const [urlList, setUrlList] = useState('');
   const [targetDomain, setTargetDomain] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // Состояния для Google Sheets
   const [spreadsheets, setSpreadsheets] = useState([]);
   const [runningIds, setRunningIds] = useState([]);
 
@@ -28,29 +26,44 @@ const ProjectDetails = () => {
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
-    useEffect(() => {
-      const token = localStorage.getItem('token');
-      const fetchProject = async () => {
-        try {
-          const response = await axios.get(`${apiBaseUrl}/projects`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const project = response.data.find((proj) => proj._id === projectId);
-          if (project) {
-            setProjectName(project.name);
-            // Устанавливаем isAnalyzing в зависимости от активной вкладки
-            setIsAnalyzing(activeTab === 'manual' ? project.isAnalyzingManual : project.isAnalyzingSpreadsheet);
-          } else {
-            setError('Project not found');
-            navigate('/app/projects');
-          }
-        } catch (err) {
-          setError(err.response?.data?.error || 'Failed to fetch project');
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const fetchProject = async () => {
+      try {
+        const response = await axios.get(`${apiBaseUrl}/projects`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const project = response.data.find((proj) => proj._id === projectId);
+        if (project) {
+          setProjectName(project.name);
+          setIsAnalyzingManual(project.isAnalyzingManual);
+          setIsAnalyzingSpreadsheet(project.isAnalyzingSpreadsheet);
+        } else {
+          setError('Project not found');
+          navigate('/app/projects');
         }
-      };
-    
-      fetchProject();
-    }, [projectId, navigate, activeTab]);
+      } catch (err) {
+        setError(err.response?.data?.error || 'Failed to fetch project');
+      }
+    };
+
+    const fetchAnalysisStatus = async () => {
+      try {
+        const response = await axios.get(`${apiBaseUrl}/${projectId}/analysis-status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setIsAnalyzingManual(response.data.isAnalyzingManual);
+        setIsAnalyzingSpreadsheet(response.data.isAnalyzingSpreadsheet);
+      } catch (err) {
+        console.error('Error fetching analysis status:', err);
+      }
+    };
+
+    fetchProject();
+    fetchAnalysisStatus();
+    const interval = setInterval(fetchAnalysisStatus, 10000);
+    return () => clearInterval(interval);
+  }, [projectId, navigate]);
 
   const handleAddLinks = async (e, projectId) => {
     e.preventDefault();
@@ -59,10 +72,9 @@ const ProjectDetails = () => {
     try {
       const token = localStorage.getItem('token');
       const urls = urlList.split('\n').map(url => url.trim()).filter(url => url);
-      // Формируем массив объектов в формате, ожидаемом бэкендом
       const linksData = urls.map(url => ({
         url,
-        targetDomain
+        targetDomain,
       }));
       const response = await axios.post(`${apiBaseUrl}/${projectId}/links`, linksData, {
         headers: { Authorization: `Bearer ${token}` },
@@ -86,18 +98,21 @@ const ProjectDetails = () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
+      const response = await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setError(null);
       setIsServerBusy(false);
-      setIsAnalyzing(true);
+      setIsAnalyzingManual(true);
+      return response;
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to check links');
       if (err.response?.status === 429 || err.response?.status === 409 || err.message.includes('Network Error')) {
         setIsServerBusy(true);
-        setIsAnalyzing(true);
+        setIsAnalyzingManual(true);
       }
+      throw err;
+    } finally {
       setLoading(false);
     }
   };
@@ -233,7 +248,7 @@ const ProjectDetails = () => {
           setRunningIds={setRunningIds}
           setLoading={setLoading}
           setError={setError}
-          isAnalyzing={isAnalyzing}
+          isAnalyzing={isAnalyzingSpreadsheet}
         />
       )}
     </motion.div>

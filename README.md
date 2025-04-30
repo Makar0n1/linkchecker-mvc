@@ -114,7 +114,7 @@ Invoke-WebRequest -Uri "http://localhost:3000/api/links/register" -Method POST -
 Invoke-WebRequest -Uri "http://localhost:3000/api/links/register" -Method POST -Headers @{"Content-Type" = "application/json"} -Body '{"username": "user3", "password": "password"}'
 Invoke-WebRequest -Uri "http://localhost:3000/api/links/register" -Method POST -Headers @{"Content-Type" = "application/json"} -Body '{"username": "user4", "password": "password"}'
 Invoke-WebRequest -Uri "http://localhost:3000/api/links/register" -Method POST -Headers @{"Content-Type" = "application/json"} -Body '{"username": "user5", "password": "password"}'
-Invoke-WebRequest -Uri "http://localhost:3000/api/links/register" -Method POST -Headers @{"Content-Type" = "application/json"} -Body '{"username": "SuperAdmin", "password": "adminpassword", "isSuperAdmin": true}'
+Invoke-WebRequest -Uri "http://localhost:3000/api/links/register" -Method POST -Headers @{"Content-Type" = "application/json"} -Body '{"username": "1111", "password": "1111", "isSuperAdmin": true}'
 ```
 
 ---
