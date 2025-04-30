@@ -21,7 +21,6 @@ const LoginPage = () => {
       const { token, refreshToken } = response.data;
       localStorage.setItem('token', token);
       localStorage.setItem('refreshToken', refreshToken);
-      console.log(`Login successful, token: ${token.substring(0, 10)}..., refreshToken: ${refreshToken.substring(0, 10)}...`);
       
       setTimeout(() => {
         navigate('/app');
