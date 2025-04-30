@@ -809,10 +809,12 @@ const runSpreadsheetAnalysis = async (req, res) => {
     data: { userId: req.userId, spreadsheetId, maxLinks },
   });
   await task.save();
+  console.log(`runSpreadsheetAnalysis: Created task ${task._id} with status=${task.status}, projectId=${projectId}, spreadsheetId=${spreadsheetId}`);
 
   // Сохраняем taskId в activeTasks пользователя
   user.activeTasks.set(projectId, task._id.toString());
   await user.save();
+  console.log(`runSpreadsheetAnalysis: Saved taskId ${task._id} to user.activeTasks for project ${projectId}, userId=${req.userId}`);
 
   analysisQueue.push({
     taskId: task._id,
@@ -3294,8 +3296,10 @@ const getTaskProgress = async (req, res) => {
   try {
     const task = await AnalysisTask.findOne({ _id: taskId, projectId });
     if (!task) {
+      console.log(`getTaskProgress: Task ${taskId} not found for project ${projectId}`);
       return res.status(404).json({ error: 'Task not found' });
     }
+    console.log(`getTaskProgress: Returning progress for task ${taskId}: progress=${task.progress}%, processedLinks=${task.processedLinks}, totalLinks=${task.totalLinks}, estimatedTimeRemaining=${task.estimatedTimeRemaining}s, status=${task.status}`);
     res.json({
       progress: task.progress,
       processedLinks: task.processedLinks,

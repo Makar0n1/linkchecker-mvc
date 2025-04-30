@@ -54,7 +54,6 @@ const GoogleSheets = ({
       const activeTasks = response.data.activeTasks || {};
       setTaskIds(activeTasks);
   
-      // Восстанавливаем progressData для всех активных задач
       const progressPromises = Object.entries(activeTasks).map(async ([spreadsheetId, taskId]) => {
         try {
           const progressResponse = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}`, {
@@ -68,7 +67,7 @@ const GoogleSheets = ({
       });
   
       const progressResults = await Promise.all(progressPromises);
-      const newProgressData = {};
+      const newProgressData = { ...progressData }; // Сохраняем существующий прогресс
       progressResults.forEach(({ spreadsheetId, progress }) => {
         if (progress) {
           newProgressData[spreadsheetId] = {
@@ -77,6 +76,10 @@ const GoogleSheets = ({
             totalLinks: progress.totalLinks,
             estimatedTimeRemaining: progress.estimatedTimeRemaining,
           };
+          // Если задача завершена, оставляем прогресс, но не сбрасываем его
+          if (progress.status === 'completed' || progress.status === 'failed') {
+            console.log(`Task ${spreadsheetId} is ${progress.status}, preserving progress: ${progress.progress}%`);
+          }
         }
       });
       setProgressData(newProgressData);
