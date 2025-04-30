@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { CookieContext } from './CookieContext';
 
 // Собственная функция debounce
 const debounce = (func, wait) => {
@@ -37,8 +38,11 @@ const GoogleSheets = ({
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
   const [progressData, setProgressData] = useState({});
   const [taskIds, setTaskIds] = useState({});
+  const [progressKeys, setProgressKeys] = useState({});
   const [isTokenInvalid, setIsTokenInvalid] = useState(false);
-  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
+  const context = useContext(CookieContext);
+const hasCookieConsent = context ? context.hasCookieConsent : true;
+  const [cookieError, setCookieError] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -51,69 +55,21 @@ const GoogleSheets = ({
     []
   );
 
-  let refreshPromise = null;
-  const refreshToken = async () => {
-    if (isRefreshingToken) {
-      console.log('Waiting for ongoing token refresh...');
-      return refreshPromise;
-    }
-
-    setIsRefreshingToken(true);
-    refreshPromise = new Promise(async (resolve, reject) => {
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        console.error('No refresh token found, setting token invalid');
-        setIsTokenInvalid(true);
-        setIsRefreshingToken(false);
-        reject(new Error('No refresh token'));
-        return;
-      }
-      try {
-        const response = await axios.post(`${apiBaseUrl}/refresh-token`, { refreshToken });
-        const newToken = response.data.token;
-        localStorage.setItem('token', newToken);
-        console.log(`Token refreshed successfully, new token: ${newToken.substring(0, 10)}...`);
-        setIsTokenInvalid(false);
-        setIsRefreshingToken(false);
-        resolve(newToken);
-      } catch (err) {
-        console.error('Error refreshing token:', err.message, err.response?.data);
-        setIsTokenInvalid(true);
-        setIsRefreshingToken(false);
-        reject(err);
-      }
-    });
-
-    return refreshPromise;
-  };
-
   const fetchSpreadsheets = async () => {
-    let token = localStorage.getItem('token');
-    if (!token) {
-      console.error('No token found for fetchSpreadsheets, setting token invalid');
-      setIsTokenInvalid(true);
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
       return;
     }
+
     try {
       const response = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setSpreadsheets(response.data);
     } catch (err) {
       console.error('Error fetching spreadsheets:', err.message, err.response?.status);
       if (err.response?.status === 401) {
-        try {
-          token = await refreshToken();
-          if (token) {
-            const response = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            setSpreadsheets(response.data);
-          }
-        } catch (retryErr) {
-          console.error('Retry fetchSpreadsheets failed:', retryErr.message);
-          setError(retryErr.response?.data?.error || 'Failed to fetch spreadsheets after token refresh');
-        }
+        setIsTokenInvalid(true);
       } else {
         setError(err.response?.data?.error || 'Failed to fetch spreadsheets');
       }
@@ -121,15 +77,14 @@ const GoogleSheets = ({
   };
 
   const fetchActiveTasks = async () => {
-    let token = localStorage.getItem('token');
-    if (!token) {
-      console.error('No token found for fetchActiveTasks, setting token invalid');
-      setIsTokenInvalid(true);
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
       return;
     }
+
     try {
       const response = await axios.get(`${apiBaseUrl}/${projectId}/active-spreadsheet-tasks`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       const tasks = response.data;
       const newTaskIds = {};
@@ -160,59 +115,26 @@ const GoogleSheets = ({
     } catch (err) {
       console.error('Error fetching active tasks:', err.message, err.response?.status);
       if (err.response?.status === 401) {
-        try {
-          token = await refreshToken();
-          if (token) {
-            const response = await axios.get(`${apiBaseUrl}/${projectId}/active-spreadsheet-tasks`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            const tasks = response.data;
-            const newTaskIds = {};
-            const newProgressData = {};
-            tasks.forEach(task => {
-              newTaskIds[task.spreadsheetId] = task.taskId;
-              newProgressData[task.spreadsheetId] = {
-                progress: task.progress || 0,
-                processedLinks: task.processedLinks || 0,
-                totalLinks: task.totalLinks || 0,
-                estimatedTimeRemaining: task.estimatedTimeRemaining || 0,
-                status: task.status || 'pending',
-              };
-            });
-            setTaskIds(prev => {
-              const updatedTaskIds = { ...newTaskIds };
-              Object.keys(prev).forEach(spreadsheetId => {
-                if (!newTaskIds[spreadsheetId]) {
-                  console.log(`Task for spreadsheet ${spreadsheetId} is no longer active, removing...`);
-                  delete updatedTaskIds[spreadsheetId];
-                }
-              });
-              return updatedTaskIds;
-            });
-            setProgressData(newProgressData);
-            setRunningIds(Object.keys(newTaskIds));
-            setIsProjectAnalyzing(Object.keys(newTaskIds).length > 0);
-          }
-        } catch (retryErr) {
-          console.error('Retry fetchActiveTasks failed:', retryErr.message);
-          setError('Failed to fetch active tasks after token refresh');
-        }
+        setIsTokenInvalid(true);
       }
     }
   };
 
   const fetchProgress = async (spreadsheetId, taskId) => {
-    let token = localStorage.getItem('token');
-    if (!token) {
-      console.error(`No token found for fetching progress of task ${taskId}, setting token invalid`);
-      setIsTokenInvalid(true);
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
       return;
     }
 
+    const progressKey = progressKeys[spreadsheetId];
+    if (!progressKey) {
+      console.error(`No progress key found for spreadsheet ${spreadsheetId}, taskId=${taskId}`);
+      setError('Progress key missing. Please restart the analysis.');
+      return;
+    }
+    console.log(`Fetching progress for task ${taskId} with progressKey: ${progressKey.substring(0, 10)}...`);
     try {
-      const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}?progressKey=${progressKey}`);
       const data = response.data;
       debouncedSetProgressData(prev => ({
         ...prev,
@@ -235,6 +157,11 @@ const GoogleSheets = ({
           delete newTaskIds[spreadsheetId];
           return newTaskIds;
         });
+        setProgressKeys(prev => {
+          const newProgressKeys = { ...prev };
+          delete newProgressKeys[spreadsheetId];
+          return newProgressKeys;
+        });
         setProgressData(prev => {
           const updatedProgress = { ...prev };
           delete updatedProgress[spreadsheetId];
@@ -246,50 +173,8 @@ const GoogleSheets = ({
     } catch (err) {
       console.error(`Error fetching progress for task ${taskId}:`, err.message, err.response?.status, err.response?.data);
       if (err.response?.status === 401) {
-        try {
-          token = await refreshToken();
-          if (token) {
-            console.log(`Retrying fetchProgress with new token: ${token.substring(0, 10)}...`);
-            const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            const data = response.data;
-            debouncedSetProgressData(prev => ({
-              ...prev,
-              [spreadsheetId]: {
-                progress: data.progress || 0,
-                processedLinks: data.processedLinks || 0,
-                totalLinks: data.totalLinks || 0,
-                estimatedTimeRemaining: data.estimatedTimeRemaining || 0,
-                status: data.status || 'pending',
-              },
-            }));
-            if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-              console.log(`Task ${taskId} completed with status ${data.status}, cleaning up...`);
-              if (data.status === 'failed') {
-                setError('Analysis failed. Please try again or check the logs.');
-              }
-              setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
-              setTaskIds(prev => {
-                const newTaskIds = { ...prev };
-                delete newTaskIds[spreadsheetId];
-                return newTaskIds;
-              });
-              setProgressData(prev => {
-                const updatedProgress = { ...prev };
-                delete updatedProgress[spreadsheetId];
-                return updatedProgress;
-              });
-              setIsProjectAnalyzing(Object.keys(taskIds).length === 1);
-              fetchSpreadsheets();
-            }
-          } else {
-            setError('Please log in again to continue.');
-          }
-        } catch (retryErr) {
-          console.error('Retry fetchProgress failed:', retryErr.message, retryErr.response?.data);
-          setError('Failed to fetch progress after token refresh. Please log in again.');
-        }
+        console.error(`Invalid progress key for task ${taskId}, progressKey: ${progressKey}`);
+        setError('Invalid progress key. Please restart the analysis.');
       } else if (err.response?.status === 404) {
         console.log(`Task ${taskId} not found, cleaning up...`);
         setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
@@ -297,6 +182,11 @@ const GoogleSheets = ({
           const newTaskIds = { ...prev };
           delete newTaskIds[spreadsheetId];
           return newTaskIds;
+        });
+        setProgressKeys(prev => {
+          const newProgressKeys = { ...prev };
+          delete newProgressKeys[spreadsheetId];
+          return newProgressKeys;
         });
         setProgressData(prev => {
           const updatedProgress = { ...prev };
@@ -310,44 +200,40 @@ const GoogleSheets = ({
   };
 
   const startSSE = (spreadsheetId, taskId) => {
-    let token = localStorage.getItem('token');
-    if (!token) {
-      console.error(`No token found for SSE task ${taskId}, setting token invalid`);
-      setIsTokenInvalid(true);
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
       return null;
     }
 
-    const eventSource = new EventSource(`${apiBaseUrl}/${projectId}/task-progress-sse/${taskId}?token=${token}`);
+    const progressKey = progressKeys[spreadsheetId];
+    if (!progressKey) {
+      console.error(`No progress key found for spreadsheet ${spreadsheetId}, taskId=${taskId}`);
+      setError('Progress key missing. Please restart the analysis.');
+      return null;
+    }
+    console.log(`Starting SSE for task ${taskId} with progressKey: ${progressKey.substring(0, 10)}...`);
+    const eventSource = new EventSource(`${apiBaseUrl}/${projectId}/task-progress-sse/${taskId}?progressKey=${progressKey}`);
 
-    eventSource.onmessage = async (event) => {
+    eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.error) {
         console.error(`SSE error for task ${taskId}: ${data.error}`);
         eventSource.close();
-        if (data.error.includes('Invalid token')) {
-          try {
-            token = await refreshToken();
-            if (token) {
-              console.log(`Restarting SSE with new token: ${token.substring(0, 10)}...`);
-              eventSource.close();
-              return startSSE(spreadsheetId, taskId); // Перезапускаем SSE с новым токеном
-            }
-          } catch (refreshErr) {
-            console.error('Failed to refresh token for SSE:', refreshErr.message);
-            setError('Please log in again to continue.');
-          }
-        } else {
-          if (data.error.includes('Task not found')) {
-            console.log(`Task ${taskId} not found via SSE, cleaning up...`);
-          }
-          if (data.status === 'failed') {
-            setError('Analysis failed. Please try again or check the logs.');
-          }
+        if (data.error.includes('Invalid or expired progress key')) {
+          console.error(`Invalid progress key for task ${taskId}, progressKey: ${progressKey}`);
+          setError('Invalid progress key. Please restart the analysis.');
+        } else if (data.error.includes('Task not found')) {
+          console.log(`Task ${taskId} not found via SSE, cleaning up...`);
           setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
           setTaskIds(prev => {
             const newTaskIds = { ...prev };
             delete newTaskIds[spreadsheetId];
             return newTaskIds;
+          });
+          setProgressKeys(prev => {
+            const newProgressKeys = { ...prev };
+            delete newProgressKeys[spreadsheetId];
+            return newProgressKeys;
           });
           setProgressData(prev => {
             const updatedProgress = { ...prev };
@@ -370,6 +256,7 @@ const GoogleSheets = ({
         },
       }));
       if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+        console.log(`Task ${taskId} completed with status ${data.status} via SSE, cleaning up...`);
         if (data.status === 'failed') {
           setError('Analysis failed. Please try again or check the logs.');
         }
@@ -378,6 +265,11 @@ const GoogleSheets = ({
           const newTaskIds = { ...prev };
           delete newTaskIds[spreadsheetId];
           return newTaskIds;
+        });
+        setProgressKeys(prev => {
+          const newProgressKeys = { ...prev };
+          delete newProgressKeys[spreadsheetId];
+          return newProgressKeys;
         });
         setProgressData(prev => {
           const updatedProgress = { ...prev };
@@ -399,6 +291,11 @@ const GoogleSheets = ({
         delete newTaskIds[spreadsheetId];
         return newTaskIds;
       });
+      setProgressKeys(prev => {
+        const newProgressKeys = { ...prev };
+        delete newProgressKeys[spreadsheetId];
+        return newProgressKeys;
+      });
       setProgressData(prev => {
         const updatedProgress = { ...prev };
         delete updatedProgress[spreadsheetId];
@@ -412,32 +309,20 @@ const GoogleSheets = ({
   };
 
   const fetchAnalysisStatus = async () => {
-    let token = localStorage.getItem('token');
-    if (!token) {
-      console.error('No token found for fetchAnalysisStatus, setting token invalid');
-      setIsTokenInvalid(true);
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
       return;
     }
+
     try {
       const response = await axios.get(`${apiBaseUrl}/${projectId}/analysis-status`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setIsProjectAnalyzing(response.data.isAnalyzingSpreadsheet);
     } catch (err) {
       console.error('Error fetching analysis status:', err.message, err.response?.status);
       if (err.response?.status === 401) {
-        try {
-          token = await refreshToken();
-          if (token) {
-            const response = await axios.get(`${apiBaseUrl}/${projectId}/analysis-status`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            setIsProjectAnalyzing(response.data.isAnalyzingSpreadsheet);
-          }
-        } catch (retryErr) {
-          console.error('Retry fetchAnalysisStatus failed:', retryErr.message);
-          setError('Failed to fetch analysis status after token refresh');
-        }
+        setIsTokenInvalid(true);
       }
     }
   };
@@ -463,7 +348,7 @@ const GoogleSheets = ({
     return () => {
       Object.values(eventSources).forEach(eventSource => eventSource?.close());
     };
-  }, [taskIds]);
+  }, [taskIds, progressKeys]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -497,7 +382,11 @@ const GoogleSheets = ({
 
   const addSpreadsheet = async (e) => {
     e.preventDefault();
-    let token = localStorage.getItem('token');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     setLoading(true);
     try {
       const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = form;
@@ -509,7 +398,7 @@ const GoogleSheets = ({
       const response = await axios.post(
         `${apiBaseUrl}/${projectId}/spreadsheets`,
         { ...form, gid: parseInt(form.gid), intervalHours: parseInt(form.intervalHours) },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { withCredentials: true }
       );
       await fetchSpreadsheets();
       setForm({
@@ -526,31 +415,7 @@ const GoogleSheets = ({
     } catch (err) {
       console.error('Error adding spreadsheet:', err.message, err.response?.status);
       if (err.response?.status === 401) {
-        try {
-          token = await refreshToken();
-          if (token) {
-            const response = await axios.post(
-              `${apiBaseUrl}/${projectId}/spreadsheets`,
-              { ...form, gid: parseInt(form.gid), intervalHours: parseInt(form.intervalHours) },
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-            await fetchSpreadsheets();
-            setForm({
-              spreadsheetId: '',
-              gid: '',
-              targetDomain: '',
-              urlColumn: '',
-              targetColumn: '',
-              resultRangeStart: '',
-              resultRangeEnd: '',
-              intervalHours: 4,
-            });
-            setError(null);
-          }
-        } catch (retryErr) {
-          console.error('Retry addSpreadsheet failed:', retryErr.message);
-          setError(retryErr.response?.data?.error || 'Failed to add spreadsheet after token refresh');
-        }
+        setIsTokenInvalid(true);
       } else {
         setError(err.response?.data?.error || 'Failed to add spreadsheet');
       }
@@ -560,12 +425,11 @@ const GoogleSheets = ({
   };
 
   const runAnalysis = async (spreadsheetId) => {
-    let token = localStorage.getItem('token');
-    if (!token) {
-      setError('Authentication token missing. Please log in again.');
-      navigate('/login');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
       return;
     }
+
     setRunningIds([...runningIds, spreadsheetId]);
     setLoading(true);
     setProgressData(prev => ({
@@ -580,42 +444,26 @@ const GoogleSheets = ({
     }));
     try {
       const response = await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/run`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
-      const { taskId } = response.data;
+      const { taskId, progressKey } = response.data;
       setTaskIds(prev => ({
         ...prev,
         [spreadsheetId]: taskId,
       }));
+      setProgressKeys(prev => ({
+        ...prev,
+        [spreadsheetId]: progressKey,
+      }));
       const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setSpreadsheets(updated.data);
       setError(null);
     } catch (err) {
       console.error('Error running analysis:', err.message, err.response?.status);
       if (err.response?.status === 401) {
-        try {
-          token = await refreshToken();
-          if (token) {
-            const response = await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/run`, {}, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            const { taskId } = response.data;
-            setTaskIds(prev => ({
-              ...prev,
-              [spreadsheetId]: taskId,
-            }));
-            const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            setSpreadsheets(updated.data);
-            setError(null);
-          }
-        } catch (retryErr) {
-          console.error('Retry runAnalysis failed:', retryErr.message);
-          setError(retryErr.response?.data?.error || 'Failed to run analysis after token refresh');
-        }
+        setIsTokenInvalid(true);
       } else {
         const errorMessage = err.response?.data?.error || 'Failed to run analysis';
         setError(errorMessage);
@@ -631,19 +479,28 @@ const GoogleSheets = ({
           delete newTaskIds[spreadsheetId];
           return newTaskIds;
         });
+        setProgressKeys(prev => {
+          const newProgressKeys = { ...prev };
+          delete newProgressKeys[spreadsheetId];
+          return newProgressKeys;
+        });
       }
     }
   };
 
   const cancelAnalysis = async (spreadsheetId) => {
-    let token = localStorage.getItem('token');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     setLoading(true);
     try {
       await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/cancel`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setSpreadsheets(updated.data);
       setRunningIds(runningIds.filter(id => id !== spreadsheetId));
@@ -657,39 +514,17 @@ const GoogleSheets = ({
         delete newTaskIds[spreadsheetId];
         return newTaskIds;
       });
+      setProgressKeys(prev => {
+        const newProgressKeys = { ...prev };
+        delete newProgressKeys[spreadsheetId];
+        return newProgressKeys;
+      });
       setIsProjectAnalyzing(false);
       setError(null);
     } catch (err) {
       console.error('Error cancelling analysis:', err.message, err.response?.status);
       if (err.response?.status === 401) {
-        try {
-          token = await refreshToken();
-          if (token) {
-            await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/cancel`, {}, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            setSpreadsheets(updated.data);
-            setRunningIds(runningIds.filter(id => id !== spreadsheetId));
-            setProgressData(prev => {
-              const newProgress = { ...prev };
-              delete newProgress[spreadsheetId];
-              return newProgress;
-            });
-            setTaskIds(prev => {
-              const newTaskIds = { ...prev };
-              delete newTaskIds[spreadsheetId];
-              return newTaskIds;
-            });
-            setIsProjectAnalyzing(false);
-            setError(null);
-          }
-        } catch (retryErr) {
-          console.error('Retry cancelAnalysis failed:', retryErr.message);
-          setError(retryErr.response?.data?.error || 'Failed to cancel analysis after token refresh');
-        }
+        setIsTokenInvalid(true);
       } else {
         setError(err.response?.data?.error || 'Failed to cancel analysis');
       }
@@ -699,11 +534,15 @@ const GoogleSheets = ({
   };
 
   const deleteSpreadsheet = async (spreadsheetId) => {
-    let token = localStorage.getItem('token');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     setLoading(true);
     try {
       await axios.delete(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setSpreadsheets(spreadsheets.filter(s => s._id !== spreadsheetId));
       setError(null);
@@ -717,32 +556,15 @@ const GoogleSheets = ({
         delete newTaskIds[spreadsheetId];
         return newTaskIds;
       });
+      setProgressKeys(prev => {
+        const newProgressKeys = { ...prev };
+        delete newProgressKeys[spreadsheetId];
+        return newProgressKeys;
+      });
     } catch (err) {
       console.error('Error deleting spreadsheet:', err.message, err.response?.status);
       if (err.response?.status === 401) {
-        try {
-          token = await refreshToken();
-          if (token) {
-            await axios.delete(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            setSpreadsheets(spreadsheets.filter(s => s._id !== spreadsheetId));
-            setError(null);
-            setProgressData(prev => {
-              const newProgress = { ...prev };
-              delete newProgress[spreadsheetId];
-              return newProgress;
-            });
-            setTaskIds(prev => {
-              const newTaskIds = { ...prev };
-              delete newTaskIds[spreadsheetId];
-              return newTaskIds;
-            });
-          }
-        } catch (retryErr) {
-          console.error('Retry deleteSpreadsheet failed:', retryErr.message);
-          setError(retryErr.response?.data?.error || 'Failed to delete spreadsheet after token refresh');
-        }
+        setIsTokenInvalid(true);
       } else {
         setError(err.response?.data?.error || 'Failed to delete spreadsheet');
       }
@@ -788,13 +610,23 @@ const GoogleSheets = ({
           Your session has expired. Please log in again to continue.
           <button
             onClick={() => {
-              localStorage.removeItem('token');
-              localStorage.removeItem('refreshToken');
               navigate('/login');
             }}
             className="ml-2 text-yellow-900 underline"
           >
             Log in
+          </button>
+        </div>
+      )}
+
+      {cookieError && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+          {cookieError}
+          <button
+            onClick={() => setCookieError(null)}
+            className="ml-2 text-red-900 underline"
+          >
+            Close
           </button>
         </div>
       )}

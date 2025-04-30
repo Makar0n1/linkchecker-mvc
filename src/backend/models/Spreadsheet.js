@@ -24,7 +24,7 @@ const spreadsheetSchema = new mongoose.Schema({
     lastChecked: Date
   }],
   lastRun: Date,
-  scanCount: { type: Number, default: 0 } // Новое поле для подсчёта сканирований
+  scanCount: { type: Number, default: 0 }
 });
 
 module.exports = mongoose.model('Spreadsheet', spreadsheetSchema);

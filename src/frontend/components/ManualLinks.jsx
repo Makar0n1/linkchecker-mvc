@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { CookieContext } from './CookieContext';
 
 const ManualLinks = ({
   projectId,
@@ -25,6 +26,9 @@ const ManualLinks = ({
   const [checkingLinks, setCheckingLinks] = useState(new Set());
   const [hoveredLinkId, setHoveredLinkId] = useState(null);
   const [hoveredCanonicalId, setHoveredCanonicalId] = useState(null);
+  const context = useContext(CookieContext);
+const hasCookieConsent = context ? context.hasCookieConsent : true;
+  const [cookieError, setCookieError] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -35,20 +39,28 @@ const ManualLinks = ({
     : `ws://localhost:${import.meta.env.VITE_BACKEND_PORT}`;
 
   const fetchLinks = async () => {
-    const token = localStorage.getItem('token');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     try {
       const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
-      // Убедимся, что response.data — это массив, иначе установим пустой массив
       setLinks(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch links');
-      setLinks([]); // В случае ошибки устанавливаем пустой массив
+      setLinks([]);
     }
   };
 
   const connectWebSocket = () => {
+    if (!hasCookieConsent) {
+      console.log('WebSocket connection skipped: Cookies not accepted.');
+      return { close: () => {} };
+    }
+
     const ws = new WebSocket(wsBaseUrl);
 
     ws.onopen = () => {
@@ -65,12 +77,12 @@ const ManualLinks = ({
     };
 
     ws.onclose = () => {
-      setTimeout(connectWebSocket, 5000); // Переподключаемся через 5 секунд
+      setTimeout(connectWebSocket, 5000);
     };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      ws.close(); // Закрываем соединение, чтобы сработал onclose и переподключение
+      ws.close();
     };
 
     return ws;
@@ -79,7 +91,6 @@ const ManualLinks = ({
   useEffect(() => {
     fetchLinks();
 
-    // Подключение к WebSocket
     const ws = connectWebSocket();
 
     return () => {
@@ -119,6 +130,11 @@ const ManualLinks = ({
   };
 
   const wrappedHandleCheckLinks = async (projectId) => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     const linkIds = links.map(link => link._id);
     setCheckingLinks(new Set(linkIds));
     setLoading(true);
@@ -128,6 +144,54 @@ const ManualLinks = ({
       setError(err.response?.data?.error || 'Failed to check links');
       setLoading(false);
       setCheckingLinks(new Set());
+    }
+  };
+
+  const wrappedHandleAddLinks = async (e, projectId) => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await handleAddLinks(e, projectId);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to add links');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const wrappedHandleDeleteLink = async (linkId, projectId) => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await handleDeleteLink(linkId, projectId);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete link');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const wrappedHandleDeleteAllLinks = async (projectId) => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await handleDeleteAllLinks(projectId);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete all links');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -164,7 +228,19 @@ const ManualLinks = ({
         Back to Projects
       </button>
 
-      <form onSubmit={(e) => handleAddLinks(e, projectId)} className="mb-6 flex flex-col gap-4">
+      {cookieError && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+          {cookieError}
+          <button
+            onClick={() => setCookieError(null)}
+            className="ml-2 text-red-900 underline"
+          >
+            Close
+          </button>
+        </div>
+      )}
+
+      <form onSubmit={(e) => wrappedHandleAddLinks(e, projectId)} className="mb-6 flex flex-col gap-4">
         <textarea
           value={urlList}
           onChange={(e) => setUrlList(e.target.value)}
@@ -197,14 +273,24 @@ const ManualLinks = ({
           {loading ? 'Checking...' : 'Check All Links'}
         </button>
         <button
-          onClick={() => handleDeleteAllLinks(projectId)}
+          onClick={() => wrappedHandleDeleteAllLinks(projectId)}
           disabled={loading || links.length === 0}
           className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm sm:text-base"
         >
           {loading ? 'Deleting...' : 'Delete All Links'}
         </button>
       </div>
-      {error && <p className="text-red-500 mb-6 text-sm">{error}</p>}
+      {error && (
+        <p className="text-red-500 mb-6 text-sm">
+          {error}
+          <button
+            onClick={() => setError(null)}
+            className="ml-2 text-red-700 underline"
+          >
+            Close
+          </button>
+        </p>
+      )}
       <div className="rounded-lg shadow-sm overflow-x-auto">
         <table className="w-full bg-white border border-gray-200 table-fixed min-w-[1200px]">
           <thead>
@@ -244,13 +330,11 @@ const ManualLinks = ({
                         onMouseEnter={() => {
                           if (isUrlTruncated) {
                             setTimeout(() => {
-                              setHoveredLinkId(link._id);
+                              handleMouseEnterLink(link._id);
                             }, 500);
                           }
                         }}
-                        onMouseLeave={() => {
-                          setHoveredLinkId(null);
-                        }}
+                        onMouseLeave={handleMouseLeaveLink}
                       >
                         {truncatedUrl}
                       </span>
@@ -300,7 +384,7 @@ const ManualLinks = ({
                             <svg className="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" />
                             </svg>
-                            <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 z-[9999] top-100 bottom-3 left-3 min-w-[200px] max-w-[200px] whitespace-normal break-words opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-in-out">
+                            <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 z-[9999] min-w-[200px] -top-100 bottom-3 left-3 max-w-[200px] whitespace-normal break-words opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-in-out">
                               Canonical URL differs from page URL. Search bots may prioritize the canonical URL for indexing.
                             </span>
                           </span>
@@ -327,13 +411,11 @@ const ManualLinks = ({
                         onMouseEnter={() => {
                           if (isCanonicalTruncated) {
                             setTimeout(() => {
-                              setHoveredCanonicalId(`canonical-${link._id}`);
+                              handleMouseEnterCanonical(`canonical-${link._id}`);
                             }, 500);
                           }
                         }}
-                        onMouseLeave={() => {
-                          setHoveredCanonicalId(null);
-                        }}
+                        onMouseLeave={handleMouseLeaveCanonical}
                       >
                         {truncatedCanonicalUrl}
                       </span>
@@ -353,7 +435,7 @@ const ManualLinks = ({
                     </td>
                     <td className="p-2 sm:p-3 whitespace-nowrap">
                       <button
-                        onClick={() => handleDeleteLink(link._id, projectId)}
+                        onClick={() => wrappedHandleDeleteLink(link._id, projectId)}
                         disabled={loading}
                         className="bg-red-500 text-white px-2 sm:px-3 py-1 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors text-sm sm:text-base"
                       >

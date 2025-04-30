@@ -24,7 +24,6 @@ const frontendLinkSchema = new mongoose.Schema({
   taskId: { type: mongoose.Schema.Types.ObjectId, ref: 'AnalysisTask' },
 }, { timestamps: true });
 
-// Для обратной совместимости: если используется targetDomain, конвертируем в targetDomains
 frontendLinkSchema.pre('save', function(next) {
   console.log(`FrontendLink pre-save: userId=${this.userId}, url=${this.url}`);
   if (this.targetDomain && !this.targetDomains) {

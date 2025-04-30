@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { motion } from 'framer-motion';
+import { CookieContext } from './CookieContext';
 
 // Функция для повторных попыток запроса
 const retryRequest = async (fn, retries = 3, delay = 1000) => {
@@ -9,7 +10,7 @@ const retryRequest = async (fn, retries = 3, delay = 1000) => {
     try {
       return await fn();
     } catch (err) {
-      if (i === retries - 1) throw err; // Если последняя попытка, бросаем ошибку
+      if (i === retries - 1) throw err;
       console.log(`Retrying request (${i + 1}/${retries})...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
@@ -21,17 +22,17 @@ const Dashboard = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 640);
   const navigate = useNavigate();
   const location = useLocation();
+  const context = useContext(CookieContext);
+const hasCookieConsent = context ? context.hasCookieConsent : true;
+  const [cookieError, setCookieError] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    
-    if (!token) {
-      console.log('Dashboard: No token, redirecting to /login');
-      navigate('/login');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to access the dashboard. Please reload the page and accept cookies.');
       return;
     }
 
@@ -39,33 +40,53 @@ const Dashboard = () => {
       try {
         const response = await retryRequest(() =>
           axios.get(`${apiBaseUrl}/user`, {
-            headers: { Authorization: `Bearer ${token}` },
+            withCredentials: true, // Куки отправляются только если пользователь согласился
           })
         );
-        
         setUser(response.data);
       } catch (err) {
         console.error('Dashboard: Error fetching user:', err);
         if (err.response?.status === 401) {
-          // Если токен недействителен (401), удаляем его и перенаправляем
           console.log('Dashboard: Invalid token, redirecting to /login');
-          localStorage.removeItem('token');
           navigate('/login');
         } else {
-          // При сетевой ошибке или других ошибках не удаляем токен, а показываем ошибку
-          console.log('Dashboard: Network or server error, keeping token');
-          setUser({ username: 'Error loading user', plan: 'unknown', isSuperAdmin: false }); // Заглушка
+          console.log('Dashboard: Network or server error');
+          setUser({ username: 'Error loading user', plan: 'unknown', isSuperAdmin: false });
         }
       }
     };
 
     fetchUser();
-  }, [navigate]);
+  }, [navigate, hasCookieConsent]);
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/');
+    navigate('/login');
   };
+
+  if (!hasCookieConsent) {
+    return (
+      <div className="flex flex-col min-h-screen bg-gray-50 font-sans">
+        <header className="bg-green-600 text-white py-4 shadow-lg sticky top-0 z-50">
+          <div className="container max-w-7xl mx-auto px-4 sm:px-6 flex justify-between items-center">
+            <motion.h1
+              onClick={() => navigate('/')}
+              className="text-2xl sm:text-3xl font-bold tracking-tight cursor-pointer"
+              initial={{ opacity: 0, x: -50 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6 }}
+            >
+              LinkSentry
+            </motion.h1>
+          </div>
+        </header>
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="bg-white shadow-lg rounded-lg p-6 max-w-md w-full">
+            <p className="text-red-500 text-center">{cookieError}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) return null;
 
@@ -76,7 +97,7 @@ const Dashboard = () => {
     basic: 10000,
     pro: 50000,
     premium: 200000,
-    enterprise: Infinity
+    enterprise: Infinity,
   };
   const linksRemaining = user.isSuperAdmin ? 'Unlimited' : planLimits[user.plan] - (user.linksCheckedThisMonth || 0);
 

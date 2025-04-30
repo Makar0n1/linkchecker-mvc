@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
+import { CookieContext } from './CookieContext';
 
 const Projects = () => {
   const [projects, setProjects] = useState([]);
@@ -9,17 +10,24 @@ const Projects = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+  const context = useContext(CookieContext);
+const hasCookieConsent = context ? context.hasCookieConsent : true;
+  const [cookieError, setCookieError] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     const fetchProjects = async () => {
       try {
         const response = await axios.get(`${apiBaseUrl}/projects`, {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         });
         setProjects(response.data);
       } catch (err) {
@@ -32,14 +40,18 @@ const Projects = () => {
 
   const handleAddProject = async (e) => {
     e.preventDefault();
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     if (!newProjectName.trim()) return setError('Project name is required');
 
-    const token = localStorage.getItem('token');
     try {
       const response = await axios.post(
         `${apiBaseUrl}/projects`,
         { name: newProjectName },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { withCredentials: true }
       );
       setProjects([...projects, response.data]);
       setNewProjectName('');
@@ -51,10 +63,14 @@ const Projects = () => {
   };
 
   const handleDeleteProject = async (projectId) => {
-    const token = localStorage.getItem('token');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     try {
       await axios.delete(`${apiBaseUrl}/projects/${projectId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setProjects(projects.filter((project) => project._id !== projectId));
       setError(null);
@@ -81,6 +97,17 @@ const Projects = () => {
           {error}
           <button
             onClick={() => setError(null)}
+            className="ml-2 text-red-900 underline"
+          >
+            Close
+          </button>
+        </div>
+      )}
+      {cookieError && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+          {cookieError}
+          <button
+            onClick={() => setCookieError(null)}
             className="ml-2 text-red-900 underline"
           >
             Close
@@ -134,7 +161,7 @@ const Projects = () => {
               transition={{ duration: 0.3 }}
             >
               <div
-                onClick={() => navigate(`/app/projects/${project._id}`)} // Изменили маршрут
+                onClick={() => navigate(`/app/projects/${project._id}`)}
                 className="cursor-pointer flex items-center gap-2"
               >
                 <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

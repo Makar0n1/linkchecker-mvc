@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
+import { CookieContext } from './CookieContext';
 
 import LinkAnalysisIllustration from '../../assets/images/link-analysis-illustration.jpg';
 import WorkflowIllustration from '../../assets/images/workflow-illustration.png';
@@ -12,26 +13,31 @@ import AutomatedSupport from '../../assets/images/automated-support.png';
 const StartPage = () => {
   const [user, setUser] = useState(null);
   const navigate = useNavigate();
+  const context = useContext(CookieContext);
+  const hasCookieConsent = context ? context.hasCookieConsent : true;
+  const [cookieError, setCookieError] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      const fetchUser = async () => {
-        try {
-          const response = await axios.get(`${apiBaseUrl}/user`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          setUser(response.data);
-        } catch (err) {
-          localStorage.removeItem('token');
-        }
-      };
-      fetchUser();
+    if (!hasCookieConsent) {
+      // Если куки не приняты, не делаем запрос, но пользователь всё равно может видеть страницу
+      return;
     }
+
+    const fetchUser = async () => {
+      try {
+        const response = await axios.get(`${apiBaseUrl}/user`, {
+          withCredentials: true,
+        });
+        setUser(response.data);
+      } catch (err) {
+        // Если токена нет, просто оставляем user как null — это нормально для неавторизованных пользователей
+      }
+    };
+    fetchUser();
   }, []);
 
   const fadeInUp = {
@@ -59,18 +65,32 @@ const StartPage = () => {
           </motion.h1>
           <div className="flex items-center gap-2 sm:gap-4">
             {user && <span className="text-green-100 text-sm sm:text-base hidden sm:inline">Logged in as: {user.username}</span>}
-            <Link to={user ? '/app/projects' : '/login'}> {/* Убрали путь /register */}
+            <Link to={user ? '/app/projects' : '/login'}>
               <motion.button
                 className="bg-white text-green-600 px-3 sm:px-5 py-1 sm:py-2 rounded-full font-semibold hover:bg-green-100 transition-all shadow-md text-sm sm:text-base"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                {user ? 'Start Analyse' : 'Login'} {/* Заменили Register на Login */}
+                {user ? 'Start Analyse' : 'Login'}
               </motion.button>
             </Link>
           </div>
         </div>
       </header>
+
+      {cookieError && (
+        <div className="container max-w-7xl mx-auto px-4 sm:px-6 mt-4">
+          <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+            {cookieError}
+            <button
+              onClick={() => setCookieError(null)}
+              className="ml-2 text-red-900 underline"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       <section className="relative bg-gradient-to-b from-green-500 to-green-700 text-white py-12 sm:py-20 overflow-hidden">
         <div className="absolute inset-0">
@@ -101,7 +121,7 @@ const StartPage = () => {
           >
             Discover where your site is linked, check indexability, and boost your SEO with LinkSentry.
           </motion.p>
-          <Link to={user ? '/app/projects' : '/login'}> {/* Убрали путь /register */}
+          <Link to={user ? '/app/projects' : '/login'}>
             <motion.button
               className="bg-white text-green-600 px-6 sm:px-8 py-2 sm:py-3 rounded-full font-semibold text-base sm:text-lg hover:bg-green-100 transition-all shadow-lg"
               whileHover={{ scale: 1.1 }}
@@ -196,7 +216,7 @@ const StartPage = () => {
           >
             Join thousands of users who trust LinkSentry to monitor their backlinks effortlessly.
           </motion.p>
-          <Link to={user ? '/app/projects' : '/login'}> {/* Убрали путь /register */}
+          <Link to={user ? '/app/projects' : '/login'}>
             <motion.button
               className="bg-white text-green-600 px-6 sm:px-8 py-2 sm:py-3 rounded-full font-semibold text-base sm:text-lg hover:bg-green-100 transition-all shadow-lg"
               whileHover={{ scale: 1.1 }}

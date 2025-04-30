@@ -7,8 +7,8 @@ const linkRoutes = require('./routes/linkRoutes');
 const WebSocket = require('ws');
 const Spreadsheet = require('./models/Spreadsheet');
 const Project = require('./models/Project');
+const cookieParser = require('cookie-parser');
 
-// Загружаем .env в зависимости от окружения
 const envPath = process.env.NODE_ENV === 'production'
   ? path.resolve(__dirname, '../../.env.prod')
   : path.resolve(__dirname, '../../.env');
@@ -23,13 +23,11 @@ console.log('Server.js - CORS origin:', process.env.FRONTEND_DOMAIN);
 const app = express();
 const port = process.env.BACKEND_PORT || 3000;
 
-// Настройка подключения к MongoDB
 mongoose.set('strictQuery', true);
 mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
   .then(async () => {
     console.log('Connected to MongoDB');
 
-    // Проверка и исправление данных в базе
     console.log('Checking database for missing userId in Spreadsheets and Projects...');
     const spreadsheetsWithoutUserId = await Spreadsheet.find({ userId: { $exists: false } });
     if (spreadsheetsWithoutUserId.length > 0) {
@@ -51,7 +49,6 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
     const projectsWithoutUserId = await Project.find({ userId: { $exists: false } });
     if (projectsWithoutUserId.length > 0) {
       console.error(`Found ${projectsWithoutUserId.length} Projects without userId:`, projectsWithoutUserId);
-      // Здесь можно добавить логику для исправления, но это может потребовать ручного вмешательства
     } else {
       console.log('All Projects have userId');
     }
@@ -61,7 +58,6 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
     process.exit(1);
   });
 
-// Настройка CORS
 const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = [
@@ -82,7 +78,6 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Обработка preflight запросов
 app.options('*', (req, res) => {
   console.log(`Handling OPTIONS request for ${req.url}`);
   res.set({
@@ -94,16 +89,14 @@ app.options('*', (req, res) => {
   res.status(204).send();
 });
 
-// Middleware для парсинга JSON
+app.use(cookieParser());
 app.use(express.json());
 
-// Логирование всех запросов для отладки
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} (Origin: ${req.headers.origin})`);
   next();
 });
 
-// Запуск HTTP сервера
 const server = app.listen(port, () => {
   const baseUrl = process.env.NODE_ENV === 'production'
     ? `https://api.link-check-pro.top`
@@ -111,7 +104,6 @@ const server = app.listen(port, () => {
   console.log(`Backend running at ${baseUrl}`);
 });
 
-// Настройка WebSocket сервера
 const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (ws) => {
@@ -128,16 +120,13 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Middleware для добавления wss в req
 app.use((req, res, next) => {
   req.wss = wss;
   next();
 });
 
-// Маршруты API
 app.use('/api/links', linkRoutes);
 
-// Обработка ошибок
 app.use((err, req, res, next) => {
   console.error(`Server error: ${err.message}`);
   if (!res.headersSent) {

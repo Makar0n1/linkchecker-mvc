@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
+import { CookieContext } from './CookieContext';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -22,17 +23,24 @@ const Profile = () => {
   const [modal, setModal] = useState({ isOpen: false, message: '', onConfirm: null, isConfirm: false });
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+  const context = useContext(CookieContext);
+const hasCookieConsent = context ? context.hasCookieConsent : true;
+  const [cookieError, setCookieError] = useState(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
   useEffect(() => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     const fetchUser = async () => {
-      const token = localStorage.getItem('token');
       try {
         const response = await axios.get(`${apiBaseUrl}/user`, {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         });
         setUser(response.data);
         setProfile({
@@ -58,7 +66,6 @@ const Profile = () => {
           isOpen: true,
           message: 'Failed to fetch user data. Please log in again.',
           onConfirm: () => {
-            localStorage.removeItem('token');
             navigate('/login');
           },
           isConfirm: false,
@@ -67,10 +74,9 @@ const Profile = () => {
     };
 
     const fetchProjectsAndData = async () => {
-      const token = localStorage.getItem('token');
       try {
         const projectsResponse = await axios.get(`${apiBaseUrl}/projects`, {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         });
         setProjects(projectsResponse.data);
 
@@ -78,12 +84,12 @@ const Profile = () => {
         const allSpreadsheets = [];
         for (const project of projectsResponse.data) {
           const linksResponse = await axios.get(`${apiBaseUrl}/${project._id}/links`, {
-            headers: { Authorization: `Bearer ${token}` },
+            withCredentials: true,
           });
           allLinks.push(...linksResponse.data);
 
           const spreadsheetsResponse = await axios.get(`${apiBaseUrl}/${project._id}/spreadsheets`, {
-            headers: { Authorization: `Bearer ${token}` },
+            withCredentials: true,
           });
           allSpreadsheets.push(...spreadsheetsResponse.data);
         }
@@ -101,11 +107,15 @@ const Profile = () => {
   }, [navigate]);
 
   const handleProfileUpdate = async (e) => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     e.preventDefault();
-    const token = localStorage.getItem('token');
     try {
       await axios.put(`${apiBaseUrl}/profile`, profile, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setModal({
         isOpen: true,
@@ -115,7 +125,7 @@ const Profile = () => {
       });
       setIsEditing(false);
       const response = await axios.get(`${apiBaseUrl}/user`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setUser(response.data);
       setError(null);
@@ -125,12 +135,16 @@ const Profile = () => {
   };
 
   const handlePaymentUpdate = async (e) => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     e.preventDefault();
-    const token = localStorage.getItem('token');
     try {
       if (selectedPlan) {
         await axios.post(`${apiBaseUrl}/process-payment`, { ...paymentDetails, autoPay }, {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         });
         setModal({
           isOpen: true,
@@ -140,7 +154,7 @@ const Profile = () => {
         });
       } else {
         await axios.post(`${apiBaseUrl}/process-payment`, { ...paymentDetails, autoPay }, {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         });
         setModal({
           isOpen: true,
@@ -152,7 +166,7 @@ const Profile = () => {
       setSelectedPlan('');
       setIsAddingPayment(false);
       const response = await axios.get(`${apiBaseUrl}/user`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setUser(response.data);
       setAutoPay(response.data.autoPay);
@@ -163,15 +177,19 @@ const Profile = () => {
   };
 
   const handlePlanSelect = async (plan) => {
-    const token = localStorage.getItem('token');
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     try {
       await axios.post(`${apiBaseUrl}/select-plan`, { plan }, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setSelectedPlan(plan);
       if (user.paymentDetails?.cardNumber) {
         await axios.post(`${apiBaseUrl}/process-payment`, { autoPay }, {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         });
         setModal({
           isOpen: true,
@@ -181,7 +199,7 @@ const Profile = () => {
         });
         setSelectedPlan('');
         const response = await axios.get(`${apiBaseUrl}/user`, {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         });
         setUser(response.data);
         setAutoPay(response.data.autoPay);
@@ -201,14 +219,18 @@ const Profile = () => {
   };
 
   const handleCancelSubscription = () => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     setModal({
       isOpen: true,
       message: 'Are you sure you want to cancel your subscription? Your plan will be reverted to Free.',
       onConfirm: async () => {
-        const token = localStorage.getItem('token');
         try {
           await axios.post(`${apiBaseUrl}/cancel-subscription`, {}, {
-            headers: { Authorization: `Bearer ${token}` },
+            withCredentials: true,
           });
           setModal({
             isOpen: true,
@@ -217,7 +239,7 @@ const Profile = () => {
             isConfirm: false,
           });
           const response = await axios.get(`${apiBaseUrl}/user`, {
-            headers: { Authorization: `Bearer ${token}` },
+            withCredentials: true,
           });
           setUser(response.data);
           setAutoPay(false);
@@ -231,23 +253,23 @@ const Profile = () => {
   };
 
   const handleDeleteAccount = () => {
+    if (!hasCookieConsent) {
+      setCookieError('You must accept cookies to use this feature.');
+      return;
+    }
+
     setModal({
       isOpen: true,
       message: 'Are you sure you want to delete your account? This action cannot be undone.',
       onConfirm: async () => {
-        const token = localStorage.getItem('token');
         try {
-          if (!token) {
-            throw new Error('No token found. Please log in again.');
-          }
           const response = await axios.delete(`${apiBaseUrl}/account`, {
-            headers: { Authorization: `Bearer ${token}` },
+            withCredentials: true,
           });
           setModal({
             isOpen: true,
             message: response.data.message || 'Account deleted successfully',
             onConfirm: () => {
-              localStorage.removeItem('token');
               navigate('/');
             },
             isConfirm: false,
@@ -337,7 +359,7 @@ const Profile = () => {
     basic: 10000,
     pro: 50000,
     premium: 200000,
-    enterprise: Infinity
+    enterprise: Infinity,
   };
   const linksChecked = user?.linksCheckedThisMonth || 0;
   const linkLimit = user?.isSuperAdmin ? Infinity : planLimits[user?.plan] || 0;
@@ -349,7 +371,7 @@ const Profile = () => {
     basic: 1,
     pro: 5,
     premium: 20,
-    enterprise: Infinity
+    enterprise: Infinity,
   };
   const maxSpreadsheets = user?.isSuperAdmin ? Infinity : planSpreadsheetLimits[user?.plan] || 0;
   const spreadsheetCount = spreadsheets.length;
@@ -401,6 +423,18 @@ const Profile = () => {
           {error}
           <button
             onClick={() => setError(null)}
+            className="ml-2 text-red-900 underline"
+          >
+            Close
+          </button>
+        </div>
+      )}
+
+      {cookieError && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+          {cookieError}
+          <button
+            onClick={() => setCookieError(null)}
             className="ml-2 text-red-900 underline"
           >
             Close
