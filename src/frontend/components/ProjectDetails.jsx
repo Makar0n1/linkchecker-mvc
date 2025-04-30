@@ -58,7 +58,11 @@ const ProjectDetails = () => {
     try {
       const token = localStorage.getItem('token');
       const urls = urlList.split('\n').map(url => url.trim()).filter(url => url);
-      const linksData = { urls, targetDomains: [targetDomain] }; // Обновляем формат данных
+      // Формируем массив объектов в формате, ожидаемом бэкендом
+      const linksData = urls.map(url => ({
+        url,
+        targetDomain
+      }));
       const response = await axios.post(`${apiBaseUrl}/${projectId}/links`, linksData, {
         headers: { Authorization: `Bearer ${token}` },
       });
