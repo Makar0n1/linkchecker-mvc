@@ -21,6 +21,7 @@ const frontendLinkSchema = new mongoose.Schema({
   overallStatus: { type: String },
   errorDetails: { type: String },
   lastChecked: { type: Date },
+  taskId: { type: mongoose.Schema.Types.ObjectId, ref: 'AnalysisTask' },
 }, { timestamps: true });
 
 // Для обратной совместимости: если используется targetDomain, конвертируем в targetDomains

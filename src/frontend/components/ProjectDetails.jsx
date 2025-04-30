@@ -12,7 +12,7 @@ const ProjectDetails = () => {
   const [activeTab, setActiveTab] = useState('manual');
   const [error, setError] = useState(null);
   const [isServerBusy, setIsServerBusy] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false); // Новое состояние для анализа
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // Состояния для Manual Links
   const [links, setLinks] = useState([]);
@@ -38,7 +38,7 @@ const ProjectDetails = () => {
         const project = response.data.find((proj) => proj._id === projectId);
         if (project) {
           setProjectName(project.name);
-          setIsAnalyzing(project.isAnalyzing); // Устанавливаем статус анализа
+          setIsAnalyzing(project.isAnalyzing);
         } else {
           setError('Project not found');
           navigate('/app/projects');
@@ -58,7 +58,7 @@ const ProjectDetails = () => {
     try {
       const token = localStorage.getItem('token');
       const urls = urlList.split('\n').map(url => url.trim()).filter(url => url);
-      const linksData = urls.map(url => ({ url, targetDomain }));
+      const linksData = { urls, targetDomains: [targetDomain] }; // Обновляем формат данных
       const response = await axios.post(`${apiBaseUrl}/${projectId}/links`, linksData, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -81,21 +81,18 @@ const ProjectDetails = () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
+      await axios.post(`${apiBaseUrl}/${projectId}/links/check`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setLinks(response.data);
       setError(null);
       setIsServerBusy(false);
-      setIsAnalyzing(false); // Сбрасываем после успешного анализа
+      setIsAnalyzing(true); // Устанавливаем isAnalyzing в true во время анализа
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to check links');
       if (err.response?.status === 429 || err.response?.status === 409 || err.message.includes('Network Error')) {
         setIsServerBusy(true);
         setIsAnalyzing(true);
       }
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -176,7 +173,7 @@ const ProjectDetails = () => {
           </button>
         </div>
       )}
-      <div className="border-b border-gray-200 mb-6">
+      <div className="border-b border-gray-200 mb-8">
         <nav className="flex space-x-4">
           <button
             onClick={() => setActiveTab('manual')}
@@ -210,7 +207,7 @@ const ProjectDetails = () => {
           setUrlList={setUrlList}
           targetDomain={targetDomain}
           setTargetDomain={setTargetDomain}
-          loading={loading || isAnalyzing} // Учитываем isAnalyzing
+          loading={loading}
           setLoading={setLoading}
           error={error}
           setError={setError}
@@ -230,7 +227,7 @@ const ProjectDetails = () => {
           setRunningIds={setRunningIds}
           setLoading={setLoading}
           setError={setError}
-          isAnalyzing={isAnalyzing} // Передаём статус анализа
+          isAnalyzing={isAnalyzing}
         />
       )}
     </motion.div>

@@ -40,10 +40,11 @@ const ManualLinks = ({
       const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setLinks(response.data);
-      console.log('Fetched links:', response.data);
+      // Убедимся, что response.data — это массив, иначе установим пустой массив
+      setLinks(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch links');
+      setLinks([]); // В случае ошибки устанавливаем пустой массив
     }
   };
 
@@ -51,13 +52,11 @@ const ManualLinks = ({
     const ws = new WebSocket(wsBaseUrl);
 
     ws.onopen = () => {
-      console.log('Connected to WebSocket');
       ws.send(JSON.stringify({ type: 'subscribe', projectId }));
     };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log('WebSocket message received:', data);
       if (data.type === 'analysisComplete' && data.projectId === projectId) {
         fetchLinks();
         setLoading(false);
@@ -86,7 +85,7 @@ const ManualLinks = ({
     return () => {
       ws.close();
     };
-  }, [projectId, setLinks, setError, loading, setLoading]);
+  }, [projectId]);
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
@@ -223,7 +222,7 @@ const ManualLinks = ({
             </tr>
           </thead>
           <tbody>
-            {links.length === 0 ? (
+            {!Array.isArray(links) || links.length === 0 ? (
               <tr>
                 <td colSpan="10" className="p-2 sm:p-3 text-center text-gray-500 text-sm sm:text-base">No links added yet</td>
               </tr>
