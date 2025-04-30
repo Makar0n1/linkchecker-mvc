@@ -300,7 +300,7 @@ const ManualLinks = ({
                             <svg className="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" />
                             </svg>
-                            <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 z-[9999] whitespace-nowrap max-w-none -top-8 left-0">
+                            <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 z-[9999] top-100 bottom-3 left-3 min-w-[200px] max-w-[200px] whitespace-normal break-words opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-in-out">
                               Canonical URL differs from page URL. Search bots may prioritize the canonical URL for indexing.
                             </span>
                           </span>
