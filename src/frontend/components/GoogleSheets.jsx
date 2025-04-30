@@ -80,7 +80,7 @@ const GoogleSheets = ({
       setCookieError('You must accept cookies to use this feature.');
       return;
     }
-
+  
     try {
       const response = await axios.get(`${apiBaseUrl}/${projectId}/active-spreadsheet-tasks`, {
         withCredentials: true,
@@ -89,12 +89,13 @@ const GoogleSheets = ({
       const newTaskIds = {};
       const newProgressKeys = {};
       const newProgressData = {};
-
+  
       tasks.forEach(task => {
         newTaskIds[task.spreadsheetId] = task.taskId;
-        // Проверяем, есть ли progressKey для этой задачи
-        if (task.progressKey) {
+        if (task.progressKey) { // Проверяем наличие progressKey
           newProgressKeys[task.spreadsheetId] = task.progressKey;
+        } else {
+          console.warn(`No progressKey returned for spreadsheet ${task.spreadsheetId}, taskId=${task.taskId}`);
         }
         newProgressData[task.spreadsheetId] = {
           progress: task.progress || 0,
@@ -104,7 +105,7 @@ const GoogleSheets = ({
           status: task.status || 'pending',
         };
       });
-
+  
       setTaskIds(prev => {
         const updatedTaskIds = { ...newTaskIds };
         Object.keys(prev).forEach(spreadsheetId => {
@@ -115,7 +116,7 @@ const GoogleSheets = ({
         });
         return updatedTaskIds;
       });
-
+  
       setProgressKeys(prev => {
         const updatedProgressKeys = { ...newProgressKeys };
         Object.keys(prev).forEach(spreadsheetId => {
@@ -126,7 +127,7 @@ const GoogleSheets = ({
         });
         return updatedProgressKeys;
       });
-
+  
       setProgressData(newProgressData);
       setRunningIds(Object.keys(newTaskIds));
       setIsProjectAnalyzing(Object.keys(newTaskIds).length > 0);
@@ -454,7 +455,7 @@ const GoogleSheets = ({
       setCookieError('You must accept cookies to use this feature.');
       return;
     }
-
+  
     setRunningIds([...runningIds, spreadsheetId]);
     setLoading(true);
     setProgressData(prev => ({
@@ -472,6 +473,7 @@ const GoogleSheets = ({
         withCredentials: true,
       });
       const { taskId, progressKey } = response.data;
+      console.log(`runAnalysis: Received taskId=${taskId}, progressKey=${progressKey} for spreadsheet ${spreadsheetId}`);
       setTaskIds(prev => ({
         ...prev,
         [spreadsheetId]: taskId,

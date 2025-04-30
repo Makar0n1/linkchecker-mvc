@@ -595,6 +595,7 @@ const checkLinks = async (req, res) => {
       type: 'checkLinks',
       status: 'pending',
       data: { userId, projectId },
+      progressKey,
     });
     await task.save();
 
@@ -3534,7 +3535,7 @@ const getActiveSpreadsheetTasks = async (req, res) => {
       userId,
       type: 'runSpreadsheetAnalysis',
       status: { $in: ['pending', 'processing'] },
-    }).select('_id data.spreadsheetId progress processedLinks totalLinks estimatedTimeRemaining status');
+    }).select('_id data.spreadsheetId progress processedLinks totalLinks estimatedTimeRemaining status progressKey');
 
     res.json(tasks.map(task => ({
       taskId: task._id,
@@ -3544,6 +3545,7 @@ const getActiveSpreadsheetTasks = async (req, res) => {
       totalLinks: task.totalLinks || 0,
       estimatedTimeRemaining: task.estimatedTimeRemaining || 0,
       status: task.status || 'pending',
+      progressKey: task.progressKey, // Убедимся, что возвращаем progressKey
     })));
   } catch (error) {
     console.error('getActiveSpreadsheetTasks: Error fetching active spreadsheet tasks', error);
