@@ -1478,6 +1478,7 @@ page.on('request', (req) => {
           .replace(/\/+$/, '')
           .toLowerCase()
       );
+      console.log(`Cleaned targetDomains: ${JSON.stringify(cleanTargetDomains)}`);
 
       let linksFound = null;
       let captchaType = 'none';
