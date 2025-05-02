@@ -1160,7 +1160,34 @@ const checkLinkStatus = async (link, browser) => {
     }
     return link;
   }
+  // Нормализация URL
+const normalizeUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    let normalized = parsed.hostname + parsed.pathname;
+    // Удаляем "www." для сравнения
+    normalized = normalized.replace(/^www\./, '');
+    // Удаляем завершающий слэш
+    normalized = normalized.replace(/\/$/, '');
+    return normalized.toLowerCase();
+  } catch {
+    return url.toLowerCase();
+  }
+};
 
+// Разворачивание сокращённых ссылок
+const resolveShortUrl = async (shortUrl) => {
+  try {
+    const tempPage = await browser.newPage();
+    const response = await tempPage.goto(shortUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+    const resolvedUrl = response.url();
+    await tempPage.close();
+    return resolvedUrl;
+  } catch (error) {
+    console.error(`Error resolving short URL ${shortUrl}:`, error);
+    return shortUrl;
+  }
+};
   while (attempt < maxAttempts) {
     try {
       console.log(`Attempt ${attempt + 1} to check link ${link.url}`);
@@ -1365,6 +1392,7 @@ const checkLinkStatus = async (link, browser) => {
         finalUrl = await page.url();
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
+        await page.waitForTimeout(5000); // Ждём 5 секунд для загрузки динамического контента
       } catch (error) {
         console.error(`Navigation failed for ${link.url}:`, error.message);
         link.status = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout'; // Уточняем статус для ошибок SSL
@@ -1376,6 +1404,7 @@ const checkLinkStatus = async (link, browser) => {
         await link.save();
         return link;
       }
+      await page.waitForTimeout(5000); // Ждём 5 секунд для загрузки динамического контента
       const loadTime = Date.now() - startTime;
       link.loadTime = loadTime;
 
@@ -1468,13 +1497,7 @@ const checkLinkStatus = async (link, browser) => {
         }
       }
 
-      const cleanTargetDomains = link.targetDomains.map(domain =>
-        domain
-          .replace(/^https?:\/\//, '')
-          .replace(/^\/+/, '')
-          .replace(/\/+$/, '')
-          .toLowerCase()
-      );
+      const cleanTargetDomains = link.targetDomains.map(domain => normalizeUrl(domain));
 
       let linksFound = null;
       let captchaType = 'none';
@@ -2615,8 +2638,107 @@ const checkLinkStatus = async (link, browser) => {
         }
       }
 
-      const findLinkForDomains = (targetDomains) => {
+      const findLinkForDomains = async (targetDomains) => {
         let foundLink = null;
+        // Извлечение всех ссылок с помощью Puppeteer
+        const extractedLinks = await page.evaluate(() => {
+          const urls = new Set();
+
+          // 1. Ссылки в <a href>
+          document.querySelectorAll('a').forEach(a => {
+            if (a.href && a.href.startsWith('http')) {
+              urls.add(a.href);
+            }
+          });
+
+          // 2. Ссылки в атрибутах data-url, data-href
+          document.querySelectorAll('[data-url], [data-href]').forEach(el => {
+            const url = el.getAttribute('data-url') || el.getAttribute('data-href');
+            if (url && url.startsWith('http')) {
+              urls.add(url);
+            }
+          });
+
+          // 3. Ссылки в атрибутах onclick
+          document.querySelectorAll('[onclick]').forEach(el => {
+            const onclick = el.getAttribute('onclick');
+            const match = onclick.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+            if (match && match[1]) {
+              urls.add(match[1]);
+            } else if (match && match[2]) {
+              urls.add(match[2]);
+            }
+          });
+
+          // 4. Ссылки в <meta> тегах
+          document.querySelectorAll('meta[content]').forEach(meta => {
+            const content = meta.getAttribute('content');
+            if (content && content.startsWith('http')) {
+              urls.add(content);
+            }
+          });
+
+          // 5. Ссылки в JSON-объектах внутри <script>
+          document.querySelectorAll('script[type="application/json"], script[type="application/ld+json"]').forEach(script => {
+            try {
+              const jsonContent = script.innerHTML;
+              const json = JSON.parse(jsonContent);
+              const traverse = (obj) => {
+                if (typeof obj === 'string' && obj.startsWith('http')) {
+                  urls.add(obj);
+                } else if (Array.isArray(obj)) {
+                  obj.forEach(traverse);
+                } else if (typeof obj === 'object' && obj !== null) {
+                  Object.values(obj).forEach(traverse);
+                }
+              };
+              traverse(json);
+            } catch (e) {
+              // Игнорируем ошибки парсинга JSON
+            }
+          });
+
+          // 6. Ссылки в текстовом контенте
+          document.querySelectorAll('p, div, span').forEach(el => {
+            const text = el.innerText;
+            const urlRegex = /https?:\/\/[^\s<>"']+/g;
+            const matches = text.match(urlRegex);
+            if (matches) {
+              matches.forEach(url => {
+                urls.add(url);
+              });
+            }
+          });
+
+          return Array.from(urls);
+        });
+
+        // Разворачиваем сокращённые ссылки
+        const resolvedLinks = [];
+        for (const url of extractedLinks) {
+          let resolvedUrl = url;
+          if (url.includes('t.co') || url.includes('bit.ly') || url.includes('goo.gl') || url.includes('tinyurl.com')) {
+            resolvedUrl = await resolveShortUrl(url);
+          }
+          resolvedLinks.push(decodeURIComponent(resolvedUrl));
+        }
+
+        // Поиск в извлечённых ссылках
+        resolvedLinks.forEach(href => {
+          const normalizedHref = normalizeUrl(href);
+          const matchesDomain = targetDomains.some(domain => normalizedHref.includes(domain));
+          if (matchesDomain) {
+            foundLink = {
+              href: href,
+              rel: '', // rel может быть пустым, если ссылка не из <a>
+              anchorText: 'Found in content',
+              source: 'extracted',
+            };
+            console.log(`Link found in extracted URLs: ${JSON.stringify(foundLink)}`);
+          }
+        });
+
+        if (foundLink) return foundLink;
 
         $('a').each((i, a) => {
           const href = $(a).attr('href')?.toLowerCase().trim();
@@ -2740,7 +2862,7 @@ const checkLinkStatus = async (link, browser) => {
         return foundLink;
       };
 
-      linksFound = findLinkForDomains(cleanTargetDomains);
+      linksFound = await findLinkForDomains(cleanTargetDomains);
 
       const isLinkFound = linksFound !== null;
       const hasUsefulData = isLinkFound || isMetaRobotsFound;
