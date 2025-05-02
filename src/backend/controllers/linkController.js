@@ -3,7 +3,9 @@ const Spreadsheet = require('../models/Spreadsheet');
 const User = require('../models/User');
 const Project = require('../models/Project');
 const AnalysisTask = require('../models/AnalysisTask');
-const puppeteer = require('puppeteer');
+//const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const cheerio = require('cheerio');
 const { Solver } = require('2captcha');
 const jwt = require('jsonwebtoken');
@@ -16,6 +18,8 @@ const { URL } = require('url');
 const dns = require('dns').promises;
 const mongoose = require('mongoose');
 //const { wss } = require('../server');
+
+puppeteer.use(StealthPlugin());
 
 let pLimit;
 (async () => {
