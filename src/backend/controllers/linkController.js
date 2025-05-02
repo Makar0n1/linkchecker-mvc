@@ -1369,6 +1369,10 @@ page.on('request', (req) => {
         finalUrl = await page.url();
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
+        console.log(`Simulating human behavior on ${link.url}`);
+  await page.mouse.move(100, 100); // Движение мыши
+  await page.evaluate(() => window.scrollBy(0, 500)); // Прокрутка
+  await new Promise(resolve => setTimeout(resolve, 1000)); // Задержка
         // Добавляем ожидание для динамического контента
   console.log(`Waiting for dynamic content to load on ${link.url}`);
   await new Promise(resolve => setTimeout(resolve, 5000)); // Ждём 5 секунд
