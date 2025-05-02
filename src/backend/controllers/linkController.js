@@ -1343,13 +1343,13 @@ const checkLinkStatus = async (link, browser) => {
       await page.setViewport({ width: 1920, height: 1080 });
 
       await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        if (['image', 'stylesheet', 'font', 'media', 'script'].includes(req.resourceType())) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
+page.on('request', (req) => {
+  if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+    req.abort(); // Блокируем только изображения, стили, шрифты и медиа
+  } else {
+    req.continue(); // Разрешаем скрипты
+  }
+});
 
       const startTime = Date.now();
       let response;
@@ -1365,6 +1365,9 @@ const checkLinkStatus = async (link, browser) => {
         finalUrl = await page.url();
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
+        // Добавляем ожидание для динамического контента
+  console.log(`Waiting for dynamic content to load on ${link.url}`);
+  await new Promise(resolve => setTimeout(resolve, 5000)); // Ждём 5 секунд
       } catch (error) {
         console.error(`Navigation failed for ${link.url}:`, error.message);
         link.status = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout'; // Уточняем статус для ошибок SSL
@@ -1467,7 +1470,7 @@ const checkLinkStatus = async (link, browser) => {
           link.canonicalUrl = null;
         }
       }
-
+      console.log(`Original targetDomains: ${JSON.stringify(link.targetDomains)}`);
       const cleanTargetDomains = link.targetDomains.map(domain =>
         domain
           .replace(/^https?:\/\//, '')
