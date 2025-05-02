@@ -20,6 +20,7 @@
     "bcryptjs": "^3.0.2",
     "chart.js": "^4.4.8",
     "cheerio": "^1.0.0-rc.10",
+    "chrome-remote-interface": "^0.33.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",

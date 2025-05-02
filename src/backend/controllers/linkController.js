@@ -3,9 +3,7 @@ const Spreadsheet = require('../models/Spreadsheet');
 const User = require('../models/User');
 const Project = require('../models/Project');
 const AnalysisTask = require('../models/AnalysisTask');
-//const puppeteer = require('puppeteer');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const puppeteer = require('puppeteer');
 const cheerio = require('cheerio');
 const { Solver } = require('2captcha');
 const jwt = require('jsonwebtoken');
@@ -18,8 +16,6 @@ const { URL } = require('url');
 const dns = require('dns').promises;
 const mongoose = require('mongoose');
 //const { wss } = require('../server');
-
-puppeteer.use(StealthPlugin());
 
 let pLimit;
 (async () => {
@@ -294,8 +290,6 @@ const initializeBrowser = async () => {
       '--window-size=1920,1080',
       '--disable-gpu',
       '--disable-dev-shm-usage',
-      '--single-process',
-      '--no-zygote',
       '--disable-accelerated-2d-canvas',
       '--allow-running-insecure-content',
     ],
@@ -1164,7 +1158,33 @@ const checkLinkStatus = async (link, browser) => {
     }
     return link;
   }
-
+  const normalizeUrl = (url) => {
+    try {
+      const parsed = new URL(url);
+      let normalized = parsed.hostname + parsed.pathname;
+      // Удаляем "www." для сравнения
+      normalized = normalized.replace(/^www\./, '');
+      // Удаляем завершающий слэш
+      normalized = normalized.replace(/\/$/, '');
+      return normalized.toLowerCase();
+    } catch {
+      return url.toLowerCase();
+    }
+  };
+  
+  // Разворачивание сокращённых ссылок
+  const resolveShortUrl = async (shortUrl) => {
+    try {
+      const tempPage = await browser.newPage();
+      const response = await tempPage.goto(shortUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+      const resolvedUrl = response.url();
+      await tempPage.close();
+      return resolvedUrl;
+    } catch (error) {
+      console.error(`Error resolving short URL ${shortUrl}:`, error);
+      return shortUrl;
+    }
+  };
   while (attempt < maxAttempts) {
     try {
       console.log(`Attempt ${attempt + 1} to check link ${link.url}`);
@@ -1347,13 +1367,13 @@ const checkLinkStatus = async (link, browser) => {
       await page.setViewport({ width: 1920, height: 1080 });
 
       await page.setRequestInterception(true);
-page.on('request', (req) => {
-  if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-    req.abort(); // Блокируем только изображения, стили, шрифты и медиа
-  } else {
-    req.continue(); // Разрешаем скрипты
-  }
-});
+      page.on('request', (req) => {
+        if (['image', 'stylesheet', 'font', 'media', 'script'].includes(req.resourceType())) {
+          req.continue();
+        } else {
+          req.continue();
+        }
+      });
 
       const startTime = Date.now();
       let response;
@@ -1369,13 +1389,7 @@ page.on('request', (req) => {
         finalUrl = await page.url();
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
-        console.log(`Simulating human behavior on ${link.url}`);
-  await page.mouse.move(100, 100); // Движение мыши
-  await page.evaluate(() => window.scrollBy(0, 500)); // Прокрутка
-  await new Promise(resolve => setTimeout(resolve, 1000)); // Задержка
-        // Добавляем ожидание для динамического контента
-  console.log(`Waiting for dynamic content to load on ${link.url}`);
-  await new Promise(resolve => setTimeout(resolve, 5000)); // Ждём 5 секунд
+        // await new Promise(resolve => setTimeout(resolve, 5000)); // Убираем лишнюю задержку
       } catch (error) {
         console.error(`Navigation failed for ${link.url}:`, error.message);
         link.status = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout'; // Уточняем статус для ошибок SSL
@@ -1391,6 +1405,7 @@ page.on('request', (req) => {
       link.loadTime = loadTime;
 
       if (response) {
+        // await new Promise(resolve => setTimeout(resolve, 5000)); // Убираем лишнюю задержку
         const statusCode = response.status();
         link.responseCode = statusCode.toString();
 
@@ -1478,17 +1493,164 @@ page.on('request', (req) => {
           link.canonicalUrl = null;
         }
       }
-      console.log(`Original targetDomains: ${JSON.stringify(link.targetDomains)}`);
-      const cleanTargetDomains = link.targetDomains.map(domain =>
-        domain
-          .replace(/^https?:\/\//, '')
-          .replace(/^\/+/, '')
-          .replace(/\/+$/, '')
-          .toLowerCase()
-      );
-      console.log(`Cleaned targetDomains: ${JSON.stringify(cleanTargetDomains)}`);
+      // Временная заглушка для extractLinks, пока она не определена
+      const extractLinks = async () => {
+        console.warn(`extractLinks not implemented yet, returning empty array for ${link.url}`);
+        return [];
+      };
+      
+      const findLinkForDomains = async (targetDomains) => {
+        let foundLink = null;
+        const resolvedLinks = await extractLinks();
+      
+        // Поиск в извлечённых ссылках
+        resolvedLinks.forEach(href => {
+          const normalizedHref = normalizeUrl(href);
+          const matchesDomain = targetDomains.some(domain => normalizedHref.includes(domain));
+          if (matchesDomain) {
+            foundLink = {
+              href: href,
+              rel: '', // rel может быть пустым, если ссылка не из <a>
+              anchorText: 'Found in content',
+              source: 'extracted',
+            };
+            console.log(`Link found in extracted URLs: ${JSON.stringify(foundLink)}`);
+          }
+        });
+      
+        if (foundLink) return foundLink;
+      
+        // Поиск в <a> тегах (оставляем для обратной совместимости)
+        $('a').each((i, a) => {
+          const href = $(a).attr('href')?.toLowerCase().trim();
+          if (href) {
+            const normalizedHref = normalizeUrl(href);
+            const matchesDomain = targetDomains.some(domain => normalizedHref.includes(domain));
+            if (matchesDomain) {
+              const anchorText = $(a).text().trim();
+              const hasSvg = $(a).find('svg').length > 0;
+              const hasImg = $(a).find('img').length > 0;
+              const hasIcon = $(a).find('i').length > 0;
+              const hasChildren = $(a).children().length > 0;
+              foundLink = {
+                href: href,
+                rel: $(a).attr('rel') || '',
+                anchorText: anchorText || (hasSvg ? 'SVG link' : hasImg ? 'Image link' : hasIcon ? 'Icon link' : hasChildren ? 'Element link' : 'no text'),
+                source: 'a',
+              };
+              console.log(`Link found in <a>: ${JSON.stringify(foundLink)}`);
+              return false;
+            }
+          }
+        });
+      
+        if (foundLink) return foundLink;
+      
+        // Поиск в атрибутах событий
+        const eventAttributes = ['onclick', 'onmouseover', 'onmouseout', 'onchange'];
+        eventAttributes.forEach(attr => {
+          $(`[${attr}]`).each((i, el) => {
+            const eventCode = $(el).attr(attr)?.toLowerCase();
+            if (eventCode) {
+              const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
+              if (matchesDomain) {
+                const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+                if (urlMatch) {
+                  const href = urlMatch[1] || urlMatch[2];
+                  const tagName = $(el).prop('tagName').toLowerCase();
+                  foundLink = {
+                    href: href.toLowerCase(),
+                    rel: '',
+                    anchorText: `Link in ${tagName} ${attr}`,
+                    source: `event_${attr}`,
+                  };
+                  console.log(`Link found in ${attr}: ${JSON.stringify(foundLink)}`);
+                  return false;
+                }
+              }
+            }
+          });
+        });
+      
+        if (foundLink) return foundLink;
+      
+        // Поиск в тегах img, i, svg
+        const tagsToCheck = ['img', 'i', 'svg'];
+        tagsToCheck.forEach(tag => {
+          $(tag).each((i, el) => {
+            const parentA = $(el).closest('a');
+            if (parentA.length) {
+              const href = parentA.attr('href')?.toLowerCase().trim();
+              if (href) {
+                const normalizedHref = normalizeUrl(href);
+                const matchesDomain = targetDomains.some(domain => normalizedHref.includes(domain));
+                if (matchesDomain) {
+                  const anchorText = `Link in ${tag}`;
+                  foundLink = {
+                    href: href,
+                    rel: parentA.attr('rel') || '',
+                    anchorText: anchorText,
+                    source: `${tag}_parent_a`,
+                  };
+                  console.log(`Link found in parent <a> of <${tag}>: ${JSON.stringify(foundLink)}`);
+                  return false;
+                }
+              }
+            }
+      
+            eventAttributes.forEach(attr => {
+              const eventCode = $(el).attr(attr)?.toLowerCase();
+              if (eventCode) {
+                const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
+                if (matchesDomain) {
+                  const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+                  if (urlMatch) {
+                    const href = urlMatch[1] || urlMatch[2];
+                    foundLink = {
+                      href: href.toLowerCase(),
+                      rel: '',
+                      anchorText: `Link in ${tag} ${attr}`,
+                      source: `${tag}_event_${attr}`,
+                    };
+                    console.log(`Link found in <${tag}> ${attr}: ${JSON.stringify(foundLink)}`);
+                    return false;
+                  }
+                }
+              }
+            });
+          });
+        });
+      
+        if (foundLink) return foundLink;
+      
+        // Поиск в <script>
+        $('script').each((i, script) => {
+          const scriptContent = $(script).html()?.toLowerCase();
+          if (scriptContent) {
+            const matchesDomain = targetDomains.some(domain => scriptContent.includes(domain));
+            if (matchesDomain) {
+              const urlMatch = scriptContent.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
+              if (urlMatch) {
+                const href = urlMatch[1] || urlMatch[2];
+                foundLink = {
+                  href: href.toLowerCase(),
+                  rel: '',
+                  anchorText: 'Link in JavaScript',
+                  source: 'script',
+                };
+                console.log(`Link found in <script>: ${JSON.stringify(foundLink)}`);
+                return false;
+              }
+            }
+          }
+        });
+      
+        return foundLink;
+      };
+      
+      const cleanTargetDomains = link.targetDomains.map(domain => normalizeUrl(domain));
+      let linksFound = await findLinkForDomains(cleanTargetDomains); // Убрали дублирующий вызов
 
-      let linksFound = null;
       let captchaType = 'none';
       let captchaToken = null;
 
@@ -2627,133 +2789,6 @@ page.on('request', (req) => {
         }
       }
 
-      const findLinkForDomains = (targetDomains) => {
-        let foundLink = null;
-
-        $('a').each((i, a) => {
-          const href = $(a).attr('href')?.toLowerCase().trim();
-          if (href) {
-            const matchesDomain = targetDomains.some(domain => href.includes(domain));
-            if (matchesDomain) {
-              const anchorText = $(a).text().trim();
-              const hasSvg = $(a).find('svg').length > 0;
-              const hasImg = $(a).find('img').length > 0;
-              const hasIcon = $(a).find('i').length > 0;
-              const hasChildren = $(a).children().length > 0;
-              foundLink = {
-                href: href,
-                rel: $(a).attr('rel') || '',
-                anchorText: anchorText || (hasSvg ? 'SVG link' : hasImg ? 'Image link' : hasIcon ? 'Icon link' : hasChildren ? 'Element link' : 'no text'),
-                source: 'a',
-              };
-              console.log(`Link found in <a>: ${JSON.stringify(foundLink)}`);
-              return false;
-            }
-          }
-        });
-
-        if (foundLink) return foundLink;
-
-        const eventAttributes = ['onclick', 'onmouseover', 'onmouseout', 'onchange'];
-        eventAttributes.forEach(attr => {
-          $(`[${attr}]`).each((i, el) => {
-            const eventCode = $(el).attr(attr)?.toLowerCase();
-            if (eventCode) {
-              const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
-              if (matchesDomain) {
-                const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
-                if (urlMatch) {
-                  const href = urlMatch[1] || urlMatch[2];
-                  const tagName = $(el).prop('tagName').toLowerCase();
-                  foundLink = {
-                    href: href.toLowerCase(),
-                    rel: '',
-                    anchorText: `Link in ${tagName} ${attr}`,
-                    source: `event_${attr}`,
-                  };
-                  console.log(`Link found in ${attr}: ${JSON.stringify(foundLink)}`);
-                  return false;
-                }
-              }
-            }
-          });
-        });
-
-        if (foundLink) return foundLink;
-
-        const tagsToCheck = ['img', 'i', 'svg'];
-        tagsToCheck.forEach(tag => {
-          $(tag).each((i, el) => {
-            const parentA = $(el).closest('a');
-            if (parentA.length) {
-              const href = parentA.attr('href')?.toLowerCase().trim();
-              if (href) {
-                const matchesDomain = targetDomains.some(domain => href.includes(domain));
-                if (matchesDomain) {
-                  const anchorText = `Link in ${tag}`;
-                  foundLink = {
-                    href: href,
-                    rel: parentA.attr('rel') || '',
-                    anchorText: anchorText,
-                    source: `${tag}_parent_a`,
-                  };
-                  console.log(`Link found in parent <a> of <${tag}>: ${JSON.stringify(foundLink)}`);
-                  return false;
-                }
-              }
-            }
-
-            eventAttributes.forEach(attr => {
-              const eventCode = $(el).attr(attr)?.toLowerCase();
-              if (eventCode) {
-                const matchesDomain = targetDomains.some(domain => eventCode.includes(domain));
-                if (matchesDomain) {
-                  const urlMatch = eventCode.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
-                  if (urlMatch) {
-                    const href = urlMatch[1] || urlMatch[2];
-                    foundLink = {
-                      href: href.toLowerCase(),
-                      rel: '',
-                      anchorText: `Link in ${tag} ${attr}`,
-                      source: `${tag}_event_${attr}`,
-                    };
-                    console.log(`Link found in <${tag}> ${attr}: ${JSON.stringify(foundLink)}`);
-                    return false;
-                  }
-                }
-              }
-            });
-          });
-        });
-
-        if (foundLink) return foundLink;
-
-        $('script').each((i, script) => {
-          const scriptContent = $(script).html()?.toLowerCase();
-          if (scriptContent) {
-            const matchesDomain = targetDomains.some(domain => scriptContent.includes(domain));
-            if (matchesDomain) {
-              const urlMatch = scriptContent.match(/(?:window\.location\.href\s*=\s*['"]([^'"]+)['"]|['"](https?:\/\/[^'"]+)['"])/i);
-              if (urlMatch) {
-                const href = urlMatch[1] || urlMatch[2];
-                foundLink = {
-                  href: href.toLowerCase(),
-                  rel: '',
-                  anchorText: 'Link in JavaScript',
-                  source: 'script',
-                };
-                console.log(`Link found in <script>: ${JSON.stringify(foundLink)}`);
-                return false;
-              }
-            }
-          }
-        });
-
-        return foundLink;
-      };
-
-      linksFound = findLinkForDomains(cleanTargetDomains);
-
       const isLinkFound = linksFound !== null;
       const hasUsefulData = isLinkFound || isMetaRobotsFound;
 
@@ -2787,7 +2822,7 @@ page.on('request', (req) => {
       await link.save();
       console.log(`Finished analysis for link: ${link.url}, status: ${link.status}, overallStatus: ${link.overallStatus}`);
       return link;
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // await new Promise(resolve => setTimeout(resolve, 2000)); // Убираем лишнюю задержку
     } finally {
       if (page) {
         await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
@@ -3033,8 +3068,8 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
           spreadsheetId: spreadsheet.spreadsheetId,
           source: 'google_sheets',
           status: 'pending',
-          rowIndex: link.rowIndex,
-          taskId, // Сохраняем taskId в FrontendLink
+          rowIndex: link.rowIndex, // Сохраняем rowIndex
+          taskId,
         });
         console.log(`FrontendLink object before save: ${JSON.stringify(newLink.toObject())}`);
         await newLink.save();
@@ -3063,6 +3098,7 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
             rel: link.rel,
             linkType: link.linkType,
             lastChecked: link.lastChecked,
+            rowIndex: link.rowIndex, // Сохраняем rowIndex в базе
           })),
           gid: spreadsheet.gid,
         },
@@ -3137,10 +3173,11 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
 const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeStart, resultRangeEnd, sheetName) => {
   try {
     // Подготовка данных для экспорта
-    const data = links.map(link => {
+    const dataMap = {};
+    links.forEach(link => {
       const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
       const isLinkFound = link.status === 'active' && link.rel !== 'not found';
-      return [
+      dataMap[link.rowIndex] = [
         (responseCode === '200' || responseCode === '304') && link.isIndexable && isLinkFound ? 'OK' : 'Problem',
         responseCode,
         link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
@@ -3149,23 +3186,52 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
       ];
     });
 
-    // Определяем диапазон для записи
-    const startRow = Math.min(...links.map(link => link.rowIndex));
-    const endRow = Math.max(...links.map(link => link.rowIndex));
-    const range = `${sheetName}!${resultRangeStart}${startRow}:${resultRangeEnd}${endRow}`;
-    console.log(`Exporting to ${range} (${spreadsheetId}): ${data.length} rows`);
+    // Определяем диапазоны для записи
+    const rowIndices = Object.keys(dataMap).map(Number).sort((a, b) => a - b);
+    if (rowIndices.length === 0) {
+      console.log(`No data to export for spreadsheet ${spreadsheetId}`);
+      return;
+    }
+
+    const batchUpdates = [];
+    let currentStartRow = rowIndices[0];
+    let currentValues = [];
+    let previousRow = currentStartRow - 1;
+
+    for (const rowIndex of rowIndices) {
+      if (rowIndex !== previousRow + 1) {
+        // Завершаем текущий диапазон и начинаем новый
+        if (currentValues.length > 0) {
+          const range = `${sheetName}!${resultRangeStart}${currentStartRow}:${resultRangeEnd}${previousRow}`;
+          batchUpdates.push({
+            range,
+            values: currentValues,
+          });
+        }
+        currentStartRow = rowIndex;
+        currentValues = [];
+      }
+      currentValues.push(dataMap[rowIndex]);
+      previousRow = rowIndex;
+    }
+
+    // Добавляем последний диапазон
+    if (currentValues.length > 0) {
+      const range = `${sheetName}!${resultRangeStart}${currentStartRow}:${resultRangeEnd}${previousRow}`;
+      batchUpdates.push({
+        range,
+        values: currentValues,
+      });
+    }
+
+    console.log(`Exporting ${links.length} rows to ${spreadsheetId}: ${JSON.stringify(batchUpdates)}`);
 
     // Формируем batch-запрос
     const request = {
       spreadsheetId,
       resource: {
         valueInputOption: 'RAW',
-        data: [
-          {
-            range: range,
-            values: data,
-          },
-        ],
+        data: batchUpdates,
       },
     };
 
