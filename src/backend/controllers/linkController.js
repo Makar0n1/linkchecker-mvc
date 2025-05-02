@@ -1392,7 +1392,6 @@ const resolveShortUrl = async (shortUrl) => {
         finalUrl = await page.url();
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
-        await page.waitForTimeout(5000); // Ждём 5 секунд для загрузки динамического контента
       } catch (error) {
         console.error(`Navigation failed for ${link.url}:`, error.message);
         link.status = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout'; // Уточняем статус для ошибок SSL
@@ -1404,7 +1403,6 @@ const resolveShortUrl = async (shortUrl) => {
         await link.save();
         return link;
       }
-      await page.waitForTimeout(5000); // Ждём 5 секунд для загрузки динамического контента
       const loadTime = Date.now() - startTime;
       link.loadTime = loadTime;
 
