@@ -2831,7 +2831,7 @@ const checkLinkStatus = async (link, browser) => {
   }
 };
 
-const processLinksInBatches = async (links, batchSize = 20, projectId, wss, spreadsheetId, taskId) => {
+const processLinksInBatches = async (links, batchSize = 10, projectId, wss, spreadsheetId, taskId) => {
   const { default: pLimitModule } = await import('p-limit');
   const pLimit = pLimitModule;
   const results = [];
