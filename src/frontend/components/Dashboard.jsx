@@ -183,7 +183,7 @@ const Dashboard = () => {
           </div>
         </motion.aside>
         <main
-          className={`flex-grow p-4 sm:p-6 w-full h-auto transition-all duration-300 ease-in-out
+          className={`flex-grow p-4 sm:p-6 w-full h-auto transition-all duration-300 ease-in-out overflow-x-hidden
             ${isSidebarOpen ? 'sm:ml-[256px] custom-1300:ml-[256px]' : 'sm:ml-[64px] custom-1300:ml-0'}`}
         >
           <Outlet />
