@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -27,6 +27,8 @@ const ManualLinks = ({
   const [hoveredCanonicalId, setHoveredCanonicalId] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [isCollapsing, setIsCollapsing] = useState(false);
+  const tableRef = React.useRef(null);
+  const buttonsRef = React.useRef(null);
   const linksPerPage = 10;
 
   // Вычисляем индекс последней ссылки для отображения (1–10, 1–20, 1–30 и т.д.)
@@ -40,11 +42,53 @@ const ManualLinks = ({
     setCurrentPage((prevPage) => prevPage + 1);
   };
 
+  // Кастомная функция скролла с easing
+  const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+  const smoothScrollTo = (target, duration = 1500) => {
+    let start = window.scrollY;
+    let end;
+    let elementTop;
+
+    if (typeof target === 'number') {
+      end = target;
+    } else if (target instanceof HTMLElement) {
+      elementTop = target.getBoundingClientRect().top + window.scrollY;
+      end = elementTop;
+    } else {
+      return;
+    }
+
+    const startTime = performance.now();
+
+    const animateScroll = (currentTime) => {
+      const elapsedTime = currentTime - startTime;
+      const progress = Math.min(elapsedTime / duration, 1);
+      const easedProgress = easeInOutCubic(progress);
+
+      window.scrollTo(0, start + (end - start) * easedProgress);
+
+      if (progress < 1) {
+        requestAnimationFrame(animateScroll);
+      }
+    };
+
+    requestAnimationFrame(animateScroll);
+  };
+
   const handleCollapse = () => {
     setIsCollapsing(true);
     setTimeout(() => {
       setCurrentPage(1);
       setIsCollapsing(false);
+      // Плавный скролл после анимации
+      setTimeout(() => {
+        // Скроллим к кнопкам "Check All Links" и "Delete All Links"
+        if (buttonsRef.current) {
+          const elementTop = buttonsRef.current.getBoundingClientRect().top + window.scrollY;
+          smoothScrollTo(elementTop, 1500);
+        }
+      }, 100); // Небольшая задержка, чтобы анимация завершилась
     }, 500); // Задержка соответствует длительности анимации (0.5s)
   };
 
@@ -208,7 +252,7 @@ const ManualLinks = ({
           {loading ? 'Adding...' : 'Add Links'}
         </button>
       </form>
-      <div className="mb-6 flex flex-col sm:flex-row gap-3 sm:gap-4">
+      <div ref={buttonsRef} className="mb-6 flex flex-col sm:flex-row gap-3 sm:gap-4">
         <button
           onClick={() => wrappedHandleCheckLinks(projectId)}
           disabled={loading}
@@ -226,7 +270,7 @@ const ManualLinks = ({
       </div>
       {error && <p className="text-red-500 mb-6 text-sm">{error}</p>}
       <div className="rounded-lg shadow-sm overflow-x-auto">
-        <table className="w-full bg-white border border-gray-200 table-fixed min-w-[1200px]">
+        <table ref={tableRef} className="w-full bg-white border border-gray-200 table-fixed min-w-[1200px]">
           <thead>
             <tr className="bg-green-50 text-gray-700 text-xs sm:text-sm">
               <th className="p-2 sm:p-3 text-left w-10">#</th>
