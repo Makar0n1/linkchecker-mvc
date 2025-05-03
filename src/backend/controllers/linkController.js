@@ -1096,7 +1096,8 @@ const updateProfile = async (req, res) => {
   }
 };
 
-const checkLinkStatus = async (link, browser) => {
+const checkLinkStatus = async (link) => {
+  let browser;
   let page;
   let attempt = 0;
   const maxAttempts = 3;
@@ -1158,24 +1159,25 @@ const checkLinkStatus = async (link, browser) => {
     }
     return link;
   }
+
   const normalizeUrl = (url) => {
     try {
       const parsed = new URL(url);
       let normalized = parsed.hostname + parsed.pathname;
-      // Удаляем "www." для сравнения
       normalized = normalized.replace(/^www\./, '');
-      // Удаляем завершающий слэш
       normalized = normalized.replace(/\/$/, '');
       return normalized.toLowerCase();
     } catch {
       return url.toLowerCase();
     }
   };
-  
+
   // Разворачивание сокращённых ссылок
   const resolveShortUrl = async (shortUrl) => {
+    let tempBrowser;
     try {
-      const tempPage = await browser.newPage();
+      tempBrowser = await initializeBrowser();
+      const tempPage = await tempBrowser.newPage();
       const response = await tempPage.goto(shortUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
       const resolvedUrl = response.url();
       await tempPage.close();
@@ -1183,184 +1185,188 @@ const checkLinkStatus = async (link, browser) => {
     } catch (error) {
       console.error(`Error resolving short URL ${shortUrl}:`, error);
       return shortUrl;
+    } finally {
+      if (tempBrowser) {
+        await tempBrowser.close().catch(err => console.error(`Error closing temp browser for short URL: ${err}`));
+      }
     }
   };
+
   while (attempt < maxAttempts) {
     try {
       console.log(`Attempt ${attempt + 1} to check link ${link.url}`);
-      if (!browser) {
-        browser = await initializeBrowser();
-      }
-
+      
+      // Создаём новый браузер для каждой ссылки
+      browser = await initializeBrowser();
       page = await browser.newPage();
-      await page.setDefaultNavigationTimeout(60000); // Увеличиваем таймаут до 60 секунд
+      await page.setDefaultNavigationTimeout(120000); // Увеличиваем таймаут до 120 секунд
 
       const userAgents = [
-      {
-        ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br, zstd',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.google.com/',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
+        {
+          ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.google.com/',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.bing.com/',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"macOS"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'cross-site',
-          'Sec-Fetch-User': '?1',
+        {
+          ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.bing.com/',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"macOS"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-User': '?1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Referer': 'https://duckduckgo.com/',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
+        {
+          ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://duckduckgo.com/',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.2792.52',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br, zstd',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.google.com/',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Ch-Ua': '"Microsoft Edge";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
+        {
+          ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.2792.52',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.google.com/',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Microsoft Edge";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (Linux; Android 14; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.google.com/',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
-          'Sec-Ch-Ua-Mobile': '?1',
-          'Sec-Ch-Ua-Platform': '"Android"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
+        {
+          ua: 'Mozilla/5.0 (Linux; Android 14; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.google.com/',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+            'Sec-Ch-Ua-Mobile': '?1',
+            'Sec-Ch-Ua-Platform': '"Android"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.apple.com/',
-          'Upgrade-Insecure-Requests': '1',
+        {
+          ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.apple.com/',
+            'Upgrade-Insecure-Requests': '1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.youtube.com/',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Ch-Ua': '"Google Chrome";v="128", "Not;A=Brand";v="8", "Chromium";v="128"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'cross-site',
-          'Sec-Fetch-User': '?1',
+        {
+          ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.youtube.com/',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Google Chrome";v="128", "Not;A=Brand";v="8", "Chromium";v="128"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-User': '?1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:130.0) Gecko/20100101 Firefox/130.0',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.mozilla.org/',
-          'Upgrade-Insecure-Requests': '1',
+        {
+          ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:130.0) Gecko/20100101 Firefox/130.0',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.mozilla.org/',
+            'Upgrade-Insecure-Requests': '1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (Windows Phone 10.0; Android 6.0.1; Microsoft; Lumia 950) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36 Edge/129.0.2792.52',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.microsoft.com/',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Ch-Ua': '"Microsoft Edge";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
-          'Sec-Ch-Ua-Mobile': '?1',
-          'Sec-Ch-Ua-Platform': '"Windows"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
+        {
+          ua: 'Mozilla/5.0 (Windows Phone 10.0; Android 6.0.1; Microsoft; Lumia 950) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36 Edge/129.0.2792.52',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.microsoft.com/',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Microsoft Edge";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+            'Sec-Ch-Ua-Mobile': '?1',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+          },
         },
-      },
-      {
-        ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
-          'Accept-Encoding': 'gzip, deflate, br, zstd',
-          'Connection': 'keep-alive',
-          'Referer': 'https://www.google.com/',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Linux"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
+        {
+          ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.google.com/',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Linux"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+          },
         },
-      },
-    ];
-    const selectedAgent = userAgents[attempt % userAgents.length];
+      ];
+      const selectedAgent = userAgents[attempt % userAgents.length];
       await page.setUserAgent(selectedAgent.ua);
       await page.setExtraHTTPHeaders(selectedAgent.headers);
 
@@ -1383,21 +1389,20 @@ const checkLinkStatus = async (link, browser) => {
         console.log(`Navigating to ${link.url}`);
         response = await page.goto(link.url, { 
           waitUntil: 'domcontentloaded', 
-          timeout: 60000, 
+          timeout: 120000, // Увеличиваем таймаут до 120 секунд
           ignoreHTTPSErrors: true 
         });
         finalUrl = await page.url();
         console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
         link.responseCode = response ? response.status().toString() : 'Timeout';
-        // await new Promise(resolve => setTimeout(resolve, 5000)); // Убираем лишнюю задержку
       } catch (error) {
         console.error(`Navigation failed for ${link.url}:`, error.message);
-        link.status = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout'; // Уточняем статус для ошибок SSL
+        link.status = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout';
         link.errorDetails = error.message;
         link.isIndexable = false;
         link.indexabilityStatus = error.message.includes('ERR_CERT') ? 'ssl-error' : 'timeout';
         link.responseCode = 'Error';
-        link.overallStatus = 'Problem'; // Устанавливаем overallStatus
+        link.overallStatus = 'Problem';
         await link.save();
         return link;
       }
@@ -1405,7 +1410,6 @@ const checkLinkStatus = async (link, browser) => {
       link.loadTime = loadTime;
 
       if (response) {
-        // await new Promise(resolve => setTimeout(resolve, 5000)); // Убираем лишнюю задержку
         const statusCode = response.status();
         link.responseCode = statusCode.toString();
 
@@ -1426,11 +1430,42 @@ const checkLinkStatus = async (link, browser) => {
           link.status = statusCode >= 400 ? 'broken' : 'redirect';
           await link.save();
         }
+
+        // Прокрутка страницы для кодов 200 и 304
+        if (statusCode === 200 || statusCode === 304) {
+          try {
+            console.log(`Attempting to scroll page for ${link.url} (status: ${statusCode})`);
+            await page.evaluate(async () => {
+              // Первая прокрутка до футера или копирайта
+              const targetElement = document.querySelector('footer') || 
+                                   Array.from(document.querySelectorAll('*:not(script):not(style)'))
+                                     .find(el => el.textContent.includes('©') || el.textContent.toLowerCase().includes('copyright'));
+              if (targetElement) {
+                targetElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
+              } else {
+                // Если футер или копирайт не найдены, прокручиваем до конца страницы
+                window.scrollTo(0, document.body.scrollHeight);
+              }
+        
+              // Ждём 1 секунду, чтобы подгрузился динамический контент
+              await new Promise(resolve => setTimeout(resolve, 1000));
+        
+              // Вторая прокрутка до конца страницы, чтобы захватить новый контент (например, SPA-комментарии)
+              window.scrollTo(0, document.body.scrollHeight);
+            });
+        
+            // Ждём завершения второй прокрутки и дополнительной подгрузки контента
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            console.log(`Successfully scrolled page twice for ${link.url}`);
+          } catch (scrollError) {
+            console.error(`Failed to scroll page for ${link.url}:`, scrollError.message);
+          }
+        }
       }
 
       await page.waitForFunction(
         () => document.readyState === 'complete' || (document.querySelector('meta[name="robots"]') || document.querySelector('a[href]')),
-        { timeout: 5000 },
+        { timeout: 10000 }, // Увеличиваем таймаут до 10 секунд
       ).catch(() => console.log(`Timeout waiting for page to stabilize for ${link.url}`));
 
       const randomDelay = Math.floor(Math.random() * 2000) + 1000;
@@ -1457,7 +1492,7 @@ const checkLinkStatus = async (link, browser) => {
       let isMetaRobotsFound = false;
       let isIndexableBasedOnRobots = false;
       try {
-        await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
+        await page.waitForFunction(() => document.readyState === 'complete', { timeout: 5000 }); // Увеличиваем таймаут до 5 секунд
         metaRobots = (await page.$eval('meta[name="robots"]', el => el?.content)) || '';
         isMetaRobotsFound = true;
         const robotsValues = metaRobots.toLowerCase().split(',').map(val => val.trim());
@@ -1478,7 +1513,7 @@ const checkLinkStatus = async (link, browser) => {
 
       if (link.isIndexable && (link.responseCode === '200' || link.responseCode === 'Timeout' || link.responseCode === '304' || link.responseCode === '302')) {
         try {
-          await page.waitForFunction(() => document.readyState === 'complete', { timeout: 3000 });
+          await page.waitForFunction(() => document.readyState === 'complete', { timeout: 5000 }); // Увеличиваем таймаут до 5 секунд
           const canonical = await page.$eval('link[rel="canonical"]', el => el?.href);
           if (canonical) {
             link.canonicalUrl = canonical;
@@ -1493,34 +1528,43 @@ const checkLinkStatus = async (link, browser) => {
           link.canonicalUrl = null;
         }
       }
-      // Временная заглушка для extractLinks, пока она не определена
+
+      // Реализация extractLinks
       const extractLinks = async () => {
-        console.warn(`extractLinks not implemented yet, returning empty array for ${link.url}`);
-        return [];
+        try {
+          const links = await page.evaluate(() => {
+            const anchors = Array.from(document.querySelectorAll('a'));
+            return anchors
+              .map(anchor => anchor.href)
+              .filter(href => href && href.startsWith('http'));
+          });
+          return links;
+        } catch (error) {
+          console.error(`Error extracting links for ${link.url}:`, error.message);
+          return [];
+        }
       };
-      
+
       const findLinkForDomains = async (targetDomains) => {
         let foundLink = null;
         const resolvedLinks = await extractLinks();
-      
-        // Поиск в извлечённых ссылках
+
         resolvedLinks.forEach(href => {
           const normalizedHref = normalizeUrl(href);
           const matchesDomain = targetDomains.some(domain => normalizedHref.includes(domain));
           if (matchesDomain) {
             foundLink = {
               href: href,
-              rel: '', // rel может быть пустым, если ссылка не из <a>
+              rel: '',
               anchorText: 'Found in content',
               source: 'extracted',
             };
             console.log(`Link found in extracted URLs: ${JSON.stringify(foundLink)}`);
           }
         });
-      
+
         if (foundLink) return foundLink;
-      
-        // Поиск в <a> тегах (оставляем для обратной совместимости)
+
         $('a').each((i, a) => {
           const href = $(a).attr('href')?.toLowerCase().trim();
           if (href) {
@@ -1543,10 +1587,9 @@ const checkLinkStatus = async (link, browser) => {
             }
           }
         });
-      
+
         if (foundLink) return foundLink;
-      
-        // Поиск в атрибутах событий
+
         const eventAttributes = ['onclick', 'onmouseover', 'onmouseout', 'onchange'];
         eventAttributes.forEach(attr => {
           $(`[${attr}]`).each((i, el) => {
@@ -1571,10 +1614,9 @@ const checkLinkStatus = async (link, browser) => {
             }
           });
         });
-      
+
         if (foundLink) return foundLink;
-      
-        // Поиск в тегах img, i, svg
+
         const tagsToCheck = ['img', 'i', 'svg'];
         tagsToCheck.forEach(tag => {
           $(tag).each((i, el) => {
@@ -1597,7 +1639,7 @@ const checkLinkStatus = async (link, browser) => {
                 }
               }
             }
-      
+
             eventAttributes.forEach(attr => {
               const eventCode = $(el).attr(attr)?.toLowerCase();
               if (eventCode) {
@@ -1620,10 +1662,9 @@ const checkLinkStatus = async (link, browser) => {
             });
           });
         });
-      
+
         if (foundLink) return foundLink;
-      
-        // Поиск в <script>
+
         $('script').each((i, script) => {
           const scriptContent = $(script).html()?.toLowerCase();
           if (scriptContent) {
@@ -1644,17 +1685,16 @@ const checkLinkStatus = async (link, browser) => {
             }
           }
         });
-      
+
         return foundLink;
       };
-      
+
       const cleanTargetDomains = link.targetDomains.map(domain => normalizeUrl(domain));
-      let linksFound = await findLinkForDomains(cleanTargetDomains); // Убрали дублирующий вызов
+      let linksFound = await findLinkForDomains(cleanTargetDomains);
 
       let captchaType = 'none';
       let captchaToken = null;
 
-      // Обнаружение всех типов капч
       if ($('.cf-turnstile').length > 0) captchaType = 'Cloudflare Turnstile';
       else if ($('.g-recaptcha').length > 0) captchaType = 'Google reCAPTCHA';
       else if ($('.h-captcha').length > 0) captchaType = 'hCaptcha';
@@ -1687,7 +1727,7 @@ const checkLinkStatus = async (link, browser) => {
         try {
           const currentPageUrl = await page.url();
           console.log(`Current page URL after redirects: ${currentPageUrl}`);
-      
+
           const solveCaptcha = async (task, maxRetries = 2) => {
             let retry = 0;
             while (retry <= maxRetries) {
@@ -1697,13 +1737,13 @@ const checkLinkStatus = async (link, browser) => {
                   task: task,
                 });
                 console.log(`2Captcha createTask response:`, createTaskResponse.data);
-      
+
                 if (createTaskResponse.data.errorId !== 0) {
                   throw new Error(`2Captcha createTask error: ${createTaskResponse.data.errorDescription}`);
                 }
-      
+
                 const taskId = createTaskResponse.data.taskId;
-      
+
                 let result;
                 while (true) {
                   await new Promise(resolve => setTimeout(resolve, 5000));
@@ -1718,11 +1758,11 @@ const checkLinkStatus = async (link, browser) => {
                     throw new Error(`2Captcha task failed: ${result.errorDescription || 'Unknown error'}`);
                   }
                 }
-      
+
                 if (!result.solution) {
                   throw new Error('No solution returned from 2Captcha');
                 }
-      
+
                 return result.solution;
               } catch (error) {
                 retry++;
@@ -1735,7 +1775,6 @@ const checkLinkStatus = async (link, browser) => {
             }
           };
 
-          // Обработка всех типов капч
           if (captchaType === 'Google reCAPTCHA') {
             const sitekey = await page.$eval('.g-recaptcha', el => el.getAttribute('data-sitekey'));
             if (!sitekey) throw new Error('Could not extract sitekey for Google reCAPTCHA');
@@ -1765,7 +1804,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -1775,7 +1814,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Cloudflare Turnstile') {
@@ -1806,7 +1845,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -1816,7 +1855,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'hCaptcha') {
@@ -1848,7 +1887,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -1858,7 +1897,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'FunCaptcha') {
@@ -1899,7 +1938,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -1909,7 +1948,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'GeeTest') {
@@ -1944,7 +1983,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -1954,7 +1993,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Image CAPTCHA') {
@@ -1989,7 +2028,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -1999,7 +2038,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Text CAPTCHA') {
@@ -2030,7 +2069,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2040,7 +2079,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Rotate CAPTCHA') {
@@ -2057,10 +2096,9 @@ const checkLinkStatus = async (link, browser) => {
             };
 
             const solution = await solveCaptcha(task);
-            captchaToken = solution.angle; // Предполагаем, что API возвращает угол поворота
+            captchaToken = solution.angle;
             console.log(`Rotate CAPTCHA solved: Angle ${captchaToken}`);
 
-            // Применяем поворот (предполагаем, что на странице есть элемент для поворота)
             await page.evaluate(angle => {
               const img = document.querySelector('img[src*="captcha"]');
               if (img) img.style.transform = `rotate(${angle}deg)`;
@@ -2068,7 +2106,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2078,7 +2116,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Grid CAPTCHA') {
@@ -2102,7 +2140,7 @@ const checkLinkStatus = async (link, browser) => {
             };
 
             const solution = await solveCaptcha(task);
-            const selectedCells = solution.cells; // Предполагаем, что API возвращает массив индексов клеток
+            const selectedCells = solution.cells;
             console.log(`Grid CAPTCHA solved: Selected cells ${JSON.stringify(selectedCells)}`);
 
             await page.evaluate(cells => {
@@ -2114,7 +2152,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2124,7 +2162,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Draw Around CAPTCHA') {
@@ -2140,7 +2178,7 @@ const checkLinkStatus = async (link, browser) => {
             };
 
             const solution = await solveCaptcha(task);
-            const path = solution.path; // Предполагаем, что API возвращает путь для рисования
+            const path = solution.path;
             console.log(`Draw Around CAPTCHA solved: Path ${JSON.stringify(path)}`);
 
             await page.evaluate(path => {
@@ -2158,7 +2196,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2168,7 +2206,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Bounding Box CAPTCHA') {
@@ -2183,7 +2221,7 @@ const checkLinkStatus = async (link, browser) => {
             };
 
             const solution = await solveCaptcha(task);
-            const boundingBox = solution.coordinates; // Предполагаем, что API возвращает координаты
+            const boundingBox = solution.coordinates;
             console.log(`Bounding Box CAPTCHA solved: Coordinates ${JSON.stringify(boundingBox)}`);
 
             await page.evaluate(box => {
@@ -2198,7 +2236,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2208,7 +2246,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Audio CAPTCHA') {
@@ -2236,7 +2274,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2246,7 +2284,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'KeyCAPTCHA') {
@@ -2282,7 +2320,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2292,7 +2330,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Capy Puzzle CAPTCHA') {
@@ -2320,7 +2358,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2330,7 +2368,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Lemin CAPTCHA') {
@@ -2362,7 +2400,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2372,7 +2410,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Amazon CAPTCHA') {
@@ -2410,7 +2448,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2420,7 +2458,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'CyberSiARA') {
@@ -2449,7 +2487,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2459,7 +2497,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'MTCaptcha') {
@@ -2484,7 +2522,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2494,7 +2532,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Cutcaptcha') {
@@ -2521,7 +2559,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2531,7 +2569,7 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'Friendly Captcha') {
@@ -2556,7 +2594,7 @@ const checkLinkStatus = async (link, browser) => {
 
             const submitButton = await page.$('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               await submitButton.click();
               await navigationPromise;
               content = await page.evaluate(() => document.documentElement.outerHTML);
@@ -2566,331 +2604,352 @@ const checkLinkStatus = async (link, browser) => {
                 const form = document.querySelector('form');
                 if (form) form.submit();
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }); // Увеличиваем таймаут до 120 секунд
               content = await page.evaluate(() => document.documentElement.outerHTML);
             }
           } else if (captchaType === 'atbCAPTCHA') {
             const appId = await page.$eval('script[src*="aisecurius"]', el => el.src.match(/appId=([^&]+)/)?.[1]);
-            const apiServer = await page.evaluate(() => {
-              const script = document.querySelector('script[src*="aisecurius"]');
-              return script ? new URL(script.src).hostname : null;
-            });
-            if (!appId || !apiServer) throw new Error('Could not extract parameters for atbCAPTCHA');
-            console.log(`Extracted parameters for atbCAPTCHA: appId=${appId}, apiServer=${apiServer}`);
-
-            const task = {
-              type: 'AtbCaptchaTaskProxyless',
-              appId: appId,
-              apiServer: apiServer || 'https://cap.aisecurius.com',
-              websiteURL: currentPageUrl,
-            };
-
-            const solution = await solveCaptcha(task);
-            captchaToken = solution.token;
-            console.log(`atbCAPTCHA solved: ${captchaToken}`);
-
-            await page.evaluate(token => {
-              const input = document.querySelector('input[name="atb-captcha-response"]');
-              if (input) input.value = token;
-            }, captchaToken);
-
-            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-            if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-              await submitButton.click();
-              await navigationPromise;
-              content = await page.evaluate(() => document.documentElement.outerHTML);
-            } else {
-              console.log('No submit button found for atbCAPTCHA, assuming token submission via JavaScript');
-              await page.evaluate(() => {
-                const form = document.querySelector('form');
-                if (form) form.submit();
+              const apiServer = await page.evaluate(() => {
+                const script = document.querySelector('script[src*="aisecurius"]');
+                return script ? new URL(script.src).hostname : null;
               });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-              content = await page.evaluate(() => document.documentElement.outerHTML);
-            }
-          } else if (captchaType === 'Tencent') {
-            const appId = await page.$eval('#TencentCaptcha', el => el.getAttribute('data-appid'));
-            if (!appId) throw new Error('Could not extract appId for Tencent CAPTCHA');
-            console.log(`Extracted appId for Tencent CAPTCHA: ${appId}`);
-
-            const task = {
-              type: 'TencentTaskProxyless',
-              appId: appId,
-              websiteURL: currentPageUrl,
-            };
-
-            const solution = await solveCaptcha(task);
-            captchaToken = solution.ticket;
-            console.log(`Tencent CAPTCHA solved: ${captchaToken}`);
-
-            await page.evaluate(token => {
-              const input = document.querySelector('input[name="tencent-ticket"]');
-              if (input) input.value = token;
-            }, captchaToken);
-
-            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-            if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-              await submitButton.click();
-              await navigationPromise;
-              content = await page.evaluate(() => document.documentElement.outerHTML);
-            } else {
-              console.log('No submit button found for Tencent CAPTCHA, assuming token submission via JavaScript');
-              await page.evaluate(() => {
-                const form = document.querySelector('form');
-                if (form) form.submit();
-              });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-              content = await page.evaluate(() => document.documentElement.outerHTML);
-            }
-          } else if (captchaType === 'Prosopo Procaptcha') {
-            const sitekey = await page.$eval('script[src*="prosopo"]', el => el.src.match(/sitekey=([^&]+)/)?.[1]);
-            if (!sitekey) throw new Error('Could not extract sitekey for Prosopo Procaptcha');
-            console.log(`Extracted sitekey for Prosopo Procaptcha: ${sitekey}`);
-
-            const task = {
-              type: 'ProsopoTaskProxyless',
-              websiteKey: sitekey,
-              websiteURL: currentPageUrl,
-            };
-
-            const solution = await solveCaptcha(task);
-            captchaToken = solution.token;
-            console.log(`Prosopo Procaptcha solved: ${captchaToken}`);
-
-            await page.evaluate(token => {
-              const input = document.querySelector('input[name="prosopo-token"]');
-              if (input) input.value = token;
-            }, captchaToken);
-
-            const submitButton = await page.$('button[type="submit"], input[type="submit"]');
-            if (submitButton) {
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-              await submitButton.click();
-              await navigationPromise;
-              content = await page.evaluate(() => document.documentElement.outerHTML);
-            } else {
-              console.log('No submit button found for Prosopo Procaptcha, assuming token submission via JavaScript');
-              await page.evaluate(() => {
-                const form = document.querySelector('form');
-                if (form) form.submit();
-              });
-              await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-              content = await page.evaluate(() => document.documentElement.outerHTML);
-            }
-          } else if (captchaType === 'Cloudflare Challenge Page') {
-            await page.waitForSelector('input[name="cf_captcha_kind"]', { timeout: 10000 });
-            const sitekey = await page.$eval('input[name="cf_captcha_kind"]', el => el.getAttribute('data-sitekey'));
-            if (sitekey) {
-              console.log(`Extracted sitekey for Cloudflare Challenge Page: ${sitekey}`);
+              if (!appId || !apiServer) throw new Error('Could not extract parameters for atbCAPTCHA');
+              console.log(`Extracted parameters for atbCAPTCHA: appId=${appId}, apiServer=${apiServer}`);
 
               const task = {
-                type: 'TurnstileTaskProxyless',
+                type: 'AtbCaptchaTaskProxyless',
+                appId: appId,
+                apiServer: apiServer || 'https://cap.aisecurius.com',
                 websiteURL: currentPageUrl,
-                websiteKey: sitekey,
               };
 
               const solution = await solveCaptcha(task);
               captchaToken = solution.token;
-              console.log(`Cloudflare Challenge Page solved: ${captchaToken}`);
-
-              const inputExists = await page.evaluate(() => !!document.querySelector('input[name="cf-turnstile-response"]'));
-              if (!inputExists) {
-                console.error('No cf-turnstile-response input found');
-                throw new Error('No cf-turnstile-response input found');
-              }
+              console.log(`atbCAPTCHA solved: ${captchaToken}`);
 
               await page.evaluate(token => {
-                const input = document.querySelector('input[name="cf-turnstile-response"]');
+                const input = document.querySelector('input[name="atb-captcha-response"]');
                 if (input) input.value = token;
               }, captchaToken);
 
               const submitButton = await page.$('button[type="submit"], input[type="submit"]');
               if (submitButton) {
-                const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+                const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
                 await submitButton.click();
                 await navigationPromise;
                 content = await page.evaluate(() => document.documentElement.outerHTML);
               } else {
-                console.log('No submit button found for Cloudflare Challenge Page, assuming token submission via JavaScript');
+                console.log('No submit button found for atbCAPTCHA, assuming token submission via JavaScript');
                 await page.evaluate(() => {
                   const form = document.querySelector('form');
                   if (form) form.submit();
                 });
-                await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+                await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
                 content = await page.evaluate(() => document.documentElement.outerHTML);
               }
-            } else {
-              console.log('Cloudflare Challenge Page does not require CAPTCHA solving, waiting for redirect...');
-              const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
-              await navigationPromise;
-              content = await page.evaluate(() => document.documentElement.outerHTML);
-            }
-          } else if (captchaType === 'Custom CAPTCHA') {
-            console.log('Custom CAPTCHA detected, attempting to solve as Image CAPTCHA if possible...');
-            const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src, { timeout: 5000 }).catch(() => null);
-            if (captchaImageUrl) {
-              console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
+            } else if (captchaType === 'Tencent') {
+              const appId = await page.$eval('#TencentCaptcha', el => el.getAttribute('data-appid'));
+              if (!appId) throw new Error('Could not extract appId for Tencent CAPTCHA');
+              console.log(`Extracted appId for Tencent CAPTCHA: ${appId}`);
+
               const task = {
-                type: 'ImageToTextTask',
-                body: captchaImageUrl,
-                phrase: false,
-                case: true,
-                numeric: 0,
-                math: false,
-                minLength: 1,
-                maxLength: 5,
-                comment: 'enter the text you see on the image',
-                languagePool: 'en',
+                type: 'TencentTaskProxyless',
+                appId: appId,
+                websiteURL: currentPageUrl,
               };
 
               const solution = await solveCaptcha(task);
-              captchaToken = solution.text;
-              console.log(`Custom CAPTCHA (Image) solved: ${captchaToken}`);
+              captchaToken = solution.ticket;
+              console.log(`Tencent CAPTCHA solved: ${captchaToken}`);
 
-              const inputExists = await page.evaluate(() => !!document.querySelector('input[placeholder*="enter code"], input[name*="captcha"]'));
-              if (!inputExists) {
-                console.error('No input field found for Custom CAPTCHA');
-                throw new Error('No input field found for Custom CAPTCHA');
-              }
-
-              await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
+              await page.evaluate(token => {
+                const input = document.querySelector('input[name="tencent-ticket"]');
+                if (input) input.value = token;
+              }, captchaToken);
 
               const submitButton = await page.$('button[type="submit"], input[type="submit"]');
               if (submitButton) {
-                const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+                const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
                 await submitButton.click();
                 await navigationPromise;
                 content = await page.evaluate(() => document.documentElement.outerHTML);
               } else {
-                console.log('No submit button found for Custom CAPTCHA, assuming token submission via JavaScript');
+                console.log('No submit button found for Tencent CAPTCHA, assuming token submission via JavaScript');
                 await page.evaluate(() => {
                   const form = document.querySelector('form');
                   if (form) form.submit();
                 });
-                await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
+                await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
                 content = await page.evaluate(() => document.documentElement.outerHTML);
               }
-            } else {
-              throw new Error('Custom CAPTCHA not supported for automated solving');
+            } else if (captchaType === 'Prosopo Procaptcha') {
+              const sitekey = await page.$eval('script[src*="prosopo"]', el => el.src.match(/sitekey=([^&]+)/)?.[1]);
+              if (!sitekey) throw new Error('Could not extract sitekey for Prosopo Procaptcha');
+              console.log(`Extracted sitekey for Prosopo Procaptcha: ${sitekey}`);
+
+              const task = {
+                type: 'ProsopoTaskProxyless',
+                websiteKey: sitekey,
+                websiteURL: currentPageUrl,
+              };
+
+              const solution = await solveCaptcha(task);
+              captchaToken = solution.token;
+              console.log(`Prosopo Procaptcha solved: ${captchaToken}`);
+
+              await page.evaluate(token => {
+                const input = document.querySelector('input[name="prosopo-token"]');
+                if (input) input.value = token;
+              }, captchaToken);
+
+              const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+              if (submitButton) {
+                const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
+                await submitButton.click();
+                await navigationPromise;
+                content = await page.evaluate(() => document.documentElement.outerHTML);
+              } else {
+                console.log('No submit button found for Prosopo Procaptcha, assuming token submission via JavaScript');
+                await page.evaluate(() => {
+                  const form = document.querySelector('form');
+                  if (form) form.submit();
+                });
+                await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
+                content = await page.evaluate(() => document.documentElement.outerHTML);
+              }
+            } else if (captchaType === 'Cloudflare Challenge Page') {
+              await page.waitForSelector('input[name="cf_captcha_kind"]', { timeout: 10000 });
+              const sitekey = await page.$eval('input[name="cf_captcha_kind"]', el => el.getAttribute('data-sitekey'));
+              if (sitekey) {
+                console.log(`Extracted sitekey for Cloudflare Challenge Page: ${sitekey}`);
+
+                const task = {
+                  type: 'TurnstileTaskProxyless',
+                  websiteURL: currentPageUrl,
+                  websiteKey: sitekey,
+                };
+
+                const solution = await solveCaptcha(task);
+                captchaToken = solution.token;
+                console.log(`Cloudflare Challenge Page solved: ${captchaToken}`);
+
+                const inputExists = await page.evaluate(() => !!document.querySelector('input[name="cf-turnstile-response"]'));
+                if (!inputExists) {
+                  console.error('No cf-turnstile-response input found');
+                  throw new Error('No cf-turnstile-response input found');
+                }
+
+                await page.evaluate(token => {
+                  const input = document.querySelector('input[name="cf-turnstile-response"]');
+                  if (input) input.value = token;
+                }, captchaToken);
+
+                const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+                if (submitButton) {
+                  const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
+                  await submitButton.click();
+                  await navigationPromise;
+                  content = await page.evaluate(() => document.documentElement.outerHTML);
+                } else {
+                  console.log('No submit button found for Cloudflare Challenge Page, assuming token submission via JavaScript');
+                  await page.evaluate(() => {
+                    const form = document.querySelector('form');
+                    if (form) form.submit();
+                  });
+                  await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
+                  content = await page.evaluate(() => document.documentElement.outerHTML);
+                }
+              } else {
+                console.log('Cloudflare Challenge Page does not require CAPTCHA solving, waiting for redirect...');
+                const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
+                await navigationPromise;
+                content = await page.evaluate(() => document.documentElement.outerHTML);
+              }
+            } else if (captchaType === 'Custom CAPTCHA') {
+              console.log('Custom CAPTCHA detected, attempting to solve as Image CAPTCHA if possible...');
+              const captchaImageUrl = await page.$eval('img[src*="captcha"]', el => el.src, { timeout: 5000 }).catch(() => null);
+              if (captchaImageUrl) {
+                console.log(`Extracted CAPTCHA image URL: ${captchaImageUrl}`);
+                const task = {
+                  type: 'ImageToTextTask',
+                  body: captchaImageUrl,
+                  phrase: false,
+                  case: true,
+                  numeric: 0,
+                  math: false,
+                  minLength: 1,
+                  maxLength: 5,
+                  comment: 'enter the text you see on the image',
+                  languagePool: 'en',
+                };
+
+                const solution = await solveCaptcha(task);
+                captchaToken = solution.text;
+                console.log(`Custom CAPTCHA (Image) solved: ${captchaToken}`);
+
+                const inputExists = await page.evaluate(() => !!document.querySelector('input[placeholder*="enter code"], input[name*="captcha"]'));
+                if (!inputExists) {
+                  console.error('No input field found for Custom CAPTCHA');
+                  throw new Error('No input field found for Custom CAPTCHA');
+                }
+
+                await page.type('input[placeholder*="enter code"], input[name*="captcha"]', captchaToken);
+
+                const submitButton = await page.$('button[type="submit"], input[type="submit"]');
+                if (submitButton) {
+                  const navigationPromise = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
+                  await submitButton.click();
+                  await navigationPromise;
+                  content = await page.evaluate(() => document.documentElement.outerHTML);
+                } else {
+                  console.log('No submit button found for Custom CAPTCHA, assuming token submission via JavaScript');
+                  await page.evaluate(() => {
+                    const form = document.querySelector('form');
+                    if (form) form.submit();
+                  });
+                  await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 });
+                  content = await page.evaluate(() => document.documentElement.outerHTML);
+                }
+              } else {
+                throw new Error('Custom CAPTCHA not supported for automated solving');
+              }
             }
+
+            $ = cheerio.load(content);
+          } catch (error) {
+            console.error(`Error solving CAPTCHA for ${link.url}:`, error.message);
+            link.status = 'suspected-captcha';
+            link.rel = 'blocked';
+            link.linkType = 'unknown';
+            link.anchorText = 'captcha suspected';
+            link.errorDetails = `CAPTCHA solving failed: ${error.message}`;
+            await link.save();
           }
-
-          $ = cheerio.load(content);
-        } catch (error) {
-          console.error(`Error solving CAPTCHA for ${link.url}:`, error.message);
-          link.status = 'suspected-captcha';
-          link.rel = 'blocked';
-          link.linkType = 'unknown';
-          link.anchorText = 'captcha suspected';
-          link.errorDetails = `CAPTCHA solving failed: ${error.message}`;
-          await link.save();
         }
-      }
 
-      const isLinkFound = linksFound !== null;
-      const hasUsefulData = isLinkFound || isMetaRobotsFound;
+        const isLinkFound = linksFound !== null;
+        const hasUsefulData = isLinkFound || isMetaRobotsFound;
 
-      if (hasUsefulData) {
-        if (isLinkFound) {
-          link.status = 'active';
-          link.rel = linksFound.rel;
-          link.anchorText = linksFound.anchorText;
-          const relValues = linksFound.rel ? linksFound.rel.toLowerCase().split(' ') : [];
-          link.linkType = relValues.some(value => ['nofollow', 'ugc', 'sponsored'].includes(value)) ? 'nofollow' : 'dofollow';
-          link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
+        if (hasUsefulData) {
+          if (isLinkFound) {
+            link.status = 'active';
+            link.rel = linksFound.rel;
+            link.anchorText = linksFound.anchorText;
+            const relValues = linksFound.rel ? linksFound.rel.toLowerCase().split(' ') : [];
+            link.linkType = relValues.some(value => ['nofollow', 'ugc', 'sponsored'].includes(value)) ? 'nofollow' : 'dofollow';
+            link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
+          } else {
+            link.status = 'active';
+            link.rel = 'not found';
+            link.linkType = 'unknown';
+            link.anchorText = 'not found';
+            link.errorDetails = link.errorDetails || '';
+          }
+          link.overallStatus = (link.responseCode === '200' || link.responseCode === '304') && link.isIndexable && isLinkFound ? 'OK' : 'Problem';
         } else {
-          link.status = 'active';
+          link.status = 'broken';
           link.rel = 'not found';
           link.linkType = 'unknown';
           link.anchorText = 'not found';
-          link.errorDetails = link.errorDetails || '';
+          link.errorDetails = link.errorDetails || 'No useful data found';
+          link.overallStatus = 'Problem';
         }
-        // Исправляем логику: код 304 считается таким же успешным, как 200
-        link.overallStatus = (link.responseCode === '200' || link.responseCode === '304') && link.isIndexable && isLinkFound ? 'OK' : 'Problem';
-      } else {
-        link.status = 'broken';
-        link.rel = 'not found';
-        link.linkType = 'unknown';
-        link.anchorText = 'not found';
-        link.errorDetails = link.errorDetails || 'No useful data found';
-        link.overallStatus = 'Problem';
-      }
 
-      link.lastChecked = new Date();
-      await link.save();
-      console.log(`Finished analysis for link: ${link.url}, status: ${link.status}, overallStatus: ${link.overallStatus}`);
-      return link;
-      // await new Promise(resolve => setTimeout(resolve, 2000)); // Убираем лишнюю задержку
-    } finally {
-      if (page) {
-        await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
+        link.lastChecked = new Date();
+        await link.save();
+        console.log(`Finished analysis for link: ${link.url}, status: ${link.status}, overallStatus: ${link.overallStatus}`);
+        return link;
+      } catch (error) {
+        console.error(`Error on attempt ${attempt + 1} for ${link.url}:`, error.message);
+        attempt++;
+        if (attempt >= maxAttempts) {
+          console.error(`Max attempts reached for ${link.url}, marking as broken`);
+          link.status = 'broken';
+          link.errorDetails = `Failed after ${maxAttempts} attempts: ${error.message}`;
+          link.overallStatus = 'Problem';
+          await link.save();
+          return link;
+        }
+        // Закрываем браузер перед следующей попыткой
+        if (browser) {
+          await browser.close().catch(err => console.error(`Error closing browser on attempt ${attempt}: ${err}`));
+          browser = null;
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Задержка перед следующей попыткой
+      } finally {
+        // Закрываем страницу и браузер после каждой ссылки
+        if (page) {
+          await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
+        }
+        if (browser) {
+          await browser.close().catch(err => console.error(`Error closing browser for ${link.url}:`, err));
+        }
+        console.log(`Browser closed for ${link.url}`);
       }
     }
-  }
-};
+  };
 
-const processLinksInBatches = async (links, batchSize = 10, projectId, wss, spreadsheetId, taskId) => {
-  const { default: pLimitModule } = await import('p-limit');
-  const pLimit = pLimitModule;
-  const results = [];
-  const totalLinks = links.length;
 
-  console.log(`Starting processLinksInBatches: taskId=${taskId}, totalLinks=${totalLinks}`);
+          
+             
 
-  const limit = pLimit(10);
-  let processedLinks = 0;
-  let totalProcessingTime = 0;
-
-  if (!taskId) {
-    console.log('processLinksInBatches: Task ID is missing, cancelling analysis');
-    return results;
-  }
-
-  const task = await AnalysisTask.findById(taskId);
-  if (!task) {
-    console.log(`processLinksInBatches: Task ${taskId} not found during initialization, cancelling analysis`);
-    return results;
-  }
-
-  await AnalysisTask.findByIdAndUpdate(taskId, {
-    $set: {
-      progress: 0,
-      processedLinks: 0,
-      totalLinks,
-      estimatedTimeRemaining: 0,
-    },
-  });
-  console.log(`Initialized progress for task ${taskId}: totalLinks=${totalLinks}`);
-
-  for (let i = 0; i < totalLinks; i += batchSize) {
+  const processLinksInBatches = async (links, batchSize = 10, projectId, wss, spreadsheetId, taskId) => {
+    const { default: pLimitModule } = await import('p-limit');
+    const pLimit = pLimitModule;
+    const results = [];
+    const totalLinks = links.length;
+  
+    console.log(`Starting processLinksInBatches: taskId=${taskId}, totalLinks=${totalLinks}`);
+  
+    const limit = pLimit(3); // Ограничиваем до 3 параллельных браузеров
+    let processedLinks = 0;
+    let totalProcessingTime = 0;
+  
+    if (!taskId) {
+      console.log('processLinksInBatches: Task ID is missing, cancelling analysis');
+      return results;
+    }
+  
     const task = await AnalysisTask.findById(taskId);
     if (!task) {
-      console.log(`processLinksInBatches: Task ${taskId} not found - analysis likely cancelled`);
+      console.log(`processLinksInBatches: Task ${taskId} not found during initialization, cancelling analysis`);
       return results;
     }
-    if (task.status === 'cancelled') {
-      console.log(`processLinksInBatches: Task ${taskId} status is cancelled, stopping analysis`);
-      return results;
-    }
-
-    const batch = links.slice(i, i + batchSize);
-    console.log(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalLinks / batchSize)}: links ${i + 1} to ${Math.min(i + batchSize, totalLinks)}`);
-
-    const memoryUsage = process.memoryUsage();
-    console.log(`Memory usage before batch: RSS=${(memoryUsage.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
-
-    let browser;
-    try {
-      browser = await initializeBrowser();
+  
+    await AnalysisTask.findByIdAndUpdate(taskId, {
+      $set: {
+        progress: 0,
+        processedLinks: 0,
+        totalLinks,
+        estimatedTimeRemaining: 0,
+      },
+    });
+    console.log(`Initialized progress for task ${taskId}: totalLinks=${totalLinks}`);
+  
+    for (let i = 0; i < totalLinks; i += batchSize) {
+      const task = await AnalysisTask.findById(taskId);
+      if (!task) {
+        console.log(`processLinksInBatches: Task ${taskId} not found - analysis likely cancelled`);
+        return results;
+      }
+      if (task.status === 'cancelled') {
+        console.log(`processLinksInBatches: Task ${taskId} status is cancelled, stopping analysis`);
+        return results;
+      }
+  
+      const batch = links.slice(i, i + batchSize);
+      console.log(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalLinks / batchSize)}: links ${i + 1} to ${Math.min(i + batchSize, totalLinks)}`);
+  
+      const memoryUsage = process.memoryUsage();
+      console.log(`Memory usage before batch: RSS=${(memoryUsage.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`);
+  
       const startTime = Date.now();
-
+  
       const batchResults = await Promise.all(
         batch.map(link => limit(async () => {
           console.log(`Starting analysis for link: ${link.url}`);
           try {
-            const updatedLink = await checkLinkStatus(link, browser);
+            const updatedLink = await checkLinkStatus(link);
             console.log(`Finished analysis for link: ${link.url}, status: ${updatedLink.status}, overallStatus: ${updatedLink.overallStatus}`);
             return updatedLink;
           } catch (error) {
@@ -2898,28 +2957,27 @@ const processLinksInBatches = async (links, batchSize = 10, projectId, wss, spre
             link.status = 'broken';
             link.errorDetails = `Failed during analysis: ${error.message}`;
             link.overallStatus = 'Problem';
-
-            // Проверяем статус задачи перед сохранением
+  
             const currentTask = await AnalysisTask.findById(taskId);
             if (!currentTask || currentTask.status === 'cancelled') {
               console.log(`processLinksInBatches: Task ${taskId} cancelled during link processing, skipping save for ${link.url}`);
-              return link; // Пропускаем сохранение
+              return link;
             }
-
+  
             try {
               await link.save();
             } catch (saveError) {
               if (saveError.name === 'DocumentNotFoundError') {
                 console.log(`processLinksInBatches: FrontendLink ${link._id} not found, likely deleted during cancellation`);
-                return link; // Игнорируем ошибку
+                return link;
               }
-              throw saveError; // Перебрасываем другие ошибки
+              throw saveError;
             }
             return link;
           }
         }))
       );
-
+  
       processedLinks += batchResults.length;
       const batchTime = Date.now() - startTime;
       totalProcessingTime += batchTime;
@@ -2927,14 +2985,13 @@ const processLinksInBatches = async (links, batchSize = 10, projectId, wss, spre
       const remainingLinks = totalLinks - processedLinks;
       const estimatedTimeRemaining = Math.round((remainingLinks * avgTimePerLink) / 1000);
       const progress = Math.round((processedLinks / totalLinks) * 100);
-
-      // Проверяем статус задачи перед обновлением прогресса
+  
       const currentTask = await AnalysisTask.findById(taskId);
       if (!currentTask || currentTask.status === 'cancelled') {
         console.log(`processLinksInBatches: Task ${taskId} cancelled, skipping progress update`);
         return results;
       }
-
+  
       await AnalysisTask.findByIdAndUpdate(taskId, {
         $set: {
           progress,
@@ -2944,54 +3001,45 @@ const processLinksInBatches = async (links, batchSize = 10, projectId, wss, spre
         },
       });
       console.log(`Updated progress for task ${taskId}: progress=${progress}%, processedLinks=${processedLinks}, totalLinks=${totalLinks}, estimatedTimeRemaining=${estimatedTimeRemaining}s`);
-
+  
       results.push(...batchResults);
       console.log(`Batch completed: ${i + batch.length} of ${totalLinks} links processed`);
-
+  
       const memoryUsageAfter = process.memoryUsage();
       console.log(`Memory usage after batch: RSS=${(memoryUsageAfter.rss / 1024 / 1024).toFixed(2)}MB, HeapTotal=${(memoryUsageAfter.heapTotal / 1024 / 1024).toFixed(2)}MB, HeapUsed=${(memoryUsageAfter.heapUsed / 1024 / 1024).toFixed(2)}MB`);
-
-      await closeBrowser(browser);
-      browser = null;
+  
       global.gc && global.gc();
       await new Promise(resolve => setTimeout(resolve, 1000));
-    } catch (error) {
-      console.error(`Critical error in processLinksInBatches for batch ${Math.floor(i / batchSize) + 1}:`, error);
-      if (browser) {
-        await closeBrowser(browser);
-      }
-      throw error;
     }
-  }
-
-  const pendingLinks = await FrontendLink.find({ status: 'checking' });
-  if (pendingLinks.length > 0) {
-    console.log(`Found ${pendingLinks.length} links still in "checking" status after analysis. Updating...`);
-    await Promise.all(pendingLinks.map(async (link) => {
-      console.log(`Processing pending link: ${link.url}, userId=${link.userId}`);
-      if (!link.userId) {
-        console.error(`Link ${link.url} has no userId, deleting to avoid validation error`);
-        await FrontendLink.deleteOne({ _id: link._id });
-        return;
-      }
-      link.status = 'broken';
-      link.errorDetails = 'Analysis incomplete: status not updated';
-      link.overallStatus = 'Problem';
-      try {
-        await link.save();
-      } catch (saveError) {
-        if (saveError.name === 'DocumentNotFoundError') {
-          console.log(`processLinksInBatches: FrontendLink ${link._id} not found during pending link update, likely deleted`);
-        } else {
-          throw saveError;
+  
+    const pendingLinks = await FrontendLink.find({ status: 'checking' });
+    if (pendingLinks.length > 0) {
+      console.log(`Found ${pendingLinks.length} links still in "checking" status after analysis. Updating...`);
+      await Promise.all(pendingLinks.map(async (link) => {
+        console.log(`Processing pending link: ${link.url}, userId=${link.userId}`);
+        if (!link.userId) {
+          console.error(`Link ${link.url} has no userId, deleting to avoid validation error`);
+          await FrontendLink.deleteOne({ _id: link._id });
+          return;
         }
-      }
-      console.log(`Updated link ${link.url} to status: broken`);
-    }));
-  }
-
-  return results;
-};
+        link.status = 'broken';
+        link.errorDetails = 'Analysis incomplete: status not updated';
+        link.overallStatus = 'Problem';
+        try {
+          await link.save();
+        } catch (saveError) {
+          if (saveError.name === 'DocumentNotFoundError') {
+            console.log(`processLinksInBatches: FrontendLink ${link._id} not found during pending link update, likely deleted`);
+          } else {
+            throw saveError;
+          }
+        }
+        console.log(`Updated link ${link.url} to status: broken`);
+      }));
+    }
+  
+    return results;
+  };
 
 const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId, userId) => {
   try {
