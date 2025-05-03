@@ -7,7 +7,7 @@ module.exports = {
     theme: {
       extend: {
         screens: {
-          'custom-1300': '1300px', // Добавляем брейкпоинт для 1300px
+          'custom-1300': '1300px', // Добавsляем брейкпоинт для 1300px
         },
       },
     },
