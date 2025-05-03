@@ -1,3 +1,10 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.will-change-height {
+    will-change: height;
+  }
+body {
+    overscroll-behavior: none;
+}

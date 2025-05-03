@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { motion } from 'framer-motion';
@@ -21,6 +21,7 @@ const Dashboard = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 640);
   const navigate = useNavigate();
   const location = useLocation();
+  const sidebarRef = useRef(null);
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -47,14 +48,12 @@ const Dashboard = () => {
       } catch (err) {
         console.error('Dashboard: Error fetching user:', err);
         if (err.response?.status === 401) {
-          // Если токен недействителен (401), удаляем его и перенаправляем
           console.log('Dashboard: Invalid token, redirecting to /login');
           localStorage.removeItem('token');
           navigate('/login');
         } else {
-          // При сетевой ошибке или других ошибках не удаляем токен, а показываем ошибку
           console.log('Dashboard: Network or server error, keeping token');
-          setUser({ username: 'Error loading user', plan: 'unknown', isSuperAdmin: false }); // Заглушка
+          setUser({ username: 'Error loading user', plan: 'unknown', isSuperAdmin: false });
         }
       }
     };
@@ -108,112 +107,132 @@ const Dashboard = () => {
           </div>
         </div>
       </header>
-      <nav className="bg-green-600 text-white py-2 sm:hidden sticky top-16 z-40">
-        <div className="container max-w-7xl mx-auto px-4 flex gap-3 overflow-x-auto">
-          <button
-            onClick={() => navigate('/app/projects')}
-            className={`px-3 py-1 rounded flex items-center gap-2 text-sm ${isActive('/app/projects') ? 'bg-green-700' : 'hover:bg-green-700'}`}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18m-7 5h7" />
-            </svg>
-            Projects
-          </button>
-          <button
-            onClick={() => navigate('/app/profile')}
-            className={`px-3 py-1 rounded flex items-center gap-2 text-sm ${isActive('/app/profile') ? 'bg-green-700' : 'hover:bg-green-700'}`}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-            Profile
-          </button>
-          <button
-            onClick={handleLogout}
-            className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 flex items-center gap-2 text-sm"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            Logout
-          </button>
-        </div>
-      </nav>
-      <div className="flex flex-1 overflow-hidden">
+
+      <div className="flex flex-1">
+        {/* Sidebar для десктопа - Фиксированный, растянут на всю высоту */}
         <motion.aside
+          ref={sidebarRef}
           initial={{ width: isSidebarOpen ? 256 : 64 }}
           animate={{ width: isSidebarOpen ? 256 : 64 }}
           transition={{ duration: 0.3, ease: 'easeInOut' }}
-          className="bg-green-600 text-white p-4 flex-shrink-0 shadow-lg hidden sm:block sm:static sm:h-auto sm:z-auto"
+          className="bg-green-600 text-white flex-shrink-0 shadow-lg hidden sm:block fixed top-[72px] left-0 z-40 h-screen"
         >
-          <div className="flex justify-between items-center mb-6">
-            <h2 className={`text-2xl font-bold ${isSidebarOpen ? 'block' : 'hidden'} sm:${isSidebarOpen ? 'block' : 'hidden'}`}>Dashboard</h2>
-            <button
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="text-white focus:outline-none hidden sm:block"
-            >
-              {isSidebarOpen ? (
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-                </svg>
-              ) : (
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                </svg>
-              )}
-            </button>
+          <div className="flex flex-col h-full p-4">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className={`text-2xl font-bold ${isSidebarOpen ? 'block' : 'hidden'}`}>Dashboard</h2>
+              <button
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="text-white focus:outline-none"
+              >
+                {isSidebarOpen ? (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                  </svg>
+                ) : (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <nav className="flex-1 overflow-y-auto">
+              <ul>
+                <li className="mb-4">
+                  <button
+                    onClick={() => navigate('/app/projects')}
+                    className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/projects') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18m-7 5h7" />
+                    </svg>
+                    <span className={isSidebarOpen ? 'block' : 'hidden'}>Projects</span>
+                  </button>
+                </li>
+                <li className="mb-4">
+                  <button
+                    onClick={() => navigate('/app/profile')}
+                    className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/profile') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <span className={isSidebarOpen ? 'block' : 'hidden'}>Profile</span>
+                  </button>
+                </li>
+                <li className="mt-4">
+                  <div className={`text-sm text-green-200 mb-2 ${isSidebarOpen ? 'block' : 'hidden'}`}>
+                    Links Remaining: {linksRemaining}
+                  </div>
+                </li>
+                <li className="mt-auto">
+                  <div className={`text-sm text-green-200 mb-2 ${isSidebarOpen ? 'block' : 'hidden'}`}>
+                    Logged in as: {user.username}
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left p-2 hover:bg-red-700 rounded bg-red-600 flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    <span className={isSidebarOpen ? 'block' : 'hidden'}>Logout</span>
+                  </button>
+                </li>
+              </ul>
+            </nav>
           </div>
-          <nav className="flex-1">
-            <ul>
-              <li className="mb-4">
-                <button
-                  onClick={() => navigate('/app/projects')}
-                  className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/projects') ? 'bg-green-700' : 'hover:bg-green-700'}`}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18m-7 5h7" />
-                  </svg>
-                  <span className={isSidebarOpen ? 'block' : 'hidden'}>Projects</span>
-                </button>
-              </li>
-              <li className="mb-4">
-                <button
-                  onClick={() => navigate('/app/profile')}
-                  className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/profile') ? 'bg-green-700' : 'hover:bg-green-700'}`}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                  <span className={isSidebarOpen ? 'block' : 'hidden'}>Profile</span>
-                </button>
-              </li>
-              <li className="mt-4">
-                <div className={`text-sm text-green-200 mb-2 ${isSidebarOpen ? 'block' : 'hidden'}`}>
-                  Links Remaining: {linksRemaining}
-                </div>
-              </li>
-              <li className="mt-auto">
-                <div className={`text-sm text-green-200 mb-2 ${isSidebarOpen ? 'block' : 'hidden'}`}>
-                  Logged in as: {user.username}
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="w-full text-left p-2 hover:bg-red-700 rounded bg-red-600 flex items-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
-                  <span className={isSidebarOpen ? 'block' : 'hidden'}>Logout</span>
-                </button>
-              </li>
-            </ul>
-          </nav>
         </motion.aside>
-        <main className="flex-grow p-4 sm:p-6 w-full overflow-x-hidden">
+        <main
+          className={`flex-grow p-4 sm:p-6 w-full h-auto transition-all duration-300 ease-in-out
+            ${isSidebarOpen ? 'sm:ml-[256px] custom-1300:ml-[256px]' : 'sm:ml-[64px] custom-1300:ml-0'}`}
+        >
           <Outlet />
         </main>
       </div>
-      <footer className="bg-gray-800 text-white py-4 sm:py-6 z-10 relative">
+
+      {/* Таб-бар для мобильной версии */}
+      <motion.nav
+        initial={{ y: 50, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.3 }}
+        className="sm:hidden bg-green-600 text-white fixed bottom-0 left-0 right-0 shadow-lg z-50"
+      >
+        <div className="flex justify-around items-center h-16">
+          <motion.button
+            onClick={() => navigate('/app/projects')}
+            className={`flex flex-col items-center justify-center flex-1 h-full ${isActive('/app/projects') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+            whileTap={{ scale: 0.95 }}
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18m-7 5h7" />
+            </svg>
+            <span className="text-xs mt-1">Projects</span>
+          </motion.button>
+          <motion.button
+            onClick={() => navigate('/app/profile')}
+            className={`flex flex-col items-center justify-center flex-1 h-full ${isActive('/app/profile') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+            whileTap={{ scale: 0.95 }}
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            <span className="text-xs mt-1">Profile</span>
+          </motion.button>
+          <motion.button
+            onClick={handleLogout}
+            className="flex flex-col items-center justify-center flex-1 h-full bg-red-600 hover:bg-red-700"
+            whileTap={{ scale: 0.95 }}
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            <span className="text-xs mt-1">Logout</span>
+          </motion.button>
+        </div>
+      </motion.nav>
+
+      {/* Футер - только для десктопа */}
+      <footer className="sm:block hidden bg-gray-800 text-white py-4 sm:py-6 z-50 relative">
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 text-center">
           <p className="text-sm sm:text-base">© 2025 Link-Check-Pro.Top | All rights reserved.</p>
           <p className="mt-2 text-sm sm:text-base">

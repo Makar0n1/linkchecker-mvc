@@ -5,7 +5,11 @@ module.exports = {
       "./src/frontend/**/*.{js,jsx,ts,tsx}" // Указываем пути к файлам фронта
     ],
     theme: {
-      extend: {}
+      extend: {
+        screens: {
+          'custom-1300': '1300px', // Добавляем брейкпоинт для 1300px
+        },
+      },
     },
     plugins: []
   };
