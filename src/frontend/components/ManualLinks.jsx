@@ -25,6 +25,28 @@ const ManualLinks = ({
   const [checkingLinks, setCheckingLinks] = useState(new Set());
   const [hoveredLinkId, setHoveredLinkId] = useState(null);
   const [hoveredCanonicalId, setHoveredCanonicalId] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isCollapsing, setIsCollapsing] = useState(false);
+  const linksPerPage = 10;
+
+  // Вычисляем индекс последней ссылки для отображения (1–10, 1–20, 1–30 и т.д.)
+  const indexOfLastLink = currentPage * linksPerPage;
+  const displayedLinks = links.slice(0, Math.min(indexOfLastLink, links.length));
+
+  // Проверяем, есть ли ещё ссылки для загрузки
+  const hasMoreLinks = indexOfLastLink < links.length;
+
+  const handleLoadMore = () => {
+    setCurrentPage((prevPage) => prevPage + 1);
+  };
+
+  const handleCollapse = () => {
+    setIsCollapsing(true);
+    setTimeout(() => {
+      setCurrentPage(1);
+      setIsCollapsing(false);
+    }, 500); // Задержка соответствует длительности анимации (0.5s)
+  };
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -40,11 +62,10 @@ const ManualLinks = ({
       const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      // Убедимся, что response.data — это массив, иначе установим пустой массив
       setLinks(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch links');
-      setLinks([]); // В случае ошибки устанавливаем пустой массив
+      setLinks([]);
     }
   };
 
@@ -65,12 +86,12 @@ const ManualLinks = ({
     };
 
     ws.onclose = () => {
-      setTimeout(connectWebSocket, 5000); // Переподключаемся через 5 секунд
+      setTimeout(connectWebSocket, 5000);
     };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      ws.close(); // Закрываем соединение, чтобы сработал onclose и переподключение
+      ws.close();
     };
 
     return ws;
@@ -79,7 +100,6 @@ const ManualLinks = ({
   useEffect(() => {
     fetchLinks();
 
-    // Подключение к WebSocket
     const ws = connectWebSocket();
 
     return () => {
@@ -149,7 +169,7 @@ const ManualLinks = ({
 
   return (
     <motion.div
-      className="max-w-full mx-auto"
+      className="max-w-full mx-auto h-auto"
       initial="hidden"
       animate="visible"
       variants={fadeInUp}
@@ -206,7 +226,7 @@ const ManualLinks = ({
       </div>
       {error && <p className="text-red-500 mb-6 text-sm">{error}</p>}
       <div className="rounded-lg shadow-sm overflow-x-auto">
-        <table className="w-full bg-white border border-gray-200 table-fixed min-w-[1200px]">
+        <table className="w-full bg-white border border-gray-200 table-auto">
           <thead>
             <tr className="bg-green-50 text-gray-700 text-xs sm:text-sm">
               <th className="p-2 sm:p-3 text-left w-10">#</th>
@@ -227,7 +247,7 @@ const ManualLinks = ({
                 <td colSpan="10" className="p-2 sm:p-3 text-center text-gray-500 text-sm sm:text-base">No links added yet</td>
               </tr>
             ) : (
-              links.map((link, index) => {
+              displayedLinks.map((link, index) => {
                 const isCanonicalMismatch = link.canonicalUrl && link.url.toLowerCase().replace(/\/$/, '') !== link.canonicalUrl.toLowerCase().replace(/\/$/, '');
                 const status = getStatus(link);
                 const truncatedUrl = truncateUrl(link.url);
@@ -236,7 +256,13 @@ const ManualLinks = ({
                 const isCanonicalTruncated = link.canonicalUrl && link.canonicalUrl !== truncatedCanonicalUrl;
 
                 return (
-                  <tr key={link._id} className="border-t border-gray-200 hover:bg-gray-50 transition-colors">
+                  <motion.tr
+                    key={link._id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: isCollapsing ? 0 : 1, y: isCollapsing ? 20 : 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="border-t border-gray-200 hover:bg-gray-50 transition-colors"
+                  >
                     <td className="p-2 sm:p-3 text-gray-700 text-center text-sm sm:text-base whitespace-nowrap">{index + 1}</td>
                     <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base truncate relative">
                       <span
@@ -244,13 +270,11 @@ const ManualLinks = ({
                         onMouseEnter={() => {
                           if (isUrlTruncated) {
                             setTimeout(() => {
-                              setHoveredLinkId(link._id);
+                              handleMouseEnterLink(link._id);
                             }, 500);
                           }
                         }}
-                        onMouseLeave={() => {
-                          setHoveredLinkId(null);
-                        }}
+                        onMouseLeave={handleMouseLeaveLink}
                       >
                         {truncatedUrl}
                       </span>
@@ -327,13 +351,11 @@ const ManualLinks = ({
                         onMouseEnter={() => {
                           if (isCanonicalTruncated) {
                             setTimeout(() => {
-                              setHoveredCanonicalId(`canonical-${link._id}`);
+                              handleMouseEnterCanonical(`canonical-${link._id}`);
                             }, 500);
                           }
                         }}
-                        onMouseLeave={() => {
-                          setHoveredCanonicalId(null);
-                        }}
+                        onMouseLeave={handleMouseLeaveCanonical}
                       >
                         {truncatedCanonicalUrl}
                       </span>
@@ -360,12 +382,32 @@ const ManualLinks = ({
                         Delete
                       </button>
                     </td>
-                  </tr>
+                  </motion.tr>
                 );
               })
             )}
           </tbody>
         </table>
+      </div>
+      <div className="mt-6 flex justify-center gap-3">
+        {hasMoreLinks && (
+          <button
+            onClick={handleLoadMore}
+            disabled={loading}
+            className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
+          >
+            Load More
+          </button>
+        )}
+        {currentPage > 1 && (
+          <button
+            onClick={handleCollapse}
+            disabled={loading}
+            className="bg-gray-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-gray-600 disabled:bg-gray-300 transition-colors shadow-md text-sm sm:text-base"
+          >
+            Collapse
+          </button>
+        )}
       </div>
     </motion.div>
   );
