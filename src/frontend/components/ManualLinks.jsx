@@ -1,26 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { saveAs } from 'file-saver';
 
 const ManualLinks = ({
   projectId,
   links,
   setLinks,
-  urlList,
-  setUrlList,
-  targetDomain,
-  setTargetDomain,
   loading,
   setLoading,
   error,
   setError,
-  handleAddLinks,
   handleCheckLinks,
   handleDeleteLink,
   handleDeleteAllLinks,
+  isAddLinksModalOpen,
+  setIsAddLinksModalOpen,
+  urlList,
+  setUrlList,
+  targetDomain,
+  setTargetDomain,
+  handleAddLinks,
+  domainSummary,
+  avgLoadTime,
 }) => {
-  const navigate = useNavigate();
   const [copiedField, setCopiedField] = useState(null);
   const [checkingLinks, setCheckingLinks] = useState(new Set());
   const [hoveredLinkId, setHoveredLinkId] = useState(null);
@@ -31,18 +34,15 @@ const ManualLinks = ({
   const buttonsRef = React.useRef(null);
   const linksPerPage = 10;
 
-  // Вычисляем индекс последней ссылки для отображения (1–10, 1–20, 1–30 и т.д.)
   const indexOfLastLink = currentPage * linksPerPage;
   const displayedLinks = links.slice(0, Math.min(indexOfLastLink, links.length));
 
-  // Проверяем, есть ли ещё ссылки для загрузки
   const hasMoreLinks = indexOfLastLink < links.length;
 
   const handleLoadMore = () => {
     setCurrentPage((prevPage) => prevPage + 1);
   };
 
-  // Кастомная функция скролла с easing
   const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
   const smoothScrollTo = (target, duration = 1500) => {
@@ -81,15 +81,13 @@ const ManualLinks = ({
     setTimeout(() => {
       setCurrentPage(1);
       setIsCollapsing(false);
-      // Плавный скролл после анимации
       setTimeout(() => {
-        // Скроллим к кнопкам "Check All Links" и "Delete All Links"
         if (buttonsRef.current) {
           const elementTop = buttonsRef.current.getBoundingClientRect().top + window.scrollY;
           smoothScrollTo(elementTop, 1500);
         }
-      }, 100); // Небольшая задержка, чтобы анимация завершилась
-    }, 500); // Задержка соответствует длительности анимации (0.5s)
+      }, 100);
+    }, 500);
   };
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
@@ -195,6 +193,37 @@ const ManualLinks = ({
     }
   };
 
+  const handleExportToCSV = () => {
+    if (!links || links.length === 0) return;
+
+    const csvRows = [];
+    const headers = [
+      '#,URL,Target Domain,Status,Response Code,Indexable,Rel,Link Type,Canonical URL',
+    ];
+    csvRows.push(headers.join(','));
+
+    links.forEach((link, index) => {
+      const status = getStatus(link);
+      const row = [
+        index + 1,
+        `"${link.url}"`,
+        link.targetDomains && link.targetDomains.length > 0 ? `"${link.targetDomains.join(', ')}"` : 'N/A',
+        status,
+        status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.responseCode || 'N/A',
+        status === 'Not checked yet...' || status === 'Checking' ? 'N/A' :
+          link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
+        status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.rel || 'none',
+        status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.rel === 'not found' ? 'not found' : link.linkType || 'not found',
+        link.canonicalUrl ? `"${link.canonicalUrl}"` : 'None',
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    saveAs(blob, `links_analysis_${projectId}.csv`);
+  };
+
   const handleMouseEnterLink = (linkId) => {
     setHoveredLinkId(linkId);
   };
@@ -218,77 +247,100 @@ const ManualLinks = ({
       animate="visible"
       variants={fadeInUp}
     >
-      <button
-        onClick={() => navigate('/app/projects')}
-        className="mb-4 flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-        </svg>
-        Back to Projects
-      </button>
+      <div ref={buttonsRef} className="mb-6 flex items-center gap-3 sm:gap-4 border-b border-gray-200 pb-4">
+  {/* Mobile Buttons (in a row) */}
+  <div className="sm:hidden flex overflow-x-auto gap-3">
+    <button
+      onClick={() => wrappedHandleCheckLinks(projectId)}
+      disabled={loading}
+      className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm whitespace-nowrap"
+    >
+      {loading ? 'Checking...' : 'Check All'}
+    </button>
+    <button
+      onClick={() => handleDeleteAllLinks(projectId)}
+      disabled={loading || links.length === 0}
+      className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm whitespace-nowrap"
+    >
+      {loading ? 'Deleting...' : 'Delete All'}
+    </button>
+    <button
+      onClick={() => setIsAddLinksModalOpen(true)}
+      className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 transition-colors shadow-md"
+    >
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+      </svg>
+    </button>
+  </div>
 
-      <form onSubmit={(e) => handleAddLinks(e, projectId)} className="mb-6 flex flex-col gap-4">
-        <textarea
-          value={urlList}
-          onChange={(e) => setUrlList(e.target.value)}
-          placeholder="Enter URLs (one per line)"
-          className="w-full h-28 p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 resize-none text-sm sm:text-base"
-          disabled={loading}
-        />
-        <input
-          type="text"
-          value={targetDomain}
-          onChange={(e) => setTargetDomain(e.target.value)}
-          placeholder="Target Domain (e.g., example.com)"
-          className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 text-sm sm:text-base"
-          disabled={loading}
-        />
+  {/* Desktop Buttons (in a row with + justified to the right) */}
+  <div className="hidden sm:flex items-center justify-between gap-4 w-full">
+    <div className="flex gap-4">
+      <button
+        onClick={() => wrappedHandleCheckLinks(projectId)}
+        disabled={loading}
+        className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
+      >
+        {loading ? 'Checking...' : 'Check All Links'}
+      </button>
+      <button
+        onClick={() => handleDeleteAllLinks(projectId)}
+        disabled={loading || links.length === 0}
+        className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm sm:text-base"
+      >
+        {loading ? 'Deleting...' : 'Delete All Links'}
+      </button>
+      
+      <div className="min-w-[100px] p-2">
+          <h3 className="text-[10px] font-semibold text-gray-600">Unique Domains</h3>
+          <p className="text-sm font-bold text-gray-800">{domainSummary.uniqueDomains}</p>
+        </div>
+        <div className="min-w-[100px] p-2">
+          <h3 className="text-[10px] font-semibold text-gray-600">Total Links</h3>
+          <p className="text-sm font-bold text-gray-800">{domainSummary.totalLinks}</p>
+        </div>
+        <div className="min-w-[100px] p-2">
+          <h3 className="text-[10px] font-semibold text-gray-600">Avg Load Time</h3>
+          <p className="text-sm font-bold text-gray-800">{avgLoadTime} s</p>
+        </div>
+    </div>
+    <div className="flex items-center gap-4">
+      
+      <div className="flex overflow-x-auto gap-3 my-2">
         <button
-          type="submit"
-          disabled={loading}
-          className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
-        >
-          {loading ? 'Adding...' : 'Add Links'}
-        </button>
-      </form>
-      <div ref={buttonsRef} className="mb-6 flex flex-col sm:flex-row gap-3 sm:gap-4">
-        <button
-          onClick={() => wrappedHandleCheckLinks(projectId)}
-          disabled={loading}
-          className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
-        >
-          {loading ? 'Checking...' : 'Check All Links'}
-        </button>
-        <button
-          onClick={() => handleDeleteAllLinks(projectId)}
-          disabled={loading || links.length === 0}
-          className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm sm:text-base"
-        >
-          {loading ? 'Deleting...' : 'Delete All Links'}
-        </button>
+        onClick={() => setIsAddLinksModalOpen(true)}
+        className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 transition-colors shadow-md"
+      >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+        </svg>
+      </button>
       </div>
+    </div>
+  </div>
+</div>
       {error && <p className="text-red-500 mb-6 text-sm">{error}</p>}
       <div className="rounded-lg shadow-sm overflow-x-auto">
-        <table ref={tableRef} className="w-full bg-white border border-gray-200 table-fixed min-w-[1200px]">
+        <table ref={tableRef} className="w-full max-w-full bg-white border border-gray-200 table-auto min-w-full">
           <thead>
             <tr className="bg-green-50 text-gray-700 text-xs sm:text-sm">
-              <th className="p-2 sm:p-3 text-left w-10">#</th>
-              <th className="p-2 sm:p-3 text-left w-48">URL</th>
-              <th className="p-2 sm:p-3 text-left w-40">Target Domain</th>
-              <th className="p-2 sm:p-3 text-left w-24">Status</th>
-              <th className="p-2 sm:p-3 text-left w-28">Response Code</th>
-              <th className="p-2 sm:p-3 text-left w-24">Indexable</th>
-              <th className="p-2 sm:p-3 text-left w-20">Rel</th>
-              <th className="p-2 sm:p-3 text-left w-24">Link Type</th>
-              <th className="p-2 sm:p-3 text-left w-40">Canonical URL</th>
-              <th className="p-2 sm:p-3 text-left w-24">Action</th>
+              <th className="p-2 sm:p-3 text-left min-w-[40px]">#</th>
+              <th className="p-2 sm:p-3 text-left min-w-[200px]">URL</th>
+              <th className="p-2 sm:p-3 text-left min-w-[150px]">Target Domain</th>
+              <th className="p-2 sm:p-3 text-left min-w-[100px]">Status</th>
+              <th className="p-2 sm:p-3 text-left min-w-[120px]">Response Code</th>
+              <th className="p-2 sm:p-3 text-left min-w-[100px]">Indexable</th>
+              <th className="p-2 sm:p-3 text-left min-w-[80px]">Rel</th>
+              <th className="p-2 sm:p-3 text-left min-w-[100px]">Link Type</th>
+              <th className="p-2 sm:p-3 text-left min-w-[200px]">Canonical URL</th>
+              <th className="p-2 sm:p-3 text-left min-w-[100px]">Action</th>
             </tr>
           </thead>
           <tbody>
             {!Array.isArray(links) || links.length === 0 ? (
               <tr>
-                <td colSpan="10" className="p-2 sm:p-3 text-center text-gray-500 text-sm sm:text-base">No links added yet</td>
+                <td colSpan="10" className="p-2 sm:p-3 text-center text-gray-500 text-xs sm:text-sm">No links added yet</td>
               </tr>
             ) : (
               displayedLinks.map((link, index) => {
@@ -307,8 +359,8 @@ const ManualLinks = ({
                     transition={{ duration: 0.5 }}
                     className="border-t border-gray-200 hover:bg-gray-50 transition-colors"
                   >
-                    <td className="p-2 sm:p-3 text-gray-700 text-center text-sm sm:text-base whitespace-nowrap">{index + 1}</td>
-                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base truncate relative">
+                    <td className="p-2 sm:p-3 text-gray-700 text-center text-xs sm:text-sm whitespace-nowrap">{index + 1}</td>
+                    <td className="p-2 sm:p-3 text-gray-700 text-xs sm:text-sm truncate relative">
                       <span
                         className="truncate block"
                         onMouseEnter={() => {
@@ -334,7 +386,7 @@ const ManualLinks = ({
                         {copiedField === `url-${link._id}` ? 'Copied!' : 'Copy'}
                       </button>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base truncate">
+                    <td className="p-2 sm:p-3 text-gray-700 text-xs sm:text-sm truncate">
                       {link.targetDomains && link.targetDomains.length > 0 ? link.targetDomains.join(', ') : 'N/A'}
                     </td>
                     <td className="p-2 sm:p-3 whitespace-nowrap">
@@ -349,7 +401,7 @@ const ManualLinks = ({
                         {status}
                       </span>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base whitespace-nowrap">
+                    <td className="p-2 sm:p-3 text-gray-700 text-xs sm:text-sm whitespace-nowrap">
                       {status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.responseCode || 'N/A'}
                     </td>
                     <td className="p-2 sm:p-3 whitespace-nowrap">
@@ -375,7 +427,7 @@ const ManualLinks = ({
                         )}
                       </span>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 whitespace-wrap text-sm sm:text-base">
+                    <td className="p-2 sm:p-3 text-gray-700 whitespace-wrap text-xs sm:text-sm">
                       {status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.rel || 'none'}
                     </td>
                     <td className="p-2 sm:p-3 text-center whitespace-wrap">
@@ -389,7 +441,7 @@ const ManualLinks = ({
                         {status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.rel === 'not found' ? 'not found' : link.linkType || 'not found'}
                       </span>
                     </td>
-                    <td className="p-2 sm:p-3 text-gray-700 text-sm sm:text-base truncate relative">
+                    <td className="p-2 sm:p-3 text-gray-700 text-xs sm:text-sm truncate relative">
                       <span
                         className="truncate block"
                         onMouseEnter={() => {
@@ -421,7 +473,7 @@ const ManualLinks = ({
                       <button
                         onClick={() => handleDeleteLink(link._id, projectId)}
                         disabled={loading}
-                        className="bg-red-500 text-white px-2 sm:px-3 py-1 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors text-sm sm:text-base"
+                        className="bg-red-500 text-white px-2 sm:px-3 py-1 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors text-xs sm:text-sm"
                       >
                         Delete
                       </button>

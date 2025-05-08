@@ -16,6 +16,7 @@ router.post('/refresh-token', linkController.refreshToken);
 router.post('/projects', linkController.createProject);
 router.get('/projects', linkController.getProjects);
 router.delete('/projects/:projectId', linkController.deleteProject);
+router.get('/projects/:projectId/stats', linkController.getProjectStats); // Новый маршрут для статистики
 
 // Ссылки (в рамках проекта)
 router.post('/:projectId/links', linkController.addLinks);

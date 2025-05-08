@@ -773,16 +773,6 @@ const GoogleSheets = ({
       animate="visible"
       variants={fadeInUp}
     >
-      <button
-        onClick={() => navigate('/app/projects')}
-        className="mb-4 flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-        </svg>
-        Back to Projects
-      </button>
-
       {isTokenInvalid && (
         <div className="mb-4 p-3 bg-yellow-100 text-yellow-700 rounded-lg">
           Your session has expired. Please log in again to continue.
