@@ -4,7 +4,7 @@ const path = require('path');
 const sheets = google.sheets({
   version: 'v4',
   auth: new google.auth.GoogleAuth({
-    keyFile: path.resolve(__dirname, '../service-account.json'),
+    keyFile: path.resolve(__dirname, '../../../service-account.json'),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   }),
 });
@@ -52,6 +52,7 @@ const importFromGoogleSheets = async (spreadsheetId, defaultTargetDomain, urlCol
 
 const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeStart, resultRangeEnd, sheetName) => {
   try {
+    // Подготовка данных для экспорта
     const dataMap = {};
     links.forEach(link => {
       const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
@@ -65,6 +66,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
       ];
     });
 
+    // Определяем диапазоны для записи
     const rowIndices = Object.keys(dataMap).map(Number).sort((a, b) => a - b);
     if (rowIndices.length === 0) {
       console.log(`No data to export for spreadsheet ${spreadsheetId}`);
@@ -78,6 +80,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
 
     for (const rowIndex of rowIndices) {
       if (rowIndex !== previousRow + 1) {
+        // Завершаем текущий диапазон и начинаем новый
         if (currentValues.length > 0) {
           const range = `${sheetName}!${resultRangeStart}${currentStartRow}:${resultRangeEnd}${previousRow}`;
           batchUpdates.push({
@@ -92,6 +95,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
       previousRow = rowIndex;
     }
 
+    // Добавляем последний диапазон
     if (currentValues.length > 0) {
       const range = `${sheetName}!${resultRangeStart}${currentStartRow}:${resultRangeEnd}${previousRow}`;
       batchUpdates.push({
@@ -102,6 +106,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
 
     console.log(`Exporting ${links.length} rows to ${spreadsheetId}: ${JSON.stringify(batchUpdates)}`);
 
+    // Формируем batch-запрос
     const request = {
       spreadsheetId,
       resource: {
@@ -110,6 +115,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
       },
     };
 
+    // Отправляем batch-запрос
     const response = await sheets.spreadsheets.values.batchUpdate(request);
     console.log(`Successfully updated ${response.data.totalUpdatedCells} cells in Google Sheets`);
   } catch (error) {
@@ -121,7 +127,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
 const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, resultRangeEnd) => {
   console.log(`Formatting sheet ${spreadsheetId} (gid: ${gid})...`);
   const startColumnIndex = columnLetterToIndex(resultRangeStart);
-  const endColumnIndex = columnLetterToIndex(resultRangeEnd) + 1;
+  const endColumnIndex = columnLetterToIndex(resultRangeEnd) + 1; // +1, так как endColumnIndex не включён
 
   const requests = [
     {

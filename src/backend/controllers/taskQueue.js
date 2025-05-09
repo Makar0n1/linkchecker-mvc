@@ -4,7 +4,6 @@ const Project = require('../models/Project');
 const FrontendLink = require('../models/FrontendLink');
 const Spreadsheet = require('../models/Spreadsheet');
 const { processLinksInBatches } = require('./linkAnalysisController');
-const { analyzeSpreadsheet } = require('./spreadsheetController');
 
 const MAX_CONCURRENT_ANALYSES = 2;
 
@@ -49,7 +48,9 @@ analysisQueue.error((err, task) => {
   console.error(`Error in analysis queue for project ${task.projectId}, type: ${task.type}:`, err);
 });
 
-const loadPendingTasks = async () => {
+const cancelAnalysis = { value: false }; // Изменяем на объект
+
+const loadPendingTasks = async (analyzeSpreadsheet) => {
   try {
     const pendingTasks = await AnalysisTask.find({ status: 'pending' });
     console.log(`Found ${pendingTasks.length} pending tasks to process`);
@@ -75,6 +76,7 @@ const loadPendingTasks = async () => {
           res: null,
           userId: task.data.userId,
           wss: null,
+          data: task.data,
           handler: (task, callback) => {
             console.log(`checkLinks handler: Starting for task ${task.taskId}, userId=${task.userId}, type=${typeof task.userId}`);
             let project;
@@ -166,6 +168,7 @@ const loadPendingTasks = async () => {
           userId: userId,
           wss: null,
           spreadsheetId: task.data.spreadsheetId,
+          data: task.data,
           handler: (task, callback) => {
             console.log(`loadPendingTasks handler: Processing runSpreadsheetAnalysis task ${task.taskId}, userId=${task.userId}, type=${typeof task.userId}`);
             let project;
@@ -181,12 +184,12 @@ const loadPendingTasks = async () => {
                 return spreadsheet.save();
               })
               .then(() => {
-                cancelAnalysis = false;
-                console.log(`loadPendingTasks: Calling analyzeSpreadsheet with userId=${task.userId} for task ${task._id}`);
+                cancelAnalysis.value = false; // Изменяем свойство value
+                console.log(`loadPendingTasks: Calling analyzeSpreadsheet with userId=${task.userId} for task ${task.taskId}`);
                 return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss, task.taskId, task.userId);
               })
               .then(() => {
-                if (cancelAnalysis) {
+                if (cancelAnalysis.value) {
                   throw new Error('Analysis cancelled');
                 }
                 spreadsheet.status = 'completed';
@@ -241,8 +244,6 @@ const loadPendingTasks = async () => {
     console.error('Error loading pending tasks:', error);
   }
 };
-
-let cancelAnalysis = false;
 
 module.exports = {
   analysisQueue,

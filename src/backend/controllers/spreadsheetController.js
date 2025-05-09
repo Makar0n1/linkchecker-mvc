@@ -6,6 +6,7 @@ const FrontendLink = require('../models/FrontendLink');
 const mongoose = require('mongoose');
 const { importFromGoogleSheets, exportLinksToGoogleSheetsBatch, formatGoogleSheet } = require('./googleSheetsUtils');
 const { analysisQueue, cancelAnalysis } = require('./taskQueue');
+const { processLinksInBatches } = require('./linkAnalysisController');
 
 const addSpreadsheet = async (req, res) => {
   const { projectId } = req.params;
@@ -252,156 +253,160 @@ const runSpreadsheetAnalysis = async (req, res) => {
 
   console.log(`runSpreadsheetAnalysis: Starting for project ${projectId}, spreadsheet ${spreadsheetId}, userId=${req.userId}, type=${typeof req.userId}`);
 
-  const user = await User.findById(req.userId);
-  if (!user) {
-    console.error(`runSpreadsheetAnalysis: User not found for userId=${req.userId}`);
-    return res.status(404).json({ error: 'User not found' });
-  }
-  if (!user.isSuperAdmin && user.plan === 'free') {
-    console.log(`runSpreadsheetAnalysis: Google Sheets integration is not available on Free plan for user ${req.userId}`);
-    return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
-  }
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) {
+      console.error(`runSpreadsheetAnalysis: User not found for userId=${req.userId}`);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (!user.isSuperAdmin && user.plan === 'free') {
+      console.log(`runSpreadsheetAnalysis: Google Sheets integration is not available on Free plan for user ${req.userId}`);
+      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
+    }
 
-  const project = await Project.findOne({ _id: projectId, userId: req.userId });
-  if (!project) {
-    console.error(`runSpreadsheetAnalysis: Project ${projectId} not found for user ${req.userId}`);
-    return res.status(404).json({ error: 'Project not found' });
-  }
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) {
+      console.error(`runSpreadsheetAnalysis: Project ${projectId} not found for user ${req.userId}`);
+      return res.status(404).json({ error: 'Project not found' });
+    }
 
-  if (project.isAnalyzingSpreadsheet) {
-    console.log(`runSpreadsheetAnalysis: Google Sheets analysis already in progress for project ${projectId}, rejecting request`);
-    return res.status(409).json({ error: 'Google Sheets analysis is already in progress for this project' });
-  }
+    if (project.isAnalyzingSpreadsheet) {
+      console.log(`runSpreadsheetAnalysis: Google Sheets analysis already in progress for project ${projectId}, rejecting request`);
+      return res.status(409).json({ error: 'Google Sheets analysis is already in progress for this project' });
+    }
 
-  const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId: req.userId });
-  if (!spreadsheet) {
-    console.error(`runSpreadsheetAnalysis: Spreadsheet ${spreadsheetId} not found for project ${projectId}, user ${req.userId}`);
-    return res.status(404).json({ error: 'Spreadsheet not found' });
-  }
+    const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetId, projectId, userId: req.userId });
+    if (!spreadsheet) {
+      console.error(`runSpreadsheetAnalysis: Spreadsheet ${spreadsheetId} not found for project ${projectId}, user ${req.userId}`);
+      return res.status(404).json({ error: 'Spreadsheet not found' });
+    }
 
-  const planLinkLimits = {
-    basic: 1000,
-    pro: 5000,
-    premium: 10000,
-    enterprise: 50000,
-  };
-  const maxLinks = user.isSuperAdmin ? 50000 : planLinkLimits[user.plan];
+    const planLinkLimits = {
+      basic: 1000,
+      pro: 5000,
+      premium: 10000,
+      enterprise: 50000,
+    };
+    const maxLinks = user.isSuperAdmin ? 50000 : planLinkLimits[user.plan];
 
-  console.log(`Adding runSpreadsheetAnalysis task to queue for spreadsheet ${spreadsheetId} in project ${projectId} with userId=${req.userId}`);
+    console.log(`Adding runSpreadsheetAnalysis task to queue for spreadsheet ${spreadsheetId} in project ${projectId} with userId=${req.userId}`);
 
-  if (user.activeTasks.has(projectId)) {
-    console.log(`runSpreadsheetAnalysis: Found existing task for project ${projectId}, removing it`);
-    await AnalysisTask.findByIdAndDelete(user.activeTasks.get(projectId));
-    user.activeTasks.delete(projectId);
+    if (user.activeTasks.has(projectId)) {
+      console.log(`runSpreadsheetAnalysis: Found existing task for project ${projectId}, removing it`);
+      await AnalysisTask.findByIdAndDelete(user.activeTasks.get(projectId));
+      user.activeTasks.delete(projectId);
+      await user.save();
+    }
+
+    const task = new AnalysisTask({
+      projectId,
+      userId: req.userId,
+      type: 'runSpreadsheetAnalysis',
+      status: 'pending',
+      data: { userId: req.userId, spreadsheetId, maxLinks },
+    });
+    await task.save();
+
+    user.activeTasks.set(projectId, task._id.toString());
     await user.save();
-  }
+    console.log(`runSpreadsheetAnalysis: Updated activeTasks for user ${req.userId}, activeTasks: ${JSON.stringify(user.activeTasks)}`);
 
-  const task = new AnalysisTask({
-    projectId,
-    userId: req.userId,
-    type: 'runSpreadsheetAnalysis',
-    status: 'pending',
-    data: { userId: req.userId, spreadsheetId, maxLinks },
-  });
-  await task.save();
+    await FrontendLink.updateMany(
+      { projectId, userId: req.userId, spreadsheetId, source: 'google_sheets' },
+      { $set: { taskId: task._id } }
+    );
+    console.log(`Updated FrontendLinks with taskId=${task._id} for spreadsheet ${spreadsheetId} in project ${projectId}`);
 
-  user.activeTasks.set(projectId, task._id.toString());
-  await user.save();
-  console.log(`runSpreadsheetAnalysis: Updated activeTasks for user ${req.userId}, activeTasks: ${JSON.stringify(user.activeTasks)}`);
-
-  await FrontendLink.updateMany(
-    { projectId, userId: req.userId, spreadsheetId, source: 'google_sheets' },
-    { $set: { taskId: task._id } }
-  );
-  console.log(`Updated FrontendLinks with taskId=${task._id} for spreadsheet ${spreadsheetId} in project ${projectId}`);
-
-  analysisQueue.push({
-    taskId: task._id,
-    projectId,
-    type: 'runSpreadsheetAnalysis',
-    req,
-    res,
-    userId: req.userId,
-    wss: req.wss,
-    spreadsheetId,
-    handler: (task, callback) => {
-      console.log(`runSpreadsheetAnalysis handler: Processing task ${task.taskId} for project ${task.projectId}, userId=${task.userId}, type=${typeof task.userId}`);
-      let project;
-      Project.findOne({ _id: task.projectId, userId: task.userId })
-        .then(proj => {
-          if (!proj) throw new Error('Project not found in handler');
-          project = proj;
-          project.isAnalyzingSpreadsheet = true;
-          return project.save();
-        })
-        .then(() => {
-          spreadsheet.status = 'checking';
-          return spreadsheet.save();
-        })
-        .then(() => {
-          return analyzeSpreadsheet(spreadsheet, maxLinks, task.projectId, task.wss, task.taskId, task.userId);
-        })
-        .then(() => {
-          spreadsheet.status = 'completed';
-          spreadsheet.lastRun = new Date();
-          spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
-          return spreadsheet.save();
-        })
-        .then(() => {
-          console.log(`Finished spreadsheet analysis for spreadsheet ${spreadsheetId}`);
-          if (!task.res.headersSent) {
-            task.res.json({ message: 'Analysis completed' });
-          }
-          const wssLocal = task.wss;
-          wssLocal.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
-              client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId, spreadsheetId: task.spreadsheetId }));
+    analysisQueue.push({
+      taskId: task._id,
+      projectId,
+      type: 'runSpreadsheetAnalysis',
+      req,
+      res,
+      userId: req.userId,
+      wss: req.wss,
+      spreadsheetId,
+      data: { userId: req.userId, spreadsheetId, maxLinks },
+      handler: (task, callback) => {
+        console.log(`runSpreadsheetAnalysis handler: Processing task ${task.taskId} for project ${task.projectId}, userId=${task.userId}, type=${typeof task.userId}`);
+        let project;
+        Project.findOne({ _id: task.projectId, userId: task.userId })
+          .then(proj => {
+            if (!proj) throw new Error('Project not found in handler');
+            project = proj;
+            project.isAnalyzingSpreadsheet = true;
+            return project.save();
+          })
+          .then(() => {
+            spreadsheet.status = 'checking';
+            return spreadsheet.save();
+          })
+          .then(() => {
+            cancelAnalysis.value = false; // Изменяем свойство value
+            console.log(`runSpreadsheetAnalysis: Calling analyzeSpreadsheet with userId=${task.userId} for task ${task.taskId}`);
+            return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss, task.taskId, task.userId);
+          })
+          .then(() => {
+            if (cancelAnalysis.value) {
+              throw new Error('Analysis cancelled');
             }
-          });
-          callback(null);
-        })
-        .catch(error => {
-          if (error.name === 'DocumentNotFoundError') {
-            console.log(`runSpreadsheetAnalysis: Analysis for spreadsheet ${spreadsheetId} was likely cancelled`);
-            spreadsheet.status = 'pending';
+            spreadsheet.status = 'completed';
+            spreadsheet.lastRun = new Date();
             spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
-            spreadsheet.save()
-              .then(() => {
-                if (!task.res.headersSent) {
-                  task.res.json({ message: 'Analysis cancelled' });
+            return spreadsheet.save();
+          })
+          .then(() => {
+            console.log(`Finished spreadsheet analysis for spreadsheet ${spreadsheetId}`);
+            if (task.res && !task.res.headersSent) {
+              task.res.json({ message: 'Analysis completed' });
+            }
+            const wssLocal = task.wss;
+            if (wssLocal) {
+              wssLocal.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN && client.projectId === task.projectId) {
+                  client.send(JSON.stringify({ type: 'analysisComplete', projectId: task.projectId, spreadsheetId: task.spreadsheetId }));
                 }
-                callback(null);
               });
-          } else {
+            }
+            callback(null);
+          })
+          .catch(error => {
             console.error(`Error analyzing spreadsheet ${spreadsheetId} in project ${projectId}:`, error);
-            spreadsheet.status = 'error';
+            spreadsheet.status = error.message === 'Analysis cancelled' ? 'pending' : 'error';
             spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
             spreadsheet.save()
               .then(() => {
-                if (!task.res.headersSent) {
-                  task.res.status(500).json({ error: 'Error analyzing spreadsheet', details: error.message });
+                if (task.res && !task.res.headersSent) {
+                  if (error.message === 'Analysis cancelled') {
+                    task.res.json({ message: 'Analysis cancelled' });
+                  } else {
+                    task.res.status(500).json({ error: 'Error analyzing spreadsheet', details: error.message });
+                  }
                 }
                 callback(error);
               });
-          }
-        })
-        .finally(() => {
-          if (project) {
-            project.isAnalyzingSpreadsheet = false;
-            project.save()
-              .then(async () => {
-                console.log(`runSpreadsheetAnalysis handler: Set isAnalyzingSpreadsheet to false for project ${task.projectId}`);
-                const user = await User.findById(task.userId);
-                user.activeTasks.delete(projectId);
-                await user.save();
-              })
-              .catch(err => console.error(`Error setting isAnalyzingSpreadsheet to false for project ${task.projectId}:`, err));
-          }
-        });
-    },
-  });
+          })
+          .finally(() => {
+            if (project) {
+              project.isAnalyzingSpreadsheet = false;
+              project.save()
+                .then(async () => {
+                  console.log(`runSpreadsheetAnalysis handler: Set isAnalyzingSpreadsheet to false for project ${task.projectId}`);
+                  const user = await User.findById(task.userId);
+                  user.activeTasks.delete(projectId);
+                  await user.save();
+                })
+                .catch(err => console.error(`Error setting isAnalyzingSpreadsheet to false for project ${task.projectId}:`, err));
+            }
+          });
+      },
+    });
 
-  res.json({ taskId: task._id });
+    res.json({ taskId: task._id });
+  } catch (error) {
+    console.error('Error starting spreadsheet analysis:', error);
+    res.status(500).json({ error: 'Failed to start spreadsheet analysis' });
+  }
 };
 
 const cancelSpreadsheetAnalysis = async (req, res) => {

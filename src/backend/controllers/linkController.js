@@ -43,7 +43,8 @@ const {
 } = require('./spreadsheetController');
 const { loadPendingTasks } = require('./taskQueue');
 
-loadPendingTasks();
+// Передаем analyzeSpreadsheet в loadPendingTasks
+loadPendingTasks(analyzeSpreadsheet);
 
 module.exports = {
   getTaskProgress,
