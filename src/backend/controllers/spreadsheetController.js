@@ -100,6 +100,14 @@ const deleteSpreadsheet = async (req, res) => {
 
     const spreadsheet = await Spreadsheet.findOneAndDelete({ _id: spreadsheetId, projectId, userId: req.userId });
     if (!spreadsheet) return res.status(404).json({ error: 'Spreadsheet not found' });
+
+    // Удаляем связанные FrontendLink записи
+    await FrontendLink.deleteMany({
+      spreadsheetId: spreadsheet.spreadsheetId,
+      projectId,
+    });
+    console.log(`Deleted FrontendLinks for spreadsheet ${spreadsheetId}`);
+
     res.json({ message: 'Spreadsheet deleted' });
   } catch (error) {
     console.error('deleteSpreadsheet: Error deleting spreadsheet', error);
@@ -224,6 +232,30 @@ const analyzeSpreadsheet = async (spreadsheet, maxLinks, projectId, wss, taskId,
       throw new Error('Spreadsheet not found during update');
     }
 
+    // Сохраняем updatedLinks в базе данных FrontendLink
+    await Promise.all(updatedLinks.map(async link => {
+      await FrontendLink.findOneAndUpdate(
+        { _id: link._id },
+        {
+          $set: {
+            status: link.status,
+            responseCode: link.responseCode,
+            isIndexable: link.isIndexable,
+            canonicalUrl: link.canonicalUrl,
+            rel: link.rel,
+            linkType: link.linkType,
+            lastChecked: link.lastChecked,
+            loadTime: link.loadTime,
+            errorDetails: link.errorDetails,
+            indexabilityStatus: link.indexabilityStatus,
+            overallStatus: link.overallStatus,
+            anchorText: link.anchorText,
+          },
+        },
+        { new: true }
+      );
+    }));
+
     await exportLinksToGoogleSheetsBatch(
       spreadsheet.spreadsheetId,
       updatedLinks,
@@ -342,7 +374,7 @@ const runSpreadsheetAnalysis = async (req, res) => {
             return spreadsheet.save();
           })
           .then(() => {
-            cancelAnalysis.value = false; // Изменяем свойство value
+            cancelAnalysis.value = false;
             console.log(`runSpreadsheetAnalysis: Calling analyzeSpreadsheet with userId=${task.userId} for task ${task.taskId}`);
             return analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss, task.taskId, task.userId);
           })

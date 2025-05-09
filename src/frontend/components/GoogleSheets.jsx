@@ -21,6 +21,8 @@ const GoogleSheets = ({
   setLoading,
   setError,
   isAnalyzing,
+  stats,
+  renderStatsContent,
 }) => {
   const navigate = useNavigate();
   const [form, setForm] = useState({

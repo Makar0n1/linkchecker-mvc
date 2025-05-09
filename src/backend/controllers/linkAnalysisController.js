@@ -857,6 +857,89 @@ const getActiveTasks = async (req, res) => {
   }
 };
 
+const computeStatsForLinks = (links) => {
+  const linkTypes = {
+    dofollow: 0,
+    nofollow: 0,
+    unknown: 0,
+  };
+  links.forEach(link => {
+    if (link.linkType === 'dofollow') linkTypes.dofollow++;
+    else if (link.linkType === 'nofollow') linkTypes.nofollow++;
+    else linkTypes.unknown++;
+  });
+
+  const statuses = {
+    active: 0,
+    broken: 0,
+    suspectedCaptcha: 0,
+    timeout: 0,
+    pending: 0,
+    checking: 0,
+  };
+  links.forEach(link => {
+    if (link.status === 'active') statuses.active++;
+    else if (link.status === 'broken') statuses.broken++;
+    else if (link.status === 'suspected-captcha') statuses.suspectedCaptcha++;
+    else if (link.status === 'timeout') statuses.timeout++;
+    else if (link.status === 'pending') statuses.pending++;
+    else if (link.status === 'checking') statuses.checking++;
+  });
+
+  const responseCodes = {};
+  links.forEach(link => {
+    const code = link.responseCode || 'unknown';
+    responseCodes[code] = (responseCodes[code] || 0) + 1;
+  });
+
+  const indexability = {
+    indexable: 0,
+    nonIndexable: 0,
+    reasons: {},
+  };
+  links.forEach(link => {
+    if (link.isIndexable === true) {
+      indexability.indexable++;
+    } else if (link.isIndexable === false) {
+      indexability.nonIndexable++;
+      const reason = link.indexabilityStatus || 'unknown';
+      indexability.reasons[reason] = (indexability.reasons[reason] || 0) + 1;
+    }
+  });
+
+  const loadTimes = links
+    .filter(link => link.loadTime != null)
+    .map(link => link.loadTime);
+  const averageLoadTime = loadTimes.length > 0
+    ? (loadTimes.reduce((sum, time) => sum + time, 0) / loadTimes.length / 1000).toFixed(2)
+    : 0;
+
+  return {
+    linkTypes: {
+      ...linkTypes,
+      total: linkTypes.dofollow + linkTypes.nofollow + linkTypes.unknown,
+      dofollowPercentage: linkTypes.dofollow + linkTypes.nofollow > 0
+        ? ((linkTypes.dofollow / (linkTypes.dofollow + linkTypes.nofollow)) * 100).toFixed(2)
+        : 0,
+      nofollowPercentage: linkTypes.dofollow + linkTypes.nofollow > 0
+        ? ((linkTypes.nofollow / (linkTypes.dofollow + linkTypes.nofollow)) * 100).toFixed(2)
+        : 0,
+    },
+    statuses: {
+      ...statuses,
+      total: links.length,
+    },
+    responseCodes,
+    indexability: {
+      indexable: indexability.indexable,
+      nonIndexable: indexability.nonIndexable,
+      reasons: indexability.reasons,
+      total: indexability.indexable + indexability.nonIndexable,
+    },
+    averageLoadTime: parseFloat(averageLoadTime),
+  };
+};
+
 const getProjectStats = async (req, res) => {
   const { projectId } = req.params;
   const userId = req.userId;
@@ -868,93 +951,15 @@ const getProjectStats = async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Фильтруем ссылки по source
-    const query = { projectId };
-    if (source) {
-      query.source = source; // Добавляем фильтр по source
-    }
-    const links = await FrontendLink.find(query);
+    // По умолчанию возвращаем статистику для manual, если source не указан
+    const querySource = source || 'manual';
+    const links = await FrontendLink.find({ projectId, source: querySource });
 
-    const linkTypes = {
-      dofollow: 0,
-      nofollow: 0,
-      unknown: 0,
-    };
-    links.forEach(link => {
-      if (link.linkType === 'dofollow') linkTypes.dofollow++;
-      else if (link.linkType === 'nofollow') linkTypes.nofollow++;
-      else linkTypes.unknown++;
-    });
+    // Вычисляем статистику для выбранного источника
+    const stats = computeStatsForLinks(links);
 
-    const statuses = {
-      active: 0,
-      broken: 0,
-      suspectedCaptcha: 0,
-      timeout: 0,
-      pending: 0,
-      checking: 0,
-    };
-    links.forEach(link => {
-      if (link.status === 'active') statuses.active++;
-      else if (link.status === 'broken') statuses.broken++;
-      else if (link.status === 'suspected-captcha') statuses.suspectedCaptcha++;
-      else if (link.status === 'timeout') statuses.timeout++;
-      else if (link.status === 'pending') statuses.pending++;
-      else if (link.status === 'checking') statuses.checking++;
-    });
-
-    const responseCodes = {};
-    links.forEach(link => {
-      const code = link.responseCode || 'unknown';
-      responseCodes[code] = (responseCodes[code] || 0) + 1;
-    });
-
-    const indexability = {
-      indexable: 0,
-      nonIndexable: 0,
-      reasons: {},
-    };
-    links.forEach(link => {
-      if (link.isIndexable === true) {
-        indexability.indexable++;
-      } else if (link.isIndexable === false) {
-        indexability.nonIndexable++;
-        const reason = link.indexabilityStatus || 'unknown';
-        indexability.reasons[reason] = (indexability.reasons[reason] || 0) + 1;
-      }
-    });
-
-    const loadTimes = links
-      .filter(link => link.loadTime != null)
-      .map(link => link.loadTime);
-    const averageLoadTime = loadTimes.length > 0
-      ? (loadTimes.reduce((sum, time) => sum + time, 0) / loadTimes.length / 1000).toFixed(2)
-      : 0;
-
-    res.json({
-      linkTypes: {
-        ...linkTypes,
-        total: linkTypes.dofollow + linkTypes.nofollow + linkTypes.unknown,
-        dofollowPercentage: linkTypes.dofollow + linkTypes.nofollow > 0
-          ? ((linkTypes.dofollow / (linkTypes.dofollow + linkTypes.nofollow)) * 100).toFixed(2)
-          : 0,
-        nofollowPercentage: linkTypes.dofollow + linkTypes.nofollow > 0
-          ? ((linkTypes.nofollow / (linkTypes.dofollow + linkTypes.nofollow)) * 100).toFixed(2)
-          : 0,
-      },
-      statuses: {
-        ...statuses,
-        total: links.length,
-      },
-      responseCodes,
-      indexability: {
-        indexable: indexability.indexable,
-        nonIndexable: indexability.nonIndexable,
-        reasons: indexability.reasons,
-        total: indexability.indexable + indexability.nonIndexable,
-      },
-      averageLoadTime: parseFloat(averageLoadTime),
-    });
+    // Возвращаем статистику в старом формате
+    res.json(stats);
   } catch (error) {
     console.error('getProjectStats: Error fetching project stats', error);
     res.status(500).json({ error: 'Error fetching project stats', details: error.message });

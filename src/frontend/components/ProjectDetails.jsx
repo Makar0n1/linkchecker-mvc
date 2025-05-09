@@ -119,7 +119,7 @@ const ProjectDetails = () => {
     fetchProject();
     fetchAnalysisStatus();
     fetchStats('manual', setManualStats);
-    fetchStats('spreadsheet', setSpreadsheetStats);
+    fetchStats('google_sheets', setSpreadsheetStats); // Убедимся, что используем правильный source
     fetchDomainSummary();
     const interval = setInterval(fetchAnalysisStatus, 10000);
     return () => clearInterval(interval);
@@ -285,7 +285,7 @@ const ProjectDetails = () => {
     if (!stats) {
       return <p className="text-gray-600 text-xs">Loading analytics...</p>;
     }
-    if (stats.linkTypes.total === 0) {
+    if (stats.statuses.total === 0) {
       return <p className="text-gray-600 text-xs">No links added yet. Add links to see analytics.</p>;
     }
 
@@ -484,6 +484,8 @@ const ProjectDetails = () => {
             setLoading={setLoading}
             setError={setError}
             isAnalyzing={isAnalyzingSpreadsheet}
+            stats={spreadsheetStats}
+            renderStatsContent={renderStatsContent}
           />
         )}
       </div>
