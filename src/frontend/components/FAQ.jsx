@@ -57,6 +57,22 @@ const FAQ = () => {
     );
   };
 
+  // Обработчик клика по изображению
+  const handleImageClick = (e) => {
+    const { clientX, target } = e;
+    const { left, width } = target.getBoundingClientRect();
+    const clickPosition = clientX - left; // Позиция клика относительно левого края изображения
+
+    // Если клик в левых 30% изображения — предыдущее фото
+    if (clickPosition < width * 0.3) {
+      prevImage();
+    }
+    // Если клик в правых 30% изображения — следующее фото
+    else if (clickPosition > width * 0.7) {
+      nextImage();
+    }
+  };
+
   const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
@@ -282,41 +298,15 @@ const FAQ = () => {
             animate="visible"
             exit="exit"
             variants={modalVariants}
+            onClick={closeModal} // Клик за пределами фото закрывает модальное окно
           >
-            <div className="relative max-w-4xl w-full p-4">
-              {/* Кнопка закрытия */}
-              <button
-                onClick={closeModal}
-                className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center z-50"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-
-              {/* Кнопки навигации */}
-              <button
-                onClick={prevImage}
-                className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-gray-800 text-white p-2 rounded-full"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <button
-                onClick={nextImage}
-                className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-gray-800 text-white p-2 rounded-full"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-
+            <div className="relative w-[70vw] h-[70vh] p-4" onClick={(e) => e.stopPropagation()}>
               {/* Изображение */}
               <img
                 src={currentImages[currentImageIndex]}
                 alt={`Screenshot ${currentImageIndex + 1}`}
-                className="w-full h-auto max-h-[80vh] object-contain rounded-lg"
+                className="w-full h-full object-contain rounded-lg cursor-pointer"
+                onClick={handleImageClick}
               />
             </div>
           </motion.div>
