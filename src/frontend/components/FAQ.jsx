@@ -140,8 +140,12 @@ const FAQ = () => {
         const imgRect = img.getBoundingClientRect();
         const scaledWidth = imgRect.width * scale;
         const scaledHeight = imgRect.height * scale;
-        const maxOffsetX = (scaledWidth - window.innerWidth) / 2 / scale; // Делим на scale, чтобы учесть масштаб
-        const maxOffsetY = (scaledHeight - window.innerHeight) / 2 / scale;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        // Вычисляем максимальные смещения так, чтобы края изображения оставались в пределах экрана
+        const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / scale : 0;
+        const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / scale : 0;
 
         // Ограничиваем перемещение с эффектом пружинки
         let newOffsetX = offsetX + deltaX / scale; // Делим на scale, чтобы перемещение соответствовало масштабу
@@ -216,8 +220,11 @@ const FAQ = () => {
         const imgRect = img.getBoundingClientRect();
         const scaledWidth = imgRect.width * scale;
         const scaledHeight = imgRect.height * scale;
-        const maxOffsetX = (scaledWidth - window.innerWidth) / 2 / scale;
-        const maxOffsetY = (scaledHeight - window.innerHeight) / 2 / scale;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / scale : 0;
+        const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / scale : 0;
 
         let newOffsetX = offsetX;
         let newOffsetY = offsetY;
