@@ -25,7 +25,6 @@ const FAQ = () => {
   const [touchCurrentX, setTouchCurrentX] = useState(null);
   const [touchCurrentY, setTouchCurrentY] = useState(null);
   const [touchStartTime, setTouchStartTime] = useState(null);
-  const [lastTap, setLastTap] = useState(0);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
   const [modalOpacity, setModalOpacity] = useState(1);
@@ -112,31 +111,6 @@ const FAQ = () => {
     } else if (clickPosition > width * 0.7) {
       nextImage();
     }
-  };
-
-  // Обработчик двойного тапа для зума в точку
-  const handleDoubleTap = (e) => {
-    const currentTime = Date.now();
-    const tapInterval = currentTime - lastTap;
-
-    if (tapInterval < 300 && tapInterval > 0) {
-      const instance = panzoomInstances.current[currentImageIndex];
-      const wrapper = wrapperRef.current;
-      if (wrapper && instance) {
-        const rect = wrapper.getBoundingClientRect();
-        const touchX = e.touches[0].clientX;
-        const touchY = e.touches[0].clientY;
-
-        if (currentScale === 1) {
-          instance.zoomToPoint(2, { clientX: touchX, clientY: touchY }, { animate: true });
-          setCurrentScale(2);
-        } else {
-          instance.zoom(1, { animate: true });
-          setCurrentScale(1);
-        }
-      }
-    }
-    setLastTap(currentTime);
   };
 
   // Обработчики свайпа для мобильных устройств
@@ -255,7 +229,7 @@ const FAQ = () => {
             panOnlyWhenZoomed: true,
             duration: 300,
             easing: 'ease-in-out',
-            disableDoubleClickZoom: true, // Отключаем встроенный зум по двойному клику
+            zoomDoubleClickSpeed: 1, // Включаем зум по двойному тапу
           });
           panzoomInstances.current[index] = instance;
 
@@ -548,10 +522,7 @@ const FAQ = () => {
                       src={image}
                       alt={`Screenshot ${index + 1}`}
                       onClick={window.innerWidth >= 640 ? handleImageClick : null}
-                      onTouchStart={(e) => {
-                        handleTouchStart(e);
-                        handleDoubleTap(e);
-                      }}
+                      onTouchStart={handleTouchStart}
                       onTouchMove={handleTouchMove}
                       onTouchEnd={handleTouchEnd}
                     />
