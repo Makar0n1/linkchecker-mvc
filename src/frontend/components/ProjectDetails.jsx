@@ -106,7 +106,18 @@ const ProjectDetails = () => {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         });
         const linksData = Array.isArray(response.data) ? response.data : [];
-        const domains = new Set(linksData.map(link => link.targetDomains ? link.targetDomains[0] : 'N/A'));
+
+        // Извлекаем домен из link.url
+        const domains = new Set(linksData.map(link => {
+          try {
+            const url = new URL(link.url);
+            return url.hostname; // Извлекаем домен (например, site1.com)
+          } catch (error) {
+            console.error(`Invalid URL for link ${link.url}:`, error);
+            return 'N/A'; // Если URL некорректный, используем заглушку
+          }
+        }).filter(domain => domain !== 'N/A')); // Исключаем некорректные домены
+
         setDomainSummary({
           uniqueDomains: domains.size,
           totalLinks: linksData.length,
