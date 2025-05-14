@@ -23,6 +23,7 @@ const FAQ = () => {
   const [touchStartY, setTouchStartY] = useState(null);
   const [touchCurrentX, setTouchCurrentX] = useState(null);
   const [touchCurrentY, setTouchCurrentY] = useState(null);
+  const [touchStartTime, setTouchStartTime] = useState(null); // Для отслеживания времени свайпа
   const [panX, setPanX] = useState(0); // Для горизонтального смещения при свайпе
   const [panY, setPanY] = useState(0); // Для вертикального смещения при свайпе
   const [scale, setScale] = useState(1); // Для зума
@@ -103,11 +104,13 @@ const FAQ = () => {
     setTouchStartY(e.touches[0].clientY);
     setTouchCurrentX(e.touches[0].clientX);
     setTouchCurrentY(e.touches[0].clientY);
+    setTouchStartTime(Date.now()); // Запоминаем время начала свайпа
     setIsSwiping(true);
     setSwipeDirection(null);
   };
 
   const handleTouchMove = (e) => {
+    e.preventDefault(); // Предотвращаем нативное масштабирование страницы
     if (!isSwiping) return;
     setTouchCurrentX(e.touches[0].clientX);
     setTouchCurrentY(e.touches[0].clientY);
@@ -154,10 +157,15 @@ const FAQ = () => {
 
     const deltaX = touchCurrentX - touchStartX;
     const deltaY = touchCurrentY - touchStartY;
+    const touchEndTime = Date.now();
+    const swipeDuration = (touchEndTime - touchStartTime) / 1000; // Длительность свайпа в секундах
+    const swipeSpeed = Math.abs(deltaX) / swipeDuration; // Скорость свайпа (пиксели/секунда)
 
     if (swipeDirection === 'horizontal') {
+      // Определяем порог в зависимости от скорости свайпа
+      const swipeThreshold = swipeSpeed > 500 ? 0 : window.innerWidth * 0.4; // Если скорость > 500 px/s, перелистываем сразу
       // Горизонтальный свайп (листание фотографий)
-      if (Math.abs(deltaX) > window.innerWidth * 0.6) { // Порог 60%
+      if (Math.abs(deltaX) > swipeThreshold) {
         if (deltaX > 0 && currentImageIndex > 0) {
           // Свайп вправо — предыдущее изображение
           prevImage();
@@ -184,11 +192,13 @@ const FAQ = () => {
     setTouchStartY(null);
     setTouchCurrentX(null);
     setTouchCurrentY(null);
+    setTouchStartTime(null);
     setSwipeDirection(null);
   };
 
   // Обработчики для зума пальцами (pinch-to-zoom)
   const handlePinchStart = (e) => {
+    e.preventDefault(); // Предотвращаем нативное масштабирование страницы
     if (e.touches.length === 2) {
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -202,6 +212,7 @@ const FAQ = () => {
   };
 
   const handlePinchMove = (e) => {
+    e.preventDefault(); // Предотвращаем нативное масштабирование страницы
     if (e.touches.length === 2) {
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -458,7 +469,11 @@ const FAQ = () => {
               transition: 'background-color 0.3s ease-out',
             }}
           >
-            <div className="relative w-[70vw] h-[70vh] sm:w-[70vw] sm:h-[70vh] w-full h-full flex items-center justify-center p-0 sm:p-4" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="relative w-[70vw] h-[70vh] sm:w-[70vw] sm:h-[70vh] w-full h-full flex items-center justify-center p-0 sm:p-4"
+              onClick={(e) => e.stopPropagation()}
+              style={{ touchAction: 'none' }} // Отключаем нативный зум и скролл страницы
+            >
               {/* Контейнер для всех изображений */}
               <div className="relative w-full h-full flex items-center justify-center">
                 {currentImages.map((image, index) => (
