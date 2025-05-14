@@ -9,7 +9,7 @@ const retryRequest = async (fn, retries = 3, delay = 1000) => {
     try {
       return await fn();
     } catch (err) {
-      if (i === retries - 1) throw err; // Если последняя попытка, бросаем ошибку
+      if (i === retries - 1) throw err;
       console.log(`Retrying request (${i + 1}/${retries})...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
@@ -109,7 +109,7 @@ const Dashboard = () => {
       </header>
 
       <div className="flex flex-1">
-        {/* Sidebar для десктопа - Фиксированный, растянут на всю высоту */}
+        {/* Sidebar для десктопа */}
         <motion.aside
           ref={sidebarRef}
           initial={{ width: isSidebarOpen ? 256 : 64 }}
@@ -157,6 +157,17 @@ const Dashboard = () => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                     </svg>
                     <span className={isSidebarOpen ? 'block' : 'hidden'}>Profile</span>
+                  </button>
+                </li>
+                <li className="mb-4">
+                  <button
+                    onClick={() => navigate('/app/faq')}
+                    className={`w-full text-left p-2 rounded flex items-center gap-2 ${isActive('/app/faq') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className={isSidebarOpen ? 'block' : 'hidden'}>FAQ</span>
                   </button>
                 </li>
                 <li className="mt-4">
@@ -219,6 +230,16 @@ const Dashboard = () => {
             <span className="text-xs mt-1">Profile</span>
           </motion.button>
           <motion.button
+            onClick={() => navigate('/app/faq')}
+            className={`flex flex-col items-center justify-center flex-1 h-full ${isActive('/app/faq') ? 'bg-green-700' : 'hover:bg-green-700'}`}
+            whileTap={{ scale: 0.95 }}
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-xs mt-1">FAQ</span>
+          </motion.button>
+          <motion.button
             onClick={handleLogout}
             className="flex flex-col items-center justify-center flex-1 h-full bg-red-600 hover:bg-red-700"
             whileTap={{ scale: 0.95 }}
@@ -231,7 +252,7 @@ const Dashboard = () => {
         </div>
       </motion.nav>
 
-      {/* Футер - только для десктопа */}
+      {/* Футер */}
       <footer className="sm:block hidden bg-gray-800 text-white py-4 sm:py-6 z-50 relative">
         <div className="container max-w-7xl mx-auto px-4 sm:px-6 text-center">
           <p className="text-sm sm:text-base">© 2025 Link-Check-Pro.Top | All rights reserved.</p>

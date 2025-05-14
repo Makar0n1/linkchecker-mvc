@@ -8,6 +8,7 @@ import Projects from './components/Projects';
 import ProjectDetails from './components/ProjectDetails';
 import Profile from './components/Profile';
 import ScrollToTopButton from './components/ScrollToTopButton';
+import FAQ from './components/FAQ';
 import './styles.css';
 
 const ProtectedRoute = ({ children }) => {
@@ -29,6 +30,7 @@ root.render(
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:projectId" element={<ProjectDetails />} />
         <Route path="profile" element={<Profile />} />
+        <Route path="faq" element={<FAQ />} />
         <Route path="" element={<Navigate to="projects" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
