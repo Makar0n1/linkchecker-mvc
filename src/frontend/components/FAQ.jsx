@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import Panzoom from 'panzoom';
+import Panzoom from 'panzoom'; // Исправляем импорт
 
 // Импорт скриншотов
 import createProject from '../../assets/images/faq_create_project.png';
@@ -32,7 +32,7 @@ const FAQ = () => {
   const [isSwiping, setIsSwiping] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState(null);
   const [hasSwiped, setHasSwiped] = useState(false);
-  const panzoomInstances = useRef([]); // Для хранения экземпляров Panzoom
+  const panzoomInstances = useRef([]);
   const wrapperRef = useRef(null);
 
   // Массив всех скриншотов для каждой вкладки
@@ -64,9 +64,8 @@ const FAQ = () => {
     setModalOpacity(1);
     setHasSwiped(false);
     document.body.style.overflow = 'auto';
-    // Сбрасываем Panzoom для всех изображений
     panzoomInstances.current.forEach((instance) => {
-      if (instance) instance.zoom(1, { animate: false });
+      if (instance) instance.reset();
     });
   };
 
@@ -77,10 +76,9 @@ const FAQ = () => {
     );
     setPanX(0);
     setPanY(0);
-    // Сбрасываем Panzoom для текущего изображения
     const instance = panzoomInstances.current[currentImageIndex];
     if (instance) {
-      instance.zoom(1, { animate: false });
+      instance.reset();
     }
   };
 
@@ -91,10 +89,9 @@ const FAQ = () => {
     );
     setPanX(0);
     setPanY(0);
-    // Сбрасываем Panzoom для текущего изображения
     const instance = panzoomInstances.current[currentImageIndex];
     if (instance) {
-      instance.zoom(1, { animate: false });
+      instance.reset();
     }
   };
 
@@ -117,20 +114,17 @@ const FAQ = () => {
     const tapInterval = currentTime - lastTap;
 
     if (tapInterval < 300 && tapInterval > 0) {
-      // Двойной тап
       const wrapper = wrapperRef.current;
       if (wrapper && instance) {
         const rect = wrapper.getBoundingClientRect();
-        const touchX = e.touches[0].clientX - rect.left;
-        const touchY = e.touches[0].clientY - rect.top;
+        const touchX = e.touches[0].clientX;
+        const touchY = e.touches[0].clientY;
 
-        const currentScale = instance.getScale();
-        if (currentScale === 1) {
-          // Зум в точку
-          instance.zoomToPoint(2, { clientX: touchX + rect.left, clientY: touchY + rect.top }, { animate: true });
+        const currentZoom = instance.getTransform().scale;
+        if (currentZoom === 1) {
+          instance.zoomAbs(touchX, touchY, 2, 300); // Зум в точку с анимацией 300ms
         } else {
-          // Сброс зума
-          instance.zoom(1, { animate: true });
+          instance.zoomAbs(touchX, touchY, 1, 300); // Сброс зума
         }
       }
     }
@@ -149,8 +143,8 @@ const FAQ = () => {
 
     const instance = panzoomInstances.current[currentImageIndex];
     if (instance) {
-      const currentScale = instance.getScale();
-      if (currentScale > 1) {
+      const currentZoom = instance.getTransform().scale;
+      if (currentZoom > 1) {
         setIsPanning(true);
       }
       handleDoubleTap(e, instance);
@@ -168,8 +162,7 @@ const FAQ = () => {
 
     const instance = panzoomInstances.current[currentImageIndex];
     if (isPanning && instance) {
-      // Panzoom сам управляет перемещением, нам не нужно ничего делать
-      return;
+      return; // Panzoom сам управляет перемещением
     }
 
     // Определяем направление свайпа
@@ -183,7 +176,6 @@ const FAQ = () => {
     }
 
     if (swipeDirection === 'horizontal') {
-      // Горизонтальный свайп (листание фотографий)
       if (currentImages.length === 1) {
         setPanX(deltaX * 0.3);
       } else if (currentImageIndex === 0 && deltaX > 0) {
@@ -196,7 +188,6 @@ const FAQ = () => {
       setPanY(0);
       setModalOpacity(1);
     } else {
-      // Вертикальный свайп (закрытие)
       setPanY(deltaY);
       setPanX(0);
       const maxSwipeDistance = window.innerHeight / 2;
@@ -217,7 +208,7 @@ const FAQ = () => {
     const swipeSpeed = Math.abs(deltaX) / swipeDuration;
 
     const instance = panzoomInstances.current[currentImageIndex];
-    if (instance && instance.getScale() > 1) {
+    if (instance && instance.getTransform().scale > 1) {
       return;
     }
 
@@ -254,13 +245,12 @@ const FAQ = () => {
       const imageElements = document.querySelectorAll('.panzoom-image');
       imageElements.forEach((element, index) => {
         const instance = Panzoom(element, {
-          minScale: 1,
-          maxScale: 3,
-          contain: 'inside', // Изображение не выходит за пределы контейнера
-          cursor: 'default',
+          minZoom: 1,
+          maxZoom: 3,
+          bounds: true, // Ограничивает перемещение, чтобы края не выходили за контейнер
+          boundsPadding: 0.1, // Минимальный отступ от краёв
+          zoomDoubleClickSpeed: 0, // Отключаем встроенный зум по двойному клику (мы сами его реализуем)
           panOnlyWhenZoomed: true,
-          duration: 300, // Плавная анимация зума (300ms)
-          easing: 'ease-in-out',
         });
         panzoomInstances.current[index] = instance;
       });
