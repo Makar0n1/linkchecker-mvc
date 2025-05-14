@@ -36,6 +36,7 @@ const FAQ = () => {
   const [swipeDirection, setSwipeDirection] = useState(null); // Для определения направления свайпа
   const [hasSwiped, setHasSwiped] = useState(false); // Для отслеживания, был ли свайп
   const imageRef = useRef(null); // Для получения размеров изображения
+  const wrapperRef = useRef(null); // Для получения размеров контейнера
 
   // Массив всех скриншотов для каждой вкладки
   const images = {
@@ -111,16 +112,53 @@ const FAQ = () => {
     }
   };
 
-  // Обработчик двойного тапа для зума
-  const handleDoubleTap = () => {
+  // Обработчик двойного тапа для зума в точку
+  const handleDoubleTap = (e) => {
     const currentTime = Date.now();
     const tapInterval = currentTime - lastTap;
 
     if (tapInterval < 300 && tapInterval > 0) {
       // Двойной тап
-      setScale((prevScale) => (prevScale === 1 ? 2 : 1));
-      setOffsetX(0);
-      setOffsetY(0);
+      const img = imageRef.current;
+      const wrapper = wrapperRef.current;
+      if (img && wrapper) {
+        const rect = wrapper.getBoundingClientRect();
+        const touchX = e.touches[0].clientX - rect.left; // Координата X касания относительно контейнера
+        const touchY = e.touches[0].clientY - rect.top; // Координата Y касания относительно контейнера
+
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        if (scale === 1) {
+          // Зум в точку
+          setScale(2);
+
+          // Вычисляем смещение, чтобы точка касания оказалась в центре экрана
+          const naturalWidth = img.naturalWidth;
+          const naturalHeight = img.naturalHeight;
+          const scaledWidth = naturalWidth * 2;
+          const scaledHeight = naturalHeight * 2;
+
+          const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / 2 : 0;
+          const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / 2 : 0;
+
+          // Переводим координаты касания в координаты изображения с учётом масштаба
+          const imageX = (touchX - viewportWidth / 2) / 2; // Учитываем масштаб 2
+          const imageY = (touchY - viewportHeight / 2) / 2;
+
+          // Ограничиваем смещение
+          const newOffsetX = Math.min(maxOffsetX, Math.max(-maxOffsetX, -imageX));
+          const newOffsetY = Math.min(maxOffsetY, Math.max(-maxOffsetY, -imageY));
+
+          setOffsetX(newOffsetX);
+          setOffsetY(newOffsetY);
+        } else {
+          // Сброс зума
+          setScale(1);
+          setOffsetX(0);
+          setOffsetY(0);
+        }
+      }
     }
     setLastTap(currentTime);
   };
@@ -137,7 +175,7 @@ const FAQ = () => {
     if (scale > 1) {
       setIsPanning(true); // Если зум активен, начинаем перемещение изображения
     }
-    handleDoubleTap(); // Проверяем двойной тап
+    handleDoubleTap(e); // Проверяем двойной тап
   };
 
   const handleTouchMove = (e) => {
@@ -561,6 +599,7 @@ const FAQ = () => {
             }}
           >
             <div
+              ref={wrapperRef}
               className="relative w-[70vw] h-[70vh] sm:w-[70vw] sm:h-[70vh] w-full h-full flex items-center justify-center p-0 sm:p-4"
               onClick={(e) => e.stopPropagation()}
               style={{ touchAction: 'none' }} // Отключаем нативный зум и скролл страницы
@@ -605,7 +644,7 @@ const FAQ = () => {
                       style={{
                         transform: index === currentImageIndex ? `scale(${scale}) translate(${offsetX}px, ${offsetY}px)` : 'scale(1)',
                         transformOrigin: 'center',
-                        transition: isSwiping ? 'none' : 'transform 0.3s ease-out', // Плавный зум и перемещение только после завершения свайпа
+                        transition: isSwiping ? 'none' : 'transform 0.2s ease-in-out', // Плавный зум с небольшой анимацией
                       }}
                     />
                   </motion.div>
