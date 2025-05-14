@@ -138,14 +138,16 @@ const FAQ = () => {
       const img = imageRef.current;
       if (img) {
         const imgRect = img.getBoundingClientRect();
-        const maxOffsetX = (imgRect.width * scale - window.innerWidth) / 2;
-        const maxOffsetY = (imgRect.height * scale - window.innerHeight) / 2;
+        const scaledWidth = imgRect.width * scale;
+        const scaledHeight = imgRect.height * scale;
+        const maxOffsetX = (scaledWidth - window.innerWidth) / 2 / scale; // Делим на scale, чтобы учесть масштаб
+        const maxOffsetY = (scaledHeight - window.innerHeight) / 2 / scale;
 
         // Ограничиваем перемещение с эффектом пружинки
-        let newOffsetX = offsetX + deltaX;
-        let newOffsetY = offsetY + deltaY;
+        let newOffsetX = offsetX + deltaX / scale; // Делим на scale, чтобы перемещение соответствовало масштабу
+        let newOffsetY = offsetY + deltaY / scale;
 
-        // Пружинка по краям
+        // Жёсткие границы с пружинкой
         if (newOffsetX > maxOffsetX) {
           newOffsetX = maxOffsetX + (newOffsetX - maxOffsetX) * 0.3; // Пружинка
         } else if (newOffsetX < -maxOffsetX) {
@@ -212,8 +214,10 @@ const FAQ = () => {
       const img = imageRef.current;
       if (img) {
         const imgRect = img.getBoundingClientRect();
-        const maxOffsetX = (imgRect.width * scale - window.innerWidth) / 2;
-        const maxOffsetY = (imgRect.height * scale - window.innerHeight) / 2;
+        const scaledWidth = imgRect.width * scale;
+        const scaledHeight = imgRect.height * scale;
+        const maxOffsetX = (scaledWidth - window.innerWidth) / 2 / scale;
+        const maxOffsetY = (scaledHeight - window.innerHeight) / 2 / scale;
 
         let newOffsetX = offsetX;
         let newOffsetY = offsetY;
@@ -550,12 +554,12 @@ const FAQ = () => {
                     className="absolute w-full h-full flex items-center justify-center"
                     animate={{
                       x: (index - currentImageIndex) * window.innerWidth + panX,
-                      opacity: 1,
+                      opacity: scale > 1 && index !== currentImageIndex ? 0 : 1, // Скрываем соседние изображения при зуме
                       y: panY,
                       transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' }, // Плавное "приземление" без транзишнов во время свайпа
                     }}
                     style={{
-                      display: (!hasSwiped && index !== currentImageIndex) ? 'none' : 'flex', // Скрываем соседние изображения до первого свайпа
+                      display: (!hasSwiped && index !== currentImageIndex) || (scale > 1 && index !== currentImageIndex) ? 'none' : 'flex', // Скрываем соседние изображения до первого свайпа или при зуме
                     }}
                   >
                     <img
@@ -570,7 +574,7 @@ const FAQ = () => {
                       onTouchStartCapture={handlePinchStart}
                       onTouchMoveCapture={handlePinchMove}
                       style={{
-                        transform: index === currentImageIndex ? `scale(${scale}) translate(${offsetX}px, ${offsetY}px)` : 'scale(1)', // Зум и перемещение только для текущей фотографии
+                        transform: index === currentImageIndex ? `scale(${scale}) translate(${offsetX}px, ${offsetY}px)` : 'scale(1)',
                         transformOrigin: 'center',
                         transition: isSwiping ? 'none' : 'transform 0.3s ease-out', // Плавный зум и перемещение только после завершения свайпа
                       }}
