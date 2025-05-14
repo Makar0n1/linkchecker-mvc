@@ -25,6 +25,7 @@ const FAQ = () => {
   const [touchCurrentX, setTouchCurrentX] = useState(null);
   const [touchCurrentY, setTouchCurrentY] = useState(null);
   const [touchStartTime, setTouchStartTime] = useState(null);
+  const [lastTap, setLastTap] = useState(0);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
   const [modalOpacity, setModalOpacity] = useState(1);
@@ -106,6 +107,29 @@ const FAQ = () => {
     }
   };
 
+  // Обработчик двойного тапа для зума
+  const handleDoubleTap = (e) => {
+    const currentTime = Date.now();
+    const tapInterval = currentTime - lastTap;
+
+    if (tapInterval < 300 && tapInterval > 0) {
+      const instance = panzoomInstances.current[currentImageIndex];
+      if (instance) {
+        const touchX = e.touches[0].clientX;
+        const touchY = e.touches[0].clientY;
+
+        if (currentScale === 1) {
+          instance.zoomToPoint(2, { clientX: touchX, clientY: touchY }, { animate: true });
+          console.log('Zoom in triggered:', { touchX, touchY });
+        } else {
+          instance.zoom(1, { animate: true });
+          console.log('Zoom out triggered:', { touchX, touchY });
+        }
+      }
+    }
+    setLastTap(currentTime);
+  };
+
   // Обработчики свайпа для контейнера (листание и закрытие)
   const handleWrapperTouchStart = (e) => {
     setTouchStartX(e.touches[0].clientX);
@@ -115,6 +139,7 @@ const FAQ = () => {
     setTouchStartTime(Date.now());
     setIsSwiping(true);
     setSwipeDirection(null);
+    handleDoubleTap(e);
   };
 
   const handleWrapperTouchMove = (e) => {
@@ -139,15 +164,7 @@ const FAQ = () => {
     }
 
     if (swipeDirection === 'horizontal') {
-      if (currentImages.length === 1) {
-        setPanX(deltaX * 0.3);
-      } else if (currentImageIndex === 0 && deltaX > 0) {
-        setPanX(deltaX * 0.3);
-      } else if (currentImageIndex === currentImages.length - 1 && deltaX < 0) {
-        setPanX(deltaX * 0.3);
-      } else {
-        setPanX(deltaX);
-      }
+      setPanX(deltaX);
       setPanY(0);
       setModalOpacity(1);
     } else {
@@ -218,9 +235,8 @@ const FAQ = () => {
         panOnlyWhenZoomed: true,
         duration: 300,
         easing: 'ease-in-out',
-        zoomDoubleClickSpeed: 1, // Включаем зум по двойному касанию
         pinchToZoom: true, // Включаем зум по щипку
-        step: 0.5, // Шаг зума для двойного касания
+        step: 0.5, // Шаг зума
       });
 
       panzoomInstances.current[currentImageIndex] = instance;
@@ -505,15 +521,16 @@ const FAQ = () => {
                 {currentImages.map((image, index) => (
                   <motion.div
                     key={index}
-                    className="absolute w-full h-full flex items-center justify-center"
+                    className="absolute w-[70%] h-full flex items-center justify-center"
                     animate={{
-                      x: (index - currentImageIndex) * window.innerWidth + panX,
+                      x: (index - currentImageIndex) * window.innerWidth * 0.8 + panX,
                       y: panY,
-                      opacity: index !== currentImageIndex ? 0 : 1,
+                      opacity: 1, // Все слайды видимы, но с разной прозрачностью
                       transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' },
                     }}
                     style={{
-                      display: (!hasSwiped && index !== currentImageIndex) ? 'none' : 'flex',
+                      opacity: index === currentImageIndex ? 1 : 0.3, // Текущий слайд полностью видим, соседние — частично
+                      zIndex: index === currentImageIndex ? 10 : 5, // Текущий слайд выше остальных
                     }}
                   >
                     <img
