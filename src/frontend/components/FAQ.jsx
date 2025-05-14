@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import Panzoom from '@panzoom/panzoom';
+import Panzoom from 'panzoom';
 
 // Импорт скриншотов
 import createProject from '../../assets/images/faq_create_project.png';
