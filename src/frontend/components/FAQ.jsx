@@ -521,7 +521,7 @@ const FAQ = () => {
                 {currentImages.map((image, index) => (
                   <motion.div
                     key={index}
-                    className="absolute w-[70%] h-full flex items-center justify-center"
+                    className="absolute w-full h-full flex items-center justify-center"
                     animate={{
                       x: (index - currentImageIndex) * window.innerWidth * 0.8 + panX,
                       y: panY,
@@ -529,7 +529,7 @@ const FAQ = () => {
                       transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' },
                     }}
                     style={{
-                      opacity: index === currentImageIndex ? 1 : 0.3, // Текущий слайд полностью видим, соседние — частично
+                      opacity: index === currentImageIndex ? 1 : (isSwiping ? 0.3 : 0), // Соседние слайды видны только во время свайпа
                       zIndex: index === currentImageIndex ? 10 : 5, // Текущий слайд выше остальных
                     }}
                   >
