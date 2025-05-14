@@ -143,25 +143,17 @@ const FAQ = () => {
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
 
-        // Вычисляем максимальные смещения так, чтобы края изображения оставались в пределах экрана
+        // Вычисляем максимальные смещения так, чтобы края изображения не отрывались от краёв экрана
         const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / scale : 0;
         const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / scale : 0;
 
-        // Ограничиваем перемещение с эффектом пружинки
-        let newOffsetX = offsetX + deltaX / scale; // Делим на scale, чтобы перемещение соответствовало масштабу
+        // Ограничиваем перемещение без пружинки за пределами
+        let newOffsetX = offsetX + deltaX / scale;
         let newOffsetY = offsetY + deltaY / scale;
 
-        // Жёсткие границы с пружинкой
-        if (newOffsetX > maxOffsetX) {
-          newOffsetX = maxOffsetX + (newOffsetX - maxOffsetX) * 0.3; // Пружинка
-        } else if (newOffsetX < -maxOffsetX) {
-          newOffsetX = -maxOffsetX + (newOffsetX + maxOffsetX) * 0.3;
-        }
-        if (newOffsetY > maxOffsetY) {
-          newOffsetY = maxOffsetY + (newOffsetY - maxOffsetY) * 0.3;
-        } else if (newOffsetY < -maxOffsetY) {
-          newOffsetY = -maxOffsetY + (newOffsetY + maxOffsetY) * 0.3;
-        }
+        // Жёсткие границы: края изображения всегда прилипают к краям экрана
+        newOffsetX = Math.min(maxOffsetX, Math.max(-maxOffsetX, newOffsetX));
+        newOffsetY = Math.min(maxOffsetY, Math.max(-maxOffsetY, newOffsetY));
 
         setOffsetX(newOffsetX);
         setOffsetY(newOffsetY);
@@ -229,10 +221,8 @@ const FAQ = () => {
         let newOffsetX = offsetX;
         let newOffsetY = offsetY;
 
-        if (newOffsetX > maxOffsetX) newOffsetX = maxOffsetX;
-        if (newOffsetX < -maxOffsetX) newOffsetX = -maxOffsetX;
-        if (newOffsetY > maxOffsetY) newOffsetY = maxOffsetY;
-        if (newOffsetY < -maxOffsetY) newOffsetY = -maxOffsetY;
+        newOffsetX = Math.min(maxOffsetX, Math.max(-maxOffsetX, newOffsetX));
+        newOffsetY = Math.min(maxOffsetY, Math.max(-maxOffsetY, newOffsetY));
 
         setOffsetX(newOffsetX);
         setOffsetY(newOffsetY);
