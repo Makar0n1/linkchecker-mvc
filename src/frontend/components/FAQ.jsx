@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Импорт скриншотов
+// Импорт скриншотов (используем только указанные пути)
 import createProject from '../../assets/images/faq_create_project.png';
 import manual1 from '../../assets/images/faq_manual_links_1.png';
 import manual2 from '../../assets/images/faq_manual_links_2.png';
@@ -19,6 +19,10 @@ const FAQ = () => {
   const [activeTab, setActiveTab] = useState('create');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [touchStartX, setTouchStartX] = useState(null);
+  const [touchEndX, setTouchEndX] = useState(null);
+  const [scale, setScale] = useState(1);
+  const imageRef = useRef(null);
 
   // Массив всех скриншотов для каждой вкладки
   const images = {
@@ -34,34 +38,38 @@ const FAQ = () => {
   const openModal = (index) => {
     setCurrentImageIndex(index);
     setIsModalOpen(true);
+    setScale(1); // Сбрасываем масштаб
     document.body.style.overflow = 'hidden'; // Отключаем скролл
   };
 
   // Закрытие модального окна
   const closeModal = () => {
     setIsModalOpen(false);
+    setScale(1); // Сбрасываем масштаб при закрытии
     document.body.style.overflow = 'auto'; // Включаем скролл
   };
 
   // Следующее изображение
   const nextImage = () => {
-    setCurrentImageIndex((prevIndex) => 
+    setCurrentImageIndex((prevIndex) =>
       prevIndex === currentImages.length - 1 ? 0 : prevIndex + 1
     );
+    setScale(1); // Сбрасываем масштаб при перелистывании
   };
 
   // Предыдущее изображение
   const prevImage = () => {
-    setCurrentImageIndex((prevIndex) => 
+    setCurrentImageIndex((prevIndex) =>
       prevIndex === 0 ? currentImages.length - 1 : prevIndex - 1
     );
+    setScale(1); // Сбрасываем масштаб при перелистывании
   };
 
-  // Обработчик клика по изображению
+  // Обработчик клика по изображению (для десктопа)
   const handleImageClick = (e) => {
     const { clientX, target } = e;
     const { left, width } = target.getBoundingClientRect();
-    const clickPosition = clientX - left; // Позиция клика относительно левого края изображения
+    const clickPosition = clientX - left;
 
     // Если клик в левых 30% изображения — предыдущее фото
     if (clickPosition < width * 0.3) {
@@ -70,6 +78,59 @@ const FAQ = () => {
     // Если клик в правых 30% изображения — следующее фото
     else if (clickPosition > width * 0.7) {
       nextImage();
+    }
+  };
+
+  // Обработчики свайпа для мобильных устройств
+  const handleTouchStart = (e) => {
+    setTouchStartX(e.touches[0].clientX);
+  };
+
+  const handleTouchMove = (e) => {
+    setTouchEndX(e.touches[0].clientX);
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStartX && touchEndX) {
+      const deltaX = touchEndX - touchStartX;
+      if (deltaX > 50) {
+        // Свайп вправо — предыдущее изображение
+        prevImage();
+      } else if (deltaX < -50) {
+        // Свайп влево — следующее изображение
+        nextImage();
+      }
+    }
+    setTouchStartX(null);
+    setTouchEndX(null);
+  };
+
+  // Обработчики для зума пальцами (pinch-to-zoom)
+  const handlePinchStart = (e) => {
+    if (e.touches.length === 2) {
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const initialDistance = Math.hypot(
+        touch1.clientX - touch2.clientX,
+        touch1.clientY - touch2.clientY
+      );
+      e.target.dataset.initialDistance = initialDistance;
+      e.target.dataset.initialScale = scale;
+    }
+  };
+
+  const handlePinchMove = (e) => {
+    if (e.touches.length === 2) {
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const currentDistance = Math.hypot(
+        touch1.clientX - touch2.clientX,
+        touch1.clientY - touch2.clientY
+      );
+      const initialDistance = parseFloat(e.target.dataset.initialDistance);
+      const initialScale = parseFloat(e.target.dataset.initialScale);
+      const newScale = initialScale * (currentDistance / initialDistance);
+      setScale(Math.min(Math.max(newScale, 1), 3)); // Ограничиваем масштаб от 1x до 3x
     }
   };
 
@@ -82,6 +143,12 @@ const FAQ = () => {
     hidden: { opacity: 0, scale: 0.95 },
     visible: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: 'easeOut' } },
     exit: { opacity: 0, scale: 0.95, transition: { duration: 0.2, ease: 'easeIn' } },
+  };
+
+  const imageVariants = {
+    hidden: { opacity: 0, scale: 0.95 },
+    visible: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: 'easeOut' } },
+    exit: { opacity: 0, scale: 0.95, transition: { duration: 0.3, ease: 'easeIn' } },
   };
 
   return (
@@ -298,16 +365,51 @@ const FAQ = () => {
             animate="visible"
             exit="exit"
             variants={modalVariants}
-            onClick={closeModal} // Клик за пределами фото закрывает модальное окно
+            onClick={(e) => {
+              // На десктопе клик за пределами изображения закрывает модальное окно
+              if (window.innerWidth >= 640) {
+                closeModal();
+              }
+            }}
           >
-            <div className="relative w-[70vw] h-[70vh] p-4" onClick={(e) => e.stopPropagation()}>
-              {/* Изображение */}
-              <img
-                src={currentImages[currentImageIndex]}
-                alt={`Screenshot ${currentImageIndex + 1}`}
-                className="w-full h-full object-contain rounded-lg cursor-pointer"
-                onClick={handleImageClick}
-              />
+            <div className="relative w-[70vw] h-[70vh] sm:w-[70vw] sm:h-[70vh] w-full h-full flex items-center justify-center p-0 sm:p-4" onClick={(e) => e.stopPropagation()}>
+              {/* Крестик только для мобильной версии */}
+              <button
+                onClick={closeModal}
+                className="sm:hidden absolute top-4 right-4 bg-gray-800 bg-opacity-50 text-white rounded-full w-8 h-8 flex items-center justify-center z-50"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+
+              {/* Изображение с анимацией появления */}
+              <motion.div
+                key={currentImageIndex} // Ключ для перезапуска анимации при смене изображения
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                variants={imageVariants}
+                className="w-full sm:w-auto sm:h-auto h-auto flex items-center justify-center"
+              >
+                <img
+                  ref={imageRef}
+                  src={currentImages[currentImageIndex]}
+                  alt={`Screenshot ${currentImageIndex + 1}`}
+                  className="w-full sm:max-w-full sm:max-h-[70vh] max-h-[80vh] sm:object-contain object-contain rounded-lg cursor-pointer"
+                  onClick={window.innerWidth >= 640 ? handleImageClick : null} // Клик для десктопа
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                  onTouchStartCapture={handlePinchStart}
+                  onTouchMoveCapture={handlePinchMove}
+                  style={{
+                    transform: `scale(${scale})`,
+                    transformOrigin: 'center',
+                    transition: 'transform 0.2s ease-out',
+                  }}
+                />
+              </motion.div>
             </div>
           </motion.div>
         )}
