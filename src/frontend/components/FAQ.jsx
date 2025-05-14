@@ -24,6 +24,7 @@ const FAQ = () => {
   const [touchCurrentX, setTouchCurrentX] = useState(null);
   const [touchCurrentY, setTouchCurrentY] = useState(null);
   const [touchStartTime, setTouchStartTime] = useState(null); // Для отслеживания времени свайпа
+  const [lastTap, setLastTap] = useState(0); // Для двойного тапа
   const [panX, setPanX] = useState(0); // Для горизонтального смещения при свайпе
   const [panY, setPanY] = useState(0); // Для вертикального смещения при свайпе
   const [scale, setScale] = useState(1); // Для зума
@@ -110,6 +111,20 @@ const FAQ = () => {
     }
   };
 
+  // Обработчик двойного тапа для зума
+  const handleDoubleTap = () => {
+    const currentTime = Date.now();
+    const tapInterval = currentTime - lastTap;
+
+    if (tapInterval < 300 && tapInterval > 0) {
+      // Двойной тап
+      setScale((prevScale) => (prevScale === 1 ? 2 : 1));
+      setOffsetX(0);
+      setOffsetY(0);
+    }
+    setLastTap(currentTime);
+  };
+
   // Обработчики свайпа и перемещения увеличенного изображения
   const handleTouchStart = (e) => {
     setTouchStartX(e.touches[0].clientX);
@@ -122,6 +137,7 @@ const FAQ = () => {
     if (scale > 1) {
       setIsPanning(true); // Если зум активен, начинаем перемещение изображения
     }
+    handleDoubleTap(); // Проверяем двойной тап
   };
 
   const handleTouchMove = (e) => {
@@ -137,9 +153,12 @@ const FAQ = () => {
       // Перемещение увеличенного изображения
       const img = imageRef.current;
       if (img) {
-        const imgRect = img.getBoundingClientRect();
-        const scaledWidth = imgRect.width * scale;
-        const scaledHeight = imgRect.height * scale;
+        const naturalWidth = img.naturalWidth;
+        const naturalHeight = img.naturalHeight;
+
+        const scaledWidth = naturalWidth * scale;
+        const scaledHeight = naturalHeight * scale;
+
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
 
@@ -209,9 +228,12 @@ const FAQ = () => {
       // Плавное возвращение увеличенного изображения к краям
       const img = imageRef.current;
       if (img) {
-        const imgRect = img.getBoundingClientRect();
-        const scaledWidth = imgRect.width * scale;
-        const scaledHeight = imgRect.height * scale;
+        const naturalWidth = img.naturalWidth;
+        const naturalHeight = img.naturalHeight;
+
+        const scaledWidth = naturalWidth * scale;
+        const scaledHeight = naturalHeight * scale;
+
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
 
@@ -543,17 +565,27 @@ const FAQ = () => {
               onClick={(e) => e.stopPropagation()}
               style={{ touchAction: 'none' }} // Отключаем нативный зум и скролл страницы
             >
+              {/* Кнопка "Закрыть" для мобильной версии */}
+              <button
+                onClick={closeModal}
+                className="sm:hidden absolute top-4 right-4 bg-gray-800 bg-opacity-50 text-white rounded-full w-8 h-8 flex items-center justify-center z-50"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+
               {/* Контейнер для всех изображений */}
               <div className="relative w-full h-full flex items-center justify-center">
                 {currentImages.map((image, index) => (
                   <motion.div
                     key={index}
                     className="absolute w-full h-full flex items-center justify-center"
-                    animate={{
+                    animate={scale > 1 ? {} : { // Отключаем Framer Motion анимации при зуме
                       x: (index - currentImageIndex) * window.innerWidth + panX,
-                      opacity: scale > 1 && index !== currentImageIndex ? 0 : 1, // Скрываем соседние изображения при зуме
                       y: panY,
-                      transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' }, // Плавное "приземление" без транзишнов во время свайпа
+                      opacity: scale > 1 && index !== currentImageIndex ? 0 : 1,
+                      transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' },
                     }}
                     style={{
                       display: (!hasSwiped && index !== currentImageIndex) || (scale > 1 && index !== currentImageIndex) ? 'none' : 'flex', // Скрываем соседние изображения до первого свайпа или при зуме
