@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import Panzoom from '@panzoom/panzoom';
 
 // Импорт скриншотов
 import createProject from '../../assets/images/faq_create_project.png';
@@ -23,20 +24,16 @@ const FAQ = () => {
   const [touchStartY, setTouchStartY] = useState(null);
   const [touchCurrentX, setTouchCurrentX] = useState(null);
   const [touchCurrentY, setTouchCurrentY] = useState(null);
-  const [touchStartTime, setTouchStartTime] = useState(null); // Для отслеживания времени свайпа
-  const [lastTap, setLastTap] = useState(0); // Для двойного тапа
-  const [panX, setPanX] = useState(0); // Для горизонтального смещения при свайпе
-  const [panY, setPanY] = useState(0); // Для вертикального смещения при свайпе
-  const [scale, setScale] = useState(1); // Для зума
-  const [offsetX, setOffsetX] = useState(0); // Для перемещения увеличенного изображения по X
-  const [offsetY, setOffsetY] = useState(0); // Для перемещения увеличенного изображения по Y
-  const [modalOpacity, setModalOpacity] = useState(1); // Для прозрачности фона
+  const [touchStartTime, setTouchStartTime] = useState(null);
+  const [lastTap, setLastTap] = useState(0);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [modalOpacity, setModalOpacity] = useState(1);
   const [isSwiping, setIsSwiping] = useState(false);
-  const [isPanning, setIsPanning] = useState(false); // Для перемещения увеличенного изображения
-  const [swipeDirection, setSwipeDirection] = useState(null); // Для определения направления свайпа
-  const [hasSwiped, setHasSwiped] = useState(false); // Для отслеживания, был ли свайп
-  const imageRef = useRef(null); // Для получения размеров изображения
-  const wrapperRef = useRef(null); // Для получения размеров контейнера
+  const [swipeDirection, setSwipeDirection] = useState(null);
+  const [hasSwiped, setHasSwiped] = useState(false);
+  const panzoomInstances = useRef([]); // Для хранения экземпляров Panzoom
+  const wrapperRef = useRef(null);
 
   // Массив всех скриншотов для каждой вкладки
   const images = {
@@ -52,9 +49,6 @@ const FAQ = () => {
   const openModal = (index) => {
     setCurrentImageIndex(index);
     setIsModalOpen(true);
-    setScale(1);
-    setOffsetX(0);
-    setOffsetY(0);
     setPanX(0);
     setPanY(0);
     setModalOpacity(1);
@@ -65,14 +59,15 @@ const FAQ = () => {
   // Закрытие модального окна
   const closeModal = () => {
     setIsModalOpen(false);
-    setScale(1);
-    setOffsetX(0);
-    setOffsetY(0);
     setPanX(0);
     setPanY(0);
     setModalOpacity(1);
     setHasSwiped(false);
     document.body.style.overflow = 'auto';
+    // Сбрасываем Panzoom для всех изображений
+    panzoomInstances.current.forEach((instance) => {
+      if (instance) instance.zoom(1, { animate: false });
+    });
   };
 
   // Следующее изображение
@@ -80,11 +75,13 @@ const FAQ = () => {
     setCurrentImageIndex((prevIndex) =>
       prevIndex === currentImages.length - 1 ? prevIndex : prevIndex + 1
     );
-    setScale(1);
-    setOffsetX(0);
-    setOffsetY(0);
     setPanX(0);
     setPanY(0);
+    // Сбрасываем Panzoom для текущего изображения
+    const instance = panzoomInstances.current[currentImageIndex];
+    if (instance) {
+      instance.zoom(1, { animate: false });
+    }
   };
 
   // Предыдущее изображение
@@ -92,11 +89,13 @@ const FAQ = () => {
     setCurrentImageIndex((prevIndex) =>
       prevIndex === 0 ? prevIndex : prevIndex - 1
     );
-    setScale(1);
-    setOffsetX(0);
-    setOffsetY(0);
     setPanX(0);
     setPanY(0);
+    // Сбрасываем Panzoom для текущего изображения
+    const instance = panzoomInstances.current[currentImageIndex];
+    if (instance) {
+      instance.zoom(1, { animate: false });
+    }
   };
 
   // Обработчик клика по изображению (для десктопа)
@@ -113,57 +112,32 @@ const FAQ = () => {
   };
 
   // Обработчик двойного тапа для зума в точку
-  const handleDoubleTap = (e) => {
+  const handleDoubleTap = (e, instance) => {
     const currentTime = Date.now();
     const tapInterval = currentTime - lastTap;
 
     if (tapInterval < 300 && tapInterval > 0) {
       // Двойной тап
-      const img = imageRef.current;
       const wrapper = wrapperRef.current;
-      if (img && wrapper) {
+      if (wrapper && instance) {
         const rect = wrapper.getBoundingClientRect();
-        const touchX = e.touches[0].clientX - rect.left; // Координата X касания относительно контейнера
-        const touchY = e.touches[0].clientY - rect.top; // Координата Y касания относительно контейнера
+        const touchX = e.touches[0].clientX - rect.left;
+        const touchY = e.touches[0].clientY - rect.top;
 
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-
-        if (scale === 1) {
+        const currentScale = instance.getScale();
+        if (currentScale === 1) {
           // Зум в точку
-          setScale(2);
-
-          // Вычисляем смещение, чтобы точка касания оказалась в центре экрана
-          const naturalWidth = img.naturalWidth;
-          const naturalHeight = img.naturalHeight;
-          const scaledWidth = naturalWidth * 2;
-          const scaledHeight = naturalHeight * 2;
-
-          const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / 2 : 0;
-          const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / 2 : 0;
-
-          // Переводим координаты касания в координаты изображения с учётом масштаба
-          const imageX = (touchX - viewportWidth / 2) / 2; // Учитываем масштаб 2
-          const imageY = (touchY - viewportHeight / 2) / 2;
-
-          // Ограничиваем смещение
-          const newOffsetX = Math.min(maxOffsetX, Math.max(-maxOffsetX, -imageX));
-          const newOffsetY = Math.min(maxOffsetY, Math.max(-maxOffsetY, -imageY));
-
-          setOffsetX(newOffsetX);
-          setOffsetY(newOffsetY);
+          instance.zoomToPoint(2, { clientX: touchX + rect.left, clientY: touchY + rect.top }, { animate: true });
         } else {
           // Сброс зума
-          setScale(1);
-          setOffsetX(0);
-          setOffsetY(0);
+          instance.zoom(1, { animate: true });
         }
       }
     }
     setLastTap(currentTime);
   };
 
-  // Обработчики свайпа и перемещения увеличенного изображения
+  // Обработчики свайпа для мобильных устройств
   const handleTouchStart = (e) => {
     setTouchStartX(e.touches[0].clientX);
     setTouchStartY(e.touches[0].clientY);
@@ -172,14 +146,19 @@ const FAQ = () => {
     setTouchStartTime(Date.now());
     setIsSwiping(true);
     setSwipeDirection(null);
-    if (scale > 1) {
-      setIsPanning(true); // Если зум активен, начинаем перемещение изображения
+
+    const instance = panzoomInstances.current[currentImageIndex];
+    if (instance) {
+      const currentScale = instance.getScale();
+      if (currentScale > 1) {
+        setIsPanning(true);
+      }
+      handleDoubleTap(e, instance);
     }
-    handleDoubleTap(e); // Проверяем двойной тап
   };
 
   const handleTouchMove = (e) => {
-    e.preventDefault(); // Предотвращаем нативное масштабирование страницы
+    e.preventDefault();
     if (!isSwiping) return;
     setTouchCurrentX(e.touches[0].clientX);
     setTouchCurrentY(e.touches[0].clientY);
@@ -187,42 +166,17 @@ const FAQ = () => {
     const deltaX = e.touches[0].clientX - touchStartX;
     const deltaY = e.touches[0].clientY - touchStartY;
 
-    if (isPanning) {
-      // Перемещение увеличенного изображения
-      const img = imageRef.current;
-      if (img) {
-        const naturalWidth = img.naturalWidth;
-        const naturalHeight = img.naturalHeight;
-
-        const scaledWidth = naturalWidth * scale;
-        const scaledHeight = naturalHeight * scale;
-
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-
-        // Вычисляем максимальные смещения
-        const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / scale : 0;
-        const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / scale : 0;
-
-        // Ограничиваем перемещение
-        let newOffsetX = offsetX + deltaX / scale;
-        let newOffsetY = offsetY + deltaY / scale;
-
-        // Жёсткие границы: края изображения всегда прилипают к краям экрана
-        newOffsetX = Math.min(maxOffsetX, Math.max(-maxOffsetX, newOffsetX));
-        newOffsetY = Math.min(maxOffsetY, Math.max(-maxOffsetY, newOffsetY));
-
-        setOffsetX(newOffsetX);
-        setOffsetY(newOffsetY);
-      }
-      return; // Блокируем свайп для листания, пока зум активен
+    const instance = panzoomInstances.current[currentImageIndex];
+    if (isPanning && instance) {
+      // Panzoom сам управляет перемещением, нам не нужно ничего делать
+      return;
     }
 
     // Определяем направление свайпа
     if (!swipeDirection) {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         setSwipeDirection('horizontal');
-        setHasSwiped(true); // Устанавливаем флаг, что начался свайп
+        setHasSwiped(true);
       } else {
         setSwipeDirection('vertical');
       }
@@ -231,19 +185,19 @@ const FAQ = () => {
     if (swipeDirection === 'horizontal') {
       // Горизонтальный свайп (листание фотографий)
       if (currentImages.length === 1) {
-        setPanX(deltaX * 0.3); // Пружинка для единственной фотографии
+        setPanX(deltaX * 0.3);
       } else if (currentImageIndex === 0 && deltaX > 0) {
-        setPanX(deltaX * 0.3); // Пружинка для первой фотографии (свайп вправо)
+        setPanX(deltaX * 0.3);
       } else if (currentImageIndex === currentImages.length - 1 && deltaX < 0) {
-        setPanX(deltaX * 0.3); // Пружинка для последней фотографии (свайп влево)
+        setPanX(deltaX * 0.3);
       } else {
-        setPanX(deltaX); // Иначе следуем за пальцем
+        setPanX(deltaX);
       }
       setPanY(0);
       setModalOpacity(1);
     } else {
       // Вертикальный свайп (закрытие)
-      setPanY(deltaY); // Следуем за пальцем по вертикали
+      setPanY(deltaY);
       setPanX(0);
       const maxSwipeDistance = window.innerHeight / 2;
       const swipeProgress = Math.min(Math.abs(deltaY) / maxSwipeDistance, 1);
@@ -259,59 +213,28 @@ const FAQ = () => {
     const deltaX = touchCurrentX - touchStartX;
     const deltaY = touchCurrentY - touchStartY;
     const touchEndTime = Date.now();
-    const swipeDuration = (touchEndTime - touchStartTime) / 1000; // Длительность в секундах
-    const swipeSpeed = Math.abs(deltaX) / swipeDuration; // Скорость в px/s
+    const swipeDuration = (touchEndTime - touchStartTime) / 1000;
+    const swipeSpeed = Math.abs(deltaX) / swipeDuration;
 
-    if (isPanning) {
-      // Плавное возвращение увеличенного изображения к краям
-      const img = imageRef.current;
-      if (img) {
-        const naturalWidth = img.naturalWidth;
-        const naturalHeight = img.naturalHeight;
-
-        const scaledWidth = naturalWidth * scale;
-        const scaledHeight = naturalHeight * scale;
-
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-
-        const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / scale : 0;
-        const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / scale : 0;
-
-        let newOffsetX = offsetX;
-        let newOffsetY = offsetY;
-
-        newOffsetX = Math.min(maxOffsetX, Math.max(-maxOffsetX, newOffsetX));
-        newOffsetY = Math.min(maxOffsetY, Math.max(-maxOffsetY, newOffsetY));
-
-        setOffsetX(newOffsetX);
-        setOffsetY(newOffsetY);
-      }
-      return; // Блокируем свайп для листания, пока зум активен
+    const instance = panzoomInstances.current[currentImageIndex];
+    if (instance && instance.getScale() > 1) {
+      return;
     }
 
     if (swipeDirection === 'horizontal') {
-      // Определяем порог в зависимости от скорости свайпа
       const swipeThreshold = swipeSpeed > 500 ? 0 : window.innerWidth * 0.4;
-      // Горизонтальный свайп (листание фотографий)
       if (Math.abs(deltaX) > swipeThreshold) {
         if (deltaX > 0 && currentImageIndex > 0) {
-          // Свайп вправо — предыдущее изображение
           prevImage();
         } else if (deltaX < 0 && currentImageIndex < currentImages.length - 1) {
-          // Свайп влево — следующее изображение
           nextImage();
         }
       }
-      // Плавно возвращаем фото на место (эффект пружинки)
       setPanX(0);
     } else {
-      // Вертикальный свайп (закрытие)
       if (Math.abs(deltaY) > window.innerHeight * 0.2) {
-        // Закрываем модальное окно при свайпе вверх или вниз
         closeModal();
       } else {
-        // Если свайп недостаточно сильный, возвращаем фото на место с эффектом пружинки
         setPanY(0);
         setModalOpacity(1);
       }
@@ -325,36 +248,31 @@ const FAQ = () => {
     setSwipeDirection(null);
   };
 
-  // Обработчики для зума пальцами (pinch-to-zoom)
-  const handlePinchStart = (e) => {
-    e.preventDefault(); // Предотвращаем нативное масштабирование страницы
-    if (e.touches.length === 2) {
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const initialDistance = Math.hypot(
-        touch1.clientX - touch2.clientX,
-        touch1.clientY - touch2.clientY
-      );
-      e.target.dataset.initialDistance = initialDistance;
-      e.target.dataset.initialScale = scale;
-    }
-  };
+  // Инициализация Panzoom для каждого изображения
+  useEffect(() => {
+    if (isModalOpen) {
+      const imageElements = document.querySelectorAll('.panzoom-image');
+      imageElements.forEach((element, index) => {
+        const instance = Panzoom(element, {
+          minScale: 1,
+          maxScale: 3,
+          contain: 'inside', // Изображение не выходит за пределы контейнера
+          cursor: 'default',
+          panOnlyWhenZoomed: true,
+          duration: 300, // Плавная анимация зума (300ms)
+          easing: 'ease-in-out',
+        });
+        panzoomInstances.current[index] = instance;
+      });
 
-  const handlePinchMove = (e) => {
-    e.preventDefault(); // Предотвращаем нативное масштабирование страницы
-    if (e.touches.length === 2) {
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const currentDistance = Math.hypot(
-        touch1.clientX - touch2.clientX,
-        touch1.clientY - touch2.clientY
-      );
-      const initialDistance = parseFloat(e.target.dataset.initialDistance);
-      const initialScale = parseFloat(e.target.dataset.initialScale);
-      const newScale = initialScale * (currentDistance / initialDistance);
-      setScale(Math.min(Math.max(newScale, 1), 3)); // Ограничиваем масштаб от 1x до 3x
+      return () => {
+        panzoomInstances.current.forEach((instance) => {
+          if (instance) instance.destroy();
+        });
+        panzoomInstances.current = [];
+      };
     }
-  };
+  }, [isModalOpen, currentImageIndex]);
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
@@ -365,12 +283,6 @@ const FAQ = () => {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { duration: 0.3, ease: 'easeOut' } },
     exit: { opacity: 0, transition: { duration: 0.2, ease: 'easeIn' } },
-  };
-
-  const imageVariants = {
-    hidden: { opacity: 0, x: (swipeDirection === 'horizontal' && touchCurrentX - touchStartX < 0) ? window.innerWidth : -window.innerWidth },
-    visible: { opacity: 1, x: 0, transition: { duration: 0.3, ease: 'easeOut' } },
-    exit: { opacity: 0, x: (swipeDirection === 'horizontal' && touchCurrentX - touchStartX < 0) ? -window.innerWidth : window.innerWidth, transition: { duration: 0.3, ease: 'easeIn' } },
   };
 
   return (
@@ -588,7 +500,6 @@ const FAQ = () => {
             exit="exit"
             variants={modalVariants}
             onClick={(e) => {
-              // На десктопе клик за пределами изображения закрывает модальное окно
               if (window.innerWidth >= 640) {
                 closeModal();
               }
@@ -602,7 +513,7 @@ const FAQ = () => {
               ref={wrapperRef}
               className="relative w-[70vw] h-[70vh] sm:w-[70vw] sm:h-[70vh] w-full h-full flex items-center justify-center p-0 sm:p-4"
               onClick={(e) => e.stopPropagation()}
-              style={{ touchAction: 'none' }} // Отключаем нативный зум и скролл страницы
+              style={{ touchAction: 'none' }}
             >
               {/* Кнопка "Закрыть" для мобильной версии */}
               <button
@@ -620,32 +531,24 @@ const FAQ = () => {
                   <motion.div
                     key={index}
                     className="absolute w-full h-full flex items-center justify-center"
-                    animate={scale > 1 ? {} : { // Отключаем Framer Motion анимации при зуме
+                    animate={scale > 1 ? {} : {
                       x: (index - currentImageIndex) * window.innerWidth + panX,
                       y: panY,
                       opacity: scale > 1 && index !== currentImageIndex ? 0 : 1,
                       transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' },
                     }}
                     style={{
-                      display: (!hasSwiped && index !== currentImageIndex) || (scale > 1 && index !== currentImageIndex) ? 'none' : 'flex', // Скрываем соседние изображения до первого свайпа или при зуме
+                      display: (!hasSwiped && index !== currentImageIndex) || (scale > 1 && index !== currentImageIndex) ? 'none' : 'flex',
                     }}
                   >
                     <img
-                      ref={index === currentImageIndex ? imageRef : null} // Привязываем реф только к текущему изображению
+                      className="panzoom-image w-full sm:max-w-full sm:max-h-[70vh] max-h-[80vh] sm:object-contain object-contain rounded-lg cursor-pointer"
                       src={image}
                       alt={`Screenshot ${index + 1}`}
-                      className="w-full sm:max-w-full sm:max-h-[70vh] max-h-[80vh] sm:object-contain object-contain rounded-lg cursor-pointer"
                       onClick={window.innerWidth >= 640 ? handleImageClick : null}
                       onTouchStart={handleTouchStart}
                       onTouchMove={handleTouchMove}
                       onTouchEnd={handleTouchEnd}
-                      onTouchStartCapture={handlePinchStart}
-                      onTouchMoveCapture={handlePinchMove}
-                      style={{
-                        transform: index === currentImageIndex ? `scale(${scale}) translate(${offsetX}px, ${offsetY}px)` : 'scale(1)',
-                        transformOrigin: 'center',
-                        transition: isSwiping ? 'none' : 'transform 0.3s ease-in-out', // Плавный зум с небольшой анимацией
-                      }}
                     />
                   </motion.div>
                 ))}
