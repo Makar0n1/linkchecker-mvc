@@ -27,10 +27,14 @@ const FAQ = () => {
   const [panX, setPanX] = useState(0); // Для горизонтального смещения при свайпе
   const [panY, setPanY] = useState(0); // Для вертикального смещения при свайпе
   const [scale, setScale] = useState(1); // Для зума
+  const [offsetX, setOffsetX] = useState(0); // Для перемещения увеличенного изображения по X
+  const [offsetY, setOffsetY] = useState(0); // Для перемещения увеличенного изображения по Y
   const [modalOpacity, setModalOpacity] = useState(1); // Для прозрачности фона
   const [isSwiping, setIsSwiping] = useState(false);
+  const [isPanning, setIsPanning] = useState(false); // Для перемещения увеличенного изображения
   const [swipeDirection, setSwipeDirection] = useState(null); // Для определения направления свайпа
   const [hasSwiped, setHasSwiped] = useState(false); // Для отслеживания, был ли свайп
+  const imageRef = useRef(null); // Для получения размеров изображения
 
   // Массив всех скриншотов для каждой вкладки
   const images = {
@@ -47,6 +51,8 @@ const FAQ = () => {
     setCurrentImageIndex(index);
     setIsModalOpen(true);
     setScale(1);
+    setOffsetX(0);
+    setOffsetY(0);
     setPanX(0);
     setPanY(0);
     setModalOpacity(1);
@@ -58,6 +64,8 @@ const FAQ = () => {
   const closeModal = () => {
     setIsModalOpen(false);
     setScale(1);
+    setOffsetX(0);
+    setOffsetY(0);
     setPanX(0);
     setPanY(0);
     setModalOpacity(1);
@@ -71,6 +79,8 @@ const FAQ = () => {
       prevIndex === currentImages.length - 1 ? prevIndex : prevIndex + 1
     );
     setScale(1);
+    setOffsetX(0);
+    setOffsetY(0);
     setPanX(0);
     setPanY(0);
   };
@@ -81,6 +91,8 @@ const FAQ = () => {
       prevIndex === 0 ? prevIndex : prevIndex - 1
     );
     setScale(1);
+    setOffsetX(0);
+    setOffsetY(0);
     setPanX(0);
     setPanY(0);
   };
@@ -98,15 +110,18 @@ const FAQ = () => {
     }
   };
 
-  // Обработчики свайпа для мобильных устройств
+  // Обработчики свайпа и перемещения увеличенного изображения
   const handleTouchStart = (e) => {
     setTouchStartX(e.touches[0].clientX);
     setTouchStartY(e.touches[0].clientY);
     setTouchCurrentX(e.touches[0].clientX);
     setTouchCurrentY(e.touches[0].clientY);
-    setTouchStartTime(Date.now()); // Запоминаем время начала свайпа
+    setTouchStartTime(Date.now());
     setIsSwiping(true);
     setSwipeDirection(null);
+    if (scale > 1) {
+      setIsPanning(true); // Если зум активен, начинаем перемещение изображения
+    }
   };
 
   const handleTouchMove = (e) => {
@@ -117,6 +132,36 @@ const FAQ = () => {
 
     const deltaX = e.touches[0].clientX - touchStartX;
     const deltaY = e.touches[0].clientY - touchStartY;
+
+    if (isPanning) {
+      // Перемещение увеличенного изображения
+      const img = imageRef.current;
+      if (img) {
+        const imgRect = img.getBoundingClientRect();
+        const maxOffsetX = (imgRect.width * scale - window.innerWidth) / 2;
+        const maxOffsetY = (imgRect.height * scale - window.innerHeight) / 2;
+
+        // Ограничиваем перемещение с эффектом пружинки
+        let newOffsetX = offsetX + deltaX;
+        let newOffsetY = offsetY + deltaY;
+
+        // Пружинка по краям
+        if (newOffsetX > maxOffsetX) {
+          newOffsetX = maxOffsetX + (newOffsetX - maxOffsetX) * 0.3; // Пружинка
+        } else if (newOffsetX < -maxOffsetX) {
+          newOffsetX = -maxOffsetX + (newOffsetX + maxOffsetX) * 0.3;
+        }
+        if (newOffsetY > maxOffsetY) {
+          newOffsetY = maxOffsetY + (newOffsetY - maxOffsetY) * 0.3;
+        } else if (newOffsetY < -maxOffsetY) {
+          newOffsetY = -maxOffsetY + (newOffsetY + maxOffsetY) * 0.3;
+        }
+
+        setOffsetX(newOffsetX);
+        setOffsetY(newOffsetY);
+      }
+      return; // Блокируем свайп для листания, пока зум активен
+    }
 
     // Определяем направление свайпа
     if (!swipeDirection) {
@@ -154,16 +199,39 @@ const FAQ = () => {
   const handleTouchEnd = () => {
     if (!isSwiping) return;
     setIsSwiping(false);
+    setIsPanning(false);
 
     const deltaX = touchCurrentX - touchStartX;
     const deltaY = touchCurrentY - touchStartY;
     const touchEndTime = Date.now();
-    const swipeDuration = (touchEndTime - touchStartTime) / 1000; // Длительность свайпа в секундах
-    const swipeSpeed = Math.abs(deltaX) / swipeDuration; // Скорость свайпа (пиксели/секунда)
+    const swipeDuration = (touchEndTime - touchStartTime) / 1000; // Длительность в секундах
+    const swipeSpeed = Math.abs(deltaX) / swipeDuration; // Скорость в px/s
+
+    if (isPanning) {
+      // Плавное возвращение увеличенного изображения к краям
+      const img = imageRef.current;
+      if (img) {
+        const imgRect = img.getBoundingClientRect();
+        const maxOffsetX = (imgRect.width * scale - window.innerWidth) / 2;
+        const maxOffsetY = (imgRect.height * scale - window.innerHeight) / 2;
+
+        let newOffsetX = offsetX;
+        let newOffsetY = offsetY;
+
+        if (newOffsetX > maxOffsetX) newOffsetX = maxOffsetX;
+        if (newOffsetX < -maxOffsetX) newOffsetX = -maxOffsetX;
+        if (newOffsetY > maxOffsetY) newOffsetY = maxOffsetY;
+        if (newOffsetY < -maxOffsetY) newOffsetY = -maxOffsetY;
+
+        setOffsetX(newOffsetX);
+        setOffsetY(newOffsetY);
+      }
+      return; // Блокируем свайп для листания, пока зум активен
+    }
 
     if (swipeDirection === 'horizontal') {
       // Определяем порог в зависимости от скорости свайпа
-      const swipeThreshold = swipeSpeed > 500 ? 0 : window.innerWidth * 0.4; // Если скорость > 500 px/s, перелистываем сразу
+      const swipeThreshold = swipeSpeed > 500 ? 0 : window.innerWidth * 0.4;
       // Горизонтальный свайп (листание фотографий)
       if (Math.abs(deltaX) > swipeThreshold) {
         if (deltaX > 0 && currentImageIndex > 0) {
@@ -491,6 +559,7 @@ const FAQ = () => {
                     }}
                   >
                     <img
+                      ref={index === currentImageIndex ? imageRef : null} // Привязываем реф только к текущему изображению
                       src={image}
                       alt={`Screenshot ${index + 1}`}
                       className="w-full sm:max-w-full sm:max-h-[70vh] max-h-[80vh] sm:object-contain object-contain rounded-lg cursor-pointer"
@@ -501,9 +570,9 @@ const FAQ = () => {
                       onTouchStartCapture={handlePinchStart}
                       onTouchMoveCapture={handlePinchMove}
                       style={{
-                        transform: `scale(${scale})`,
+                        transform: index === currentImageIndex ? `scale(${scale}) translate(${offsetX}px, ${offsetY}px)` : 'scale(1)', // Зум и перемещение только для текущей фотографии
                         transformOrigin: 'center',
-                        transition: isSwiping ? 'none' : 'transform 0.3s ease-out', // Плавный зум только после завершения свайпа
+                        transition: isSwiping ? 'none' : 'transform 0.3s ease-out', // Плавный зум и перемещение только после завершения свайпа
                       }}
                     />
                   </motion.div>
