@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import Panzoom from 'panzoom'; // Исправляем импорт
+import Panzoom from '@panzoom/panzoom';
 
 // Импорт скриншотов
 import createProject from '../../assets/images/faq_create_project.png';
@@ -30,8 +30,10 @@ const FAQ = () => {
   const [panY, setPanY] = useState(0);
   const [modalOpacity, setModalOpacity] = useState(1);
   const [isSwiping, setIsSwiping] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState(null);
   const [hasSwiped, setHasSwiped] = useState(false);
+  const [currentScale, setCurrentScale] = useState(1);
   const panzoomInstances = useRef([]);
   const wrapperRef = useRef(null);
 
@@ -53,6 +55,7 @@ const FAQ = () => {
     setPanY(0);
     setModalOpacity(1);
     setHasSwiped(false);
+    setCurrentScale(1);
     document.body.style.overflow = 'hidden';
   };
 
@@ -63,9 +66,10 @@ const FAQ = () => {
     setPanY(0);
     setModalOpacity(1);
     setHasSwiped(false);
+    setCurrentScale(1);
     document.body.style.overflow = 'auto';
     panzoomInstances.current.forEach((instance) => {
-      if (instance) instance.reset();
+      if (instance) instance.zoom(1, { animate: false });
     });
   };
 
@@ -76,9 +80,10 @@ const FAQ = () => {
     );
     setPanX(0);
     setPanY(0);
+    setCurrentScale(1);
     const instance = panzoomInstances.current[currentImageIndex];
     if (instance) {
-      instance.reset();
+      instance.zoom(1, { animate: false });
     }
   };
 
@@ -89,9 +94,10 @@ const FAQ = () => {
     );
     setPanX(0);
     setPanY(0);
+    setCurrentScale(1);
     const instance = panzoomInstances.current[currentImageIndex];
     if (instance) {
-      instance.reset();
+      instance.zoom(1, { animate: false });
     }
   };
 
@@ -109,22 +115,24 @@ const FAQ = () => {
   };
 
   // Обработчик двойного тапа для зума в точку
-  const handleDoubleTap = (e, instance) => {
+  const handleDoubleTap = (e) => {
     const currentTime = Date.now();
     const tapInterval = currentTime - lastTap;
 
     if (tapInterval < 300 && tapInterval > 0) {
+      const instance = panzoomInstances.current[currentImageIndex];
       const wrapper = wrapperRef.current;
       if (wrapper && instance) {
         const rect = wrapper.getBoundingClientRect();
         const touchX = e.touches[0].clientX;
         const touchY = e.touches[0].clientY;
 
-        const currentZoom = instance.getTransform().scale;
-        if (currentZoom === 1) {
-          instance.zoomAbs(touchX, touchY, 2, 300); // Зум в точку с анимацией 300ms
+        if (currentScale === 1) {
+          instance.zoomToPoint(2, { clientX: touchX, clientY: touchY }, { animate: true });
+          setCurrentScale(2);
         } else {
-          instance.zoomAbs(touchX, touchY, 1, 300); // Сброс зума
+          instance.zoom(1, { animate: true });
+          setCurrentScale(1);
         }
       }
     }
@@ -140,15 +148,6 @@ const FAQ = () => {
     setTouchStartTime(Date.now());
     setIsSwiping(true);
     setSwipeDirection(null);
-
-    const instance = panzoomInstances.current[currentImageIndex];
-    if (instance) {
-      const currentZoom = instance.getTransform().scale;
-      if (currentZoom > 1) {
-        setIsPanning(true);
-      }
-      handleDoubleTap(e, instance);
-    }
   };
 
   const handleTouchMove = (e) => {
@@ -160,12 +159,11 @@ const FAQ = () => {
     const deltaX = e.touches[0].clientX - touchStartX;
     const deltaY = e.touches[0].clientY - touchStartY;
 
-    const instance = panzoomInstances.current[currentImageIndex];
-    if (isPanning && instance) {
-      return; // Panzoom сам управляет перемещением
+    if (currentScale > 1) {
+      setIsPanning(true);
+      return;
     }
 
-    // Определяем направление свайпа
     if (!swipeDirection) {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         setSwipeDirection('horizontal');
@@ -207,8 +205,7 @@ const FAQ = () => {
     const swipeDuration = (touchEndTime - touchStartTime) / 1000;
     const swipeSpeed = Math.abs(deltaX) / swipeDuration;
 
-    const instance = panzoomInstances.current[currentImageIndex];
-    if (instance && instance.getTransform().scale > 1) {
+    if (currentScale > 1) {
       return;
     }
 
@@ -242,18 +239,33 @@ const FAQ = () => {
   // Инициализация Panzoom для каждого изображения
   useEffect(() => {
     if (isModalOpen) {
-      const imageElements = document.querySelectorAll('.panzoom-image');
-      imageElements.forEach((element, index) => {
-        const instance = Panzoom(element, {
-          minZoom: 1,
-          maxZoom: 3,
-          bounds: true, // Ограничивает перемещение, чтобы края не выходили за контейнер
-          boundsPadding: 0.1, // Минимальный отступ от краёв
-          zoomDoubleClickSpeed: 0, // Отключаем встроенный зум по двойному клику (мы сами его реализуем)
-          panOnlyWhenZoomed: true,
+      const initializePanzoom = () => {
+        const imageElements = document.querySelectorAll('.panzoom-image');
+        if (imageElements.length === 0) {
+          setTimeout(initializePanzoom, 100);
+          return;
+        }
+
+        imageElements.forEach((element, index) => {
+          const instance = Panzoom(element, {
+            minScale: 1,
+            maxScale: 3,
+            contain: 'inside',
+            cursor: 'default',
+            panOnlyWhenZoomed: true,
+            duration: 300,
+            easing: 'ease-in-out',
+            disableDoubleClickZoom: true, // Отключаем встроенный зум по двойному клику
+          });
+          panzoomInstances.current[index] = instance;
+
+          element.addEventListener('panzoomchange', (event) => {
+            setCurrentScale(event.detail.scale);
+          });
         });
-        panzoomInstances.current[index] = instance;
-      });
+      };
+
+      initializePanzoom();
 
       return () => {
         panzoomInstances.current.forEach((instance) => {
@@ -521,14 +533,14 @@ const FAQ = () => {
                   <motion.div
                     key={index}
                     className="absolute w-full h-full flex items-center justify-center"
-                    animate={scale > 1 ? {} : {
+                    animate={{
                       x: (index - currentImageIndex) * window.innerWidth + panX,
                       y: panY,
-                      opacity: scale > 1 && index !== currentImageIndex ? 0 : 1,
+                      opacity: index !== currentImageIndex ? 0 : 1,
                       transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' },
                     }}
                     style={{
-                      display: (!hasSwiped && index !== currentImageIndex) || (scale > 1 && index !== currentImageIndex) ? 'none' : 'flex',
+                      display: (!hasSwiped && index !== currentImageIndex) ? 'none' : 'flex',
                     }}
                   >
                     <img
@@ -536,7 +548,10 @@ const FAQ = () => {
                       src={image}
                       alt={`Screenshot ${index + 1}`}
                       onClick={window.innerWidth >= 640 ? handleImageClick : null}
-                      onTouchStart={handleTouchStart}
+                      onTouchStart={(e) => {
+                        handleTouchStart(e);
+                        handleDoubleTap(e);
+                      }}
                       onTouchMove={handleTouchMove}
                       onTouchEnd={handleTouchEnd}
                     />
