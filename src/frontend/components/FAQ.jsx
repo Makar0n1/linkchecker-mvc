@@ -29,12 +29,12 @@ const FAQ = () => {
   const [panY, setPanY] = useState(0);
   const [modalOpacity, setModalOpacity] = useState(1);
   const [isSwiping, setIsSwiping] = useState(false);
-  const [isPanning, setIsPanning] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState(null);
   const [hasSwiped, setHasSwiped] = useState(false);
   const [currentScale, setCurrentScale] = useState(1);
   const panzoomInstances = useRef([]);
   const wrapperRef = useRef(null);
+  const currentImageRef = useRef(null);
 
   // Массив всех скриншотов для каждой вкладки
   const images = {
@@ -68,8 +68,9 @@ const FAQ = () => {
     setCurrentScale(1);
     document.body.style.overflow = 'auto';
     panzoomInstances.current.forEach((instance) => {
-      if (instance) instance.zoom(1, { animate: false });
+      if (instance) instance.destroy();
     });
+    panzoomInstances.current = [];
   };
 
   // Следующее изображение
@@ -80,10 +81,6 @@ const FAQ = () => {
     setPanX(0);
     setPanY(0);
     setCurrentScale(1);
-    const instance = panzoomInstances.current[currentImageIndex];
-    if (instance) {
-      instance.zoom(1, { animate: false });
-    }
   };
 
   // Предыдущее изображение
@@ -94,10 +91,6 @@ const FAQ = () => {
     setPanX(0);
     setPanY(0);
     setCurrentScale(1);
-    const instance = panzoomInstances.current[currentImageIndex];
-    if (instance) {
-      instance.zoom(1, { animate: false });
-    }
   };
 
   // Обработчик клика по изображению (для десктопа)
@@ -113,8 +106,8 @@ const FAQ = () => {
     }
   };
 
-  // Обработчики свайпа для мобильных устройств
-  const handleTouchStart = (e) => {
+  // Обработчики свайпа для контейнера (листание и закрытие)
+  const handleWrapperTouchStart = (e) => {
     setTouchStartX(e.touches[0].clientX);
     setTouchStartY(e.touches[0].clientY);
     setTouchCurrentX(e.touches[0].clientX);
@@ -124,8 +117,7 @@ const FAQ = () => {
     setSwipeDirection(null);
   };
 
-  const handleTouchMove = (e) => {
-    e.preventDefault();
+  const handleWrapperTouchMove = (e) => {
     if (!isSwiping) return;
     setTouchCurrentX(e.touches[0].clientX);
     setTouchCurrentY(e.touches[0].clientY);
@@ -134,8 +126,7 @@ const FAQ = () => {
     const deltaY = e.touches[0].clientY - touchStartY;
 
     if (currentScale > 1) {
-      setIsPanning(true);
-      return;
+      return; // Panzoom сам обрабатывает перемещение при зуме
     }
 
     if (!swipeDirection) {
@@ -168,10 +159,9 @@ const FAQ = () => {
     }
   };
 
-  const handleTouchEnd = () => {
+  const handleWrapperTouchEnd = () => {
     if (!isSwiping) return;
     setIsSwiping(false);
-    setIsPanning(false);
 
     const deltaX = touchCurrentX - touchStartX;
     const deltaY = touchCurrentY - touchStartY;
@@ -210,41 +200,47 @@ const FAQ = () => {
     setSwipeDirection(null);
   };
 
-  // Инициализация Panzoom для каждого изображения
+  // Инициализация Panzoom для текущего изображения
   useEffect(() => {
-    if (isModalOpen) {
-      const initializePanzoom = () => {
-        const imageElements = document.querySelectorAll('.panzoom-image');
-        if (imageElements.length === 0) {
-          setTimeout(initializePanzoom, 100);
-          return;
-        }
+    if (isModalOpen && currentImageRef.current) {
+      // Уничтожаем предыдущие экземпляры Panzoom
+      panzoomInstances.current.forEach((instance) => {
+        if (instance) instance.destroy();
+      });
+      panzoomInstances.current = [];
 
-        imageElements.forEach((element, index) => {
-          const instance = Panzoom(element, {
-            minScale: 1,
-            maxScale: 3,
-            contain: 'inside',
-            cursor: 'default',
-            panOnlyWhenZoomed: true,
-            duration: 300,
-            easing: 'ease-in-out',
-            zoomDoubleClickSpeed: 1, // Включаем зум по двойному тапу
-          });
-          panzoomInstances.current[index] = instance;
+      const element = currentImageRef.current;
+      const instance = Panzoom(element, {
+        minScale: 1,
+        maxScale: 3,
+        contain: 'inside',
+        cursor: 'default',
+        panOnlyWhenZoomed: true,
+        duration: 300,
+        easing: 'ease-in-out',
+        zoomDoubleClickSpeed: 1, // Включаем зум по двойному касанию
+        pinchToZoom: true, // Включаем зум по щипку
+        step: 0.5, // Шаг зума для двойного касания
+      });
 
-          element.addEventListener('panzoomchange', (event) => {
-            setCurrentScale(event.detail.scale);
-          });
-        });
-      };
+      panzoomInstances.current[currentImageIndex] = instance;
 
-      initializePanzoom();
+      // Отладка: проверяем, инициализируется ли Panzoom
+      console.log('Panzoom initialized for image index:', currentImageIndex);
+
+      // Отслеживаем изменения масштаба
+      element.addEventListener('panzoomchange', (event) => {
+        setCurrentScale(event.detail.scale);
+        console.log('Scale changed to:', event.detail.scale);
+      });
+
+      // Отладка: проверяем, срабатывает ли зум
+      element.addEventListener('panzoomzoom', (event) => {
+        console.log('Zoom event triggered:', event.detail);
+      });
 
       return () => {
-        panzoomInstances.current.forEach((instance) => {
-          if (instance) instance.destroy();
-        });
+        instance.destroy();
         panzoomInstances.current = [];
       };
     }
@@ -489,6 +485,9 @@ const FAQ = () => {
               ref={wrapperRef}
               className="relative w-[70vw] h-[70vh] sm:w-[70vw] sm:h-[70vh] w-full h-full flex items-center justify-center p-0 sm:p-4"
               onClick={(e) => e.stopPropagation()}
+              onTouchStart={handleWrapperTouchStart}
+              onTouchMove={handleWrapperTouchMove}
+              onTouchEnd={handleWrapperTouchEnd}
               style={{ touchAction: 'none' }}
             >
               {/* Кнопка "Закрыть" для мобильной версии */}
@@ -518,13 +517,11 @@ const FAQ = () => {
                     }}
                   >
                     <img
+                      ref={index === currentImageIndex ? currentImageRef : null}
                       className="panzoom-image w-full sm:max-w-full sm:max-h-[70vh] max-h-[80vh] sm:object-contain object-contain rounded-lg cursor-pointer"
                       src={image}
                       alt={`Screenshot ${index + 1}`}
                       onClick={window.innerWidth >= 640 ? handleImageClick : null}
-                      onTouchStart={handleTouchStart}
-                      onTouchMove={handleTouchMove}
-                      onTouchEnd={handleTouchEnd}
                     />
                   </motion.div>
                 ))}
