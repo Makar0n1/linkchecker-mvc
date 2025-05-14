@@ -145,11 +145,13 @@ const extractPageData = async (page, link, response, loadTime, finalUrl) => {
     }
   }
 
+  // Ждём полной загрузки страницы, включая динамический контент
   await page.waitForFunction(
-    () => document.readyState === 'complete' || (document.querySelector('meta[name="robots"]') || document.querySelector('a[href]')),
+    () => document.readyState === 'complete',
     { timeout: 10000 },
-  ).catch(() => console.log(`Timeout waiting for page to stabilize for ${link.url}`));
+  ).catch(() => console.log(`Timeout waiting for page to fully load for ${link.url}`));
 
+  // Дополнительная задержка для асинхронного контента
   const randomDelay = Math.floor(Math.random() * 2000) + 1000;
   await new Promise(resolve => setTimeout(resolve, randomDelay));
 
@@ -203,9 +205,13 @@ const extractPageData = async (page, link, response, loadTime, finalUrl) => {
       const links = await page.evaluate(() => {
         const anchors = Array.from(document.querySelectorAll('a'));
         return anchors
-          .map(anchor => anchor.href)
-          .filter(href => href && href.startsWith('http'));
+          .map(anchor => ({
+            href: anchor.href,
+            rel: anchor.getAttribute('rel') || '',
+          }))
+          .filter(link => link.href && link.href.startsWith('http'));
       });
+      console.log(`Extracted links for ${link.url}: ${JSON.stringify(links)}`); // Отладка
       return links;
     } catch (error) {
       console.error(`Error extracting links for ${link.url}:`, error.message);
@@ -217,13 +223,14 @@ const extractPageData = async (page, link, response, loadTime, finalUrl) => {
     let foundLink = null;
 
     const resolvedLinks = await extractLinks();
-    resolvedLinks.forEach(href => {
-      const normalizedHref = normalizeUrl(href);
-      const matchesDomain = targetDomains.some(domain => normalizedHref.includes(domain));
-      if (matchesDomain) {
+    resolvedLinks.forEach(linkData => {
+      const href = linkData.href.toLowerCase();
+      // Проверяем, указывает ли href на один из targetDomains
+      const matchesTarget = targetDomains.some(domain => href.includes(domain));
+      if (matchesTarget) {
         foundLink = {
-          href: href,
-          rel: '',
+          href: linkData.href,
+          rel: linkData.rel,
           anchorText: 'Found in content',
           source: 'extracted',
         };
@@ -236,9 +243,9 @@ const extractPageData = async (page, link, response, loadTime, finalUrl) => {
     $('a').each((i, a) => {
       const href = $(a).attr('href')?.toLowerCase().trim();
       if (href) {
-        const normalizedHref = normalizeUrl(href);
-        const matchesDomain = targetDomains.some(domain => normalizedHref.includes(domain));
-        if (matchesDomain) {
+        // Проверяем, указывает ли href на один из targetDomains
+        const matchesTarget = targetDomains.some(domain => href.includes(domain));
+        if (matchesTarget) {
           const anchorText = $(a).text().trim();
           const hasSvg = $(a).find('svg').length > 0;
           const hasImg = $(a).find('img').length > 0;
@@ -292,8 +299,7 @@ const extractPageData = async (page, link, response, loadTime, finalUrl) => {
         if (parentA.length) {
           const href = parentA.attr('href')?.toLowerCase().trim();
           if (href) {
-            const normalizedHref = normalizeUrl(href);
-            const matchesDomain = targetDomains.some(domain => normalizedHref.includes(domain));
+            const matchesDomain = targetDomains.some(domain => href.includes(domain));
             if (matchesDomain) {
               const anchorText = `Link in ${tag}`;
               foundLink = {
@@ -370,10 +376,11 @@ const updateLinkStatus = (link, isMetaRobotsFound, linksFound, captchaType, capt
   if (hasUsefulData) {
     if (isLinkFound) {
       link.status = 'active';
-      link.rel = linksFound.rel;
+      link.rel = linksFound.rel || '';
       link.anchorText = linksFound.anchorText;
-      const relValues = linksFound.rel ? linksFound.rel.toLowerCase().split(' ') : [];
-      link.linkType = relValues.some(value => ['nofollow', 'ugc', 'sponsored'].includes(value)) ? 'nofollow' : 'dofollow';
+      const relValues = link.rel ? link.rel.toLowerCase().split(' ') : [];
+      console.log(`Link ${link.url}: rel="${link.rel}", relValues=${relValues}`); // Отладка
+      link.linkType = relValues.includes('nofollow') ? 'nofollow' : 'dofollow';
       link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
     } else {
       link.status = 'active';
