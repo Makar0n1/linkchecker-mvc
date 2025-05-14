@@ -49,7 +49,7 @@ const FAQ = () => {
     setPanX(0);
     setPanY(0);
     setModalOpacity(1);
-    setHasSwiped(false); // Сбрасываем флаг свайпа при открытии
+    setHasSwiped(false);
     document.body.style.overflow = 'hidden';
   };
 
@@ -157,7 +157,7 @@ const FAQ = () => {
 
     if (swipeDirection === 'horizontal') {
       // Горизонтальный свайп (листание фотографий)
-      if (Math.abs(deltaX) > window.innerWidth * 0.2) {
+      if (Math.abs(deltaX) > window.innerWidth * 0.6) { // Порог 60%
         if (deltaX > 0 && currentImageIndex > 0) {
           // Свайп вправо — предыдущее изображение
           prevImage();
@@ -469,7 +469,7 @@ const FAQ = () => {
                       x: (index - currentImageIndex) * window.innerWidth + panX,
                       opacity: 1,
                       y: panY,
-                      transition: { duration: 0.2, ease: 'easeOut' },
+                      transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' }, // Плавное "приземление" без транзишнов во время свайпа
                     }}
                     style={{
                       display: (!hasSwiped && index !== currentImageIndex) ? 'none' : 'flex', // Скрываем соседние изображения до первого свайпа
@@ -488,7 +488,7 @@ const FAQ = () => {
                       style={{
                         transform: `scale(${scale})`,
                         transformOrigin: 'center',
-                        transition: 'transform 0.2s ease-out',
+                        transition: isSwiping ? 'none' : 'transform 0.3s ease-out', // Плавный зум только после завершения свайпа
                       }}
                     />
                   </motion.div>
