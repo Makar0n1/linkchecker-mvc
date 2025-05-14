@@ -200,7 +200,7 @@ const FAQ = () => {
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
 
-        // Вычисляем максимальные смещения так, чтобы края изображения всегда касались краёв экрана
+        // Вычисляем максимальные смещения
         const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / scale : 0;
         const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / scale : 0;
 
@@ -644,7 +644,7 @@ const FAQ = () => {
                       style={{
                         transform: index === currentImageIndex ? `scale(${scale}) translate(${offsetX}px, ${offsetY}px)` : 'scale(1)',
                         transformOrigin: 'center',
-                        transition: isSwiping ? 'none' : 'transform 0.2s ease-in-out', // Плавный зум с небольшой анимацией
+                        transition: isSwiping ? 'none' : 'transform 0.3s ease-in-out', // Плавный зум с небольшой анимацией
                       }}
                     />
                   </motion.div>
