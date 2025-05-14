@@ -143,11 +143,11 @@ const FAQ = () => {
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
 
-        // Вычисляем максимальные смещения так, чтобы края изображения не отрывались от краёв экрана
+        // Вычисляем максимальные смещения так, чтобы края изображения всегда касались краёв экрана
         const maxOffsetX = scaledWidth > viewportWidth ? (scaledWidth - viewportWidth) / 2 / scale : 0;
         const maxOffsetY = scaledHeight > viewportHeight ? (scaledHeight - viewportHeight) / 2 / scale : 0;
 
-        // Ограничиваем перемещение без пружинки за пределами
+        // Ограничиваем перемещение
         let newOffsetX = offsetX + deltaX / scale;
         let newOffsetY = offsetY + deltaY / scale;
 
