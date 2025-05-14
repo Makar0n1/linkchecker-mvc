@@ -36,6 +36,7 @@
     "mongoose": "^6.0.0",
     "node-schedule": "^2.1.1",
     "p-limit": "^6.2.0",
+    "panzoom": "^9.4.3",
     "puppeteer": "^23.11.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
