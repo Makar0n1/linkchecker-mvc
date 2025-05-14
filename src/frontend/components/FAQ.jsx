@@ -29,7 +29,7 @@ const FAQ = () => {
   const [modalOpacity, setModalOpacity] = useState(1); // Для прозрачности фона
   const [isSwiping, setIsSwiping] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState(null); // Для определения направления свайпа
-  const [isInitialRender, setIsInitialRender] = useState(true); // Для предотвращения мелькания
+  const [hasSwiped, setHasSwiped] = useState(false); // Для отслеживания, был ли свайп
 
   // Массив всех скриншотов для каждой вкладки
   const images = {
@@ -49,7 +49,7 @@ const FAQ = () => {
     setPanX(0);
     setPanY(0);
     setModalOpacity(1);
-    setIsInitialRender(true); // Устанавливаем флаг начального рендера
+    setHasSwiped(false); // Сбрасываем флаг свайпа при открытии
     document.body.style.overflow = 'hidden';
   };
 
@@ -60,6 +60,7 @@ const FAQ = () => {
     setPanX(0);
     setPanY(0);
     setModalOpacity(1);
+    setHasSwiped(false);
     document.body.style.overflow = 'auto';
   };
 
@@ -118,6 +119,7 @@ const FAQ = () => {
     if (!swipeDirection) {
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
         setSwipeDirection('horizontal');
+        setHasSwiped(true); // Устанавливаем флаг, что начался свайп
       } else {
         setSwipeDirection('vertical');
       }
@@ -465,15 +467,12 @@ const FAQ = () => {
                     className="absolute w-full h-full flex items-center justify-center"
                     animate={{
                       x: (index - currentImageIndex) * window.innerWidth + panX,
-                      opacity: isInitialRender && index !== currentImageIndex ? 0 : 1, // Предотвращаем мелькание
+                      opacity: 1,
                       y: panY,
-                      transition: { duration: 0.3, ease: 'easeOut' },
+                      transition: { duration: 0.2, ease: 'easeOut' },
                     }}
                     style={{
-                      display: index === currentImageIndex || Math.abs(index - currentImageIndex) <= 1 ? 'flex' : 'none',
-                    }}
-                    onAnimationComplete={() => {
-                      if (isInitialRender) setIsInitialRender(false); // После первой анимации убираем флаг
+                      display: (!hasSwiped && index !== currentImageIndex) ? 'none' : 'flex', // Скрываем соседние изображения до первого свайпа
                     }}
                   >
                     <img
