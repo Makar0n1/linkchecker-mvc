@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import Panzoom from '@panzoom/panzoom';
+import { useGesture } from '@use-gesture/react';
 
 // Импорт скриншотов
 import createProject from '../../assets/images/faq_create_project.png';
@@ -20,22 +20,11 @@ const FAQ = () => {
   const [activeTab, setActiveTab] = useState('create');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [touchStartX, setTouchStartX] = useState(null);
-  const [touchStartY, setTouchStartY] = useState(null);
-  const [touchCurrentX, setTouchCurrentX] = useState(null);
-  const [touchCurrentY, setTouchCurrentY] = useState(null);
-  const [touchStartTime, setTouchStartTime] = useState(null);
+  const [scale, setScale] = useState(1);
+  const [swipeOffset, setSwipeOffset] = useState({ x: 0, y: 0 });
   const [lastTap, setLastTap] = useState(0);
-  const [panX, setPanX] = useState(0);
-  const [panY, setPanY] = useState(0);
-  const [modalOpacity, setModalOpacity] = useState(1);
-  const [isSwiping, setIsSwiping] = useState(false);
-  const [swipeDirection, setSwipeDirection] = useState(null);
-  const [hasSwiped, setHasSwiped] = useState(false);
-  const [currentScale, setCurrentScale] = useState(1);
-  const panzoomInstances = useRef([]);
-  const wrapperRef = useRef(null);
-  const currentImageRef = useRef(null);
+  const containerRef = useRef(null);
+  const isDragging = useRef(false);
 
   // Массив всех скриншотов для каждой вкладки
   const images = {
@@ -47,51 +36,46 @@ const FAQ = () => {
   // Текущие изображения в зависимости от активной вкладки
   const currentImages = images[activeTab];
 
-  // Открытие модального окна с определённым изображением
+  // Открытие модального окна
   const openModal = (index) => {
     setCurrentImageIndex(index);
     setIsModalOpen(true);
-    setPanX(0);
-    setPanY(0);
-    setModalOpacity(1);
-    setHasSwiped(false);
-    setCurrentScale(1);
+    setScale(1);
+    setSwipeOffset({ x: 0, y: 0 });
     document.body.style.overflow = 'hidden';
   };
 
   // Закрытие модального окна
   const closeModal = () => {
     setIsModalOpen(false);
-    setPanX(0);
-    setPanY(0);
-    setModalOpacity(1);
-    setHasSwiped(false);
-    setCurrentScale(1);
+    setScale(1);
+    setSwipeOffset({ x: 0, y: 0 });
     document.body.style.overflow = 'auto';
-    panzoomInstances.current.forEach((instance) => {
-      if (instance) instance.destroy();
-    });
-    panzoomInstances.current = [];
   };
 
-  // Следующее изображение
-  const nextImage = () => {
-    setCurrentImageIndex((prevIndex) =>
-      prevIndex === currentImages.length - 1 ? prevIndex : prevIndex + 1
-    );
-    setPanX(0);
-    setPanY(0);
-    setCurrentScale(1);
-  };
+  // Обработчик двойного тапа для зума (только для мобильных устройств)
+  const handleDoubleTap = (event) => {
+    const currentTime = Date.now();
+    const tapInterval = currentTime - lastTap;
 
-  // Предыдущее изображение
-  const prevImage = () => {
-    setCurrentImageIndex((prevIndex) =>
-      prevIndex === 0 ? prevIndex : prevIndex - 1
-    );
-    setPanX(0);
-    setPanY(0);
-    setCurrentScale(1);
+    if (tapInterval < 300 && tapInterval > 0) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const tapX = event.clientX - rect.left;
+      const tapY = event.clientY - rect.top;
+
+      if (scale > 1) {
+        // Zoom out
+        setScale(1);
+        setSwipeOffset({ x: 0, y: 0 });
+      } else {
+        // Zoom in at tap point
+        setScale(2);
+        const newX = (rect.width / 2 - tapX) * 2;
+        const newY = (rect.height / 2 - tapY) * 2;
+        setSwipeOffset({ x: newX, y: newY });
+      }
+    }
+    setLastTap(currentTime);
   };
 
   // Обработчик клика по изображению (для десктопа)
@@ -100,167 +84,125 @@ const FAQ = () => {
     const { left, width } = target.getBoundingClientRect();
     const clickPosition = clientX - left;
 
-    if (clickPosition < width * 0.3) {
-      prevImage();
-    } else if (clickPosition > width * 0.7) {
-      nextImage();
+    if (clickPosition < width * 0.3 && currentImageIndex > 0) {
+      setCurrentImageIndex(currentImageIndex - 1);
+    } else if (clickPosition > width * 0.7 && currentImageIndex < currentImages.length - 1) {
+      setCurrentImageIndex(currentImageIndex + 1);
     }
   };
 
-  // Обработчик двойного тапа для зума
-  const handleDoubleTap = (e) => {
-    const currentTime = Date.now();
-    const tapInterval = currentTime - lastTap;
+  // Обработчик жестов с помощью @use-gesture/react (только для мобильных устройств)
+  useGesture(
+    {
+      onDrag: ({ movement: [mx, my], first, last, velocity, direction, pinching }) => {
+        // Пропускаем, если это десктоп
+        if (window.innerWidth >= 640) return;
 
-    if (tapInterval < 300 && tapInterval > 0) {
-      const instance = panzoomInstances.current[currentImageIndex];
-      if (instance) {
-        const touchX = e.touches[0].clientX;
-        const touchY = e.touches[0].clientY;
+        if (pinching) return;
 
-        if (currentScale === 1) {
-          instance.zoomToPoint(2, { clientX: touchX, clientY: touchY }, { animate: true });
-          console.log('Zoom in triggered:', { touchX, touchY });
+        if (first) {
+          isDragging.current = true;
+        }
+
+        if (scale > 1) {
+          // Pan when zoomed, with boundaries
+          const rect = containerRef.current.getBoundingClientRect();
+          const imgRect = document.querySelector(`img[alt="Screenshot ${currentImageIndex + 1}"]`)?.getBoundingClientRect();
+          
+          if (imgRect) {
+            const scaledWidth = imgRect.width * scale;
+            const scaledHeight = imgRect.height * scale;
+            const maxX = (scaledWidth - rect.width) / 2 / scale;
+            const maxY = (scaledHeight - rect.height) / 2 / scale;
+
+            const newX = Math.max(-maxX, Math.min(maxX, mx / scale));
+            const newY = Math.max(-maxY, Math.min(maxY, my / scale));
+
+            setSwipeOffset({
+              x: newX * scale,
+              y: newY * scale,
+            });
+          }
         } else {
-          instance.zoom(1, { animate: true });
-          console.log('Zoom out triggered:', { touchX, touchY });
+          // Swipe to navigate or close
+          const absX = Math.abs(mx);
+          const absY = Math.abs(my);
+          if (absX > absY) {
+            // Horizontal swipe
+            setSwipeOffset({ x: mx, y: 0 });
+          } else {
+            // Vertical swipe
+            setSwipeOffset({ x: 0, y: my });
+          }
         }
-      }
-    }
-    setLastTap(currentTime);
-  };
 
-  // Обработчики свайпа для контейнера (листание и закрытие)
-  const handleWrapperTouchStart = (e) => {
-    setTouchStartX(e.touches[0].clientX);
-    setTouchStartY(e.touches[0].clientY);
-    setTouchCurrentX(e.touches[0].clientX);
-    setTouchCurrentY(e.touches[0].clientY);
-    setTouchStartTime(Date.now());
-    setIsSwiping(true);
-    setSwipeDirection(null);
-    handleDoubleTap(e);
-  };
+        if (last) {
+          isDragging.current = false;
+          const swipeThreshold = 100;
+          const velocityThreshold = 0.3;
 
-  const handleWrapperTouchMove = (e) => {
-    if (!isSwiping) return;
-    setTouchCurrentX(e.touches[0].clientX);
-    setTouchCurrentY(e.touches[0].clientY);
-
-    const deltaX = e.touches[0].clientX - touchStartX;
-    const deltaY = e.touches[0].clientY - touchStartY;
-
-    if (currentScale > 1) {
-      return; // Panzoom сам обрабатывает перемещение при зуме
-    }
-
-    if (!swipeDirection) {
-      if (Math.abs(deltaX) > Math.abs(deltaY)) {
-        setSwipeDirection('horizontal');
-        setHasSwiped(true);
-      } else {
-        setSwipeDirection('vertical');
-      }
-    }
-
-    if (swipeDirection === 'horizontal') {
-      setPanX(deltaX);
-      setPanY(0);
-      setModalOpacity(1);
-    } else {
-      setPanY(deltaY);
-      setPanX(0);
-      const maxSwipeDistance = window.innerHeight / 2;
-      const swipeProgress = Math.min(Math.abs(deltaY) / maxSwipeDistance, 1);
-      setModalOpacity(1 - swipeProgress);
-    }
-  };
-
-  const handleWrapperTouchEnd = () => {
-    if (!isSwiping) return;
-    setIsSwiping(false);
-
-    const deltaX = touchCurrentX - touchStartX;
-    const deltaY = touchCurrentY - touchStartY;
-    const touchEndTime = Date.now();
-    const swipeDuration = (touchEndTime - touchStartTime) / 1000;
-    const swipeSpeed = Math.abs(deltaX) / swipeDuration;
-
-    if (currentScale > 1) {
-      return;
-    }
-
-    if (swipeDirection === 'horizontal') {
-      const swipeThreshold = swipeSpeed > 500 ? 0 : window.innerWidth * 0.4;
-      if (Math.abs(deltaX) > swipeThreshold) {
-        if (deltaX > 0 && currentImageIndex > 0) {
-          prevImage();
-        } else if (deltaX < 0 && currentImageIndex < currentImages.length - 1) {
-          nextImage();
+          if (scale <= 1) {
+            const absX = Math.abs(mx);
+            const absY = Math.abs(my);
+            if (absX > absY && (absX > swipeThreshold || Math.abs(velocity[0]) > velocityThreshold)) {
+              // Horizontal swipe to navigate
+              if (mx > 0 && currentImageIndex > 0) {
+                setCurrentImageIndex(currentImageIndex - 1);
+              } else if (mx < 0 && currentImageIndex < currentImages.length - 1) {
+                setCurrentImageIndex(currentImageIndex + 1);
+              }
+            } else if (absY > swipeThreshold || Math.abs(velocity[1]) > velocityThreshold) {
+              // Vertical swipe to close
+              closeModal();
+            }
+          }
+          setSwipeOffset({ x: scale > 1 ? swipeOffset.x : 0, y: scale > 1 ? swipeOffset.y : 0 });
         }
-      }
-      setPanX(0);
-    } else {
-      if (Math.abs(deltaY) > window.innerHeight * 0.2) {
-        closeModal();
-      } else {
-        setPanY(0);
-        setModalOpacity(1);
-      }
+      },
+      onPinch: ({ origin, offset: [s], first, last }) => {
+        // Пропускаем, если это десктоп
+        if (window.innerWidth >= 640) return;
+
+        if (first) {
+          isDragging.current = true;
+        }
+        const newScale = Math.min(Math.max(s, 1), 3);
+        setScale(newScale);
+
+        if (!last) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const pinchX = origin[0] - rect.left;
+          const pinchY = origin[1] - rect.top;
+          const newX = (rect.width / 2 - pinchX) * newScale + (rect.width / 2 - pinchX);
+          const newY = (rect.height / 2 - pinchY) * newScale + (rect.height / 2 - pinchY);
+          setSwipeOffset({ x: newX, y: newY });
+        }
+
+        if (last) {
+          isDragging.current = false;
+        }
+      },
+      onClick: ({ event }) => {
+        // Пропускаем, если это десктоп
+        if (window.innerWidth >= 640) return;
+
+        if (!isDragging.current) {
+          handleDoubleTap(event);
+        }
+      },
+    },
+    {
+      target: containerRef,
+      drag: { filterTaps: true },
+      pinch: { scaleBounds: { min: 1, max: 3 } },
     }
+  );
 
-    setTouchStartX(null);
-    setTouchStartY(null);
-    setTouchCurrentX(null);
-    setTouchCurrentY(null);
-    setTouchStartTime(null);
-    setSwipeDirection(null);
-  };
-
-  // Инициализация Panzoom для текущего изображения
+  // Сброс зума и смещения при смене изображения
   useEffect(() => {
-    if (isModalOpen && currentImageRef.current) {
-      // Уничтожаем предыдущие экземпляры Panzoom
-      panzoomInstances.current.forEach((instance) => {
-        if (instance) instance.destroy();
-      });
-      panzoomInstances.current = [];
-
-      const element = currentImageRef.current;
-      const instance = Panzoom(element, {
-        minScale: 1,
-        maxScale: 3,
-        contain: 'inside',
-        cursor: 'default',
-        panOnlyWhenZoomed: true,
-        duration: 300,
-        easing: 'ease-in-out',
-        pinchToZoom: true, // Включаем зум по щипку
-        step: 0.5, // Шаг зума
-      });
-
-      panzoomInstances.current[currentImageIndex] = instance;
-
-      // Отладка: проверяем, инициализируется ли Panzoom
-      console.log('Panzoom initialized for image index:', currentImageIndex);
-
-      // Отслеживаем изменения масштаба
-      element.addEventListener('panzoomchange', (event) => {
-        setCurrentScale(event.detail.scale);
-        console.log('Scale changed to:', event.detail.scale);
-      });
-
-      // Отладка: проверяем, срабатывает ли зум
-      element.addEventListener('panzoomzoom', (event) => {
-        console.log('Zoom event triggered:', event.detail);
-      });
-
-      return () => {
-        instance.destroy();
-        panzoomInstances.current = [];
-      };
-    }
-  }, [isModalOpen, currentImageIndex]);
+    setScale(1);
+    setSwipeOffset({ x: 0, y: 0 });
+  }, [currentImageIndex]);
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
@@ -482,67 +424,77 @@ const FAQ = () => {
       <AnimatePresence>
         {isModalOpen && (
           <motion.div
-            className="fixed inset-0 bg-black flex items-center justify-center z-50"
+            className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]"
             initial="hidden"
             animate="visible"
             exit="exit"
             variants={modalVariants}
-            onClick={(e) => {
-              if (window.innerWidth >= 640) {
-                closeModal();
-              }
-            }}
-            style={{
-              backgroundColor: `rgba(0, 0, 0, ${modalOpacity * 0.75})`,
-              transition: 'background-color 0.3s ease-out',
+            onClick={() => {
+              console.log('Clicked on outer container');
+              closeModal(); // Закрытие работает на всех устройствах
             }}
           >
             <div
-              ref={wrapperRef}
-              className="relative w-[70vw] h-[70vh] sm:w-[70vw] sm:h-[70vh] w-full h-full flex items-center justify-center p-0 sm:p-4"
-              onClick={(e) => e.stopPropagation()}
-              onTouchStart={handleWrapperTouchStart}
-              onTouchMove={handleWrapperTouchMove}
-              onTouchEnd={handleWrapperTouchEnd}
-              style={{ touchAction: 'none' }}
+              ref={containerRef}
+              className="relative w-full max-h-[70vh] flex items-center justify-center"
+              onClick={(e) => {
+                console.log('Clicked on inner container');
+                e.stopPropagation();
+              }}
+              style={{ touchAction: 'none', overflow: 'visible' }}
             >
-              {/* Кнопка "Закрыть" для мобильной версии */}
-              <button
-                onClick={closeModal}
-                className="sm:hidden absolute top-4 right-4 bg-gray-800 bg-opacity-50 text-white rounded-full w-8 h-8 flex items-center justify-center z-50"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-
-              {/* Контейнер для всех изображений */}
-              <div className="relative w-full h-full flex items-center justify-center">
-                {currentImages.map((image, index) => (
-                  <motion.div
-                    key={index}
-                    className="absolute w-full h-full flex items-center justify-center"
-                    animate={{
-                      x: (index - currentImageIndex) * window.innerWidth * 0.8 + panX,
-                      y: panY,
-                      opacity: 1, // Все слайды видимы, но с разной прозрачностью
-                      transition: isSwiping ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' },
-                    }}
-                    style={{
-                      opacity: index === currentImageIndex ? 1 : (isSwiping ? 0.3 : 0), // Соседние слайды видны только во время свайпа
-                      zIndex: index === currentImageIndex ? 10 : 5, // Текущий слайд выше остальных
-                    }}
-                  >
-                    <img
-                      ref={index === currentImageIndex ? currentImageRef : null}
-                      className="panzoom-image w-full sm:max-w-full sm:max-h-[70vh] max-h-[80vh] sm:object-contain object-contain rounded-lg cursor-pointer"
+              {/* Контейнер для изображений */}
+              {window.innerWidth >= 640 ? (
+                // На десктопе рендерим только текущее изображение
+                <motion.img
+                  key={currentImageIndex}
+                  src={currentImages[currentImageIndex]}
+                  alt={`Screenshot ${currentImageIndex + 1}`}
+                  className="max-w-full max-h-[60vh] sm:max-h-[70vh] object-contain rounded-lg"
+                  animate={{
+                    x: 0,
+                    y: 0,
+                    scale: 1,
+                    opacity: 1,
+                    transition: { type: 'spring', stiffness: 300, damping: 30 },
+                  }}
+                  style={{
+                    zIndex: 10,
+                    transformOrigin: 'center center',
+                    userSelect: 'none',
+                  }}
+                  onClick={handleImageClick}
+                />
+              ) : (
+                // На мобильных устройствах рендерим все изображения для свайпа
+                currentImages.map((image, index) => {
+                  const xPosition = (index - currentImageIndex) * window.innerWidth + swipeOffset.x;
+                  console.log(`Rendering image ${index}, currentImageIndex: ${currentImageIndex}, xPosition: ${xPosition}, swipeOffset.x: ${swipeOffset.x}`);
+                  console.log(`Container dimensions: width=${containerRef.current?.getBoundingClientRect().width}, height=${containerRef.current?.getBoundingClientRect().height}`);
+                  return (
+                    <motion.img
+                      key={index}
                       src={image}
                       alt={`Screenshot ${index + 1}`}
-                      onClick={window.innerWidth >= 640 ? handleImageClick : null}
+                      className="absolute max-w-full max-h-[60vh] object-contain rounded-lg"
+                      initial={{ x: (index - currentImageIndex) * window.innerWidth }}
+                      animate={{
+                        x: xPosition,
+                        y: swipeOffset.y,
+                        scale: scale,
+                        opacity: index === currentImageIndex ? 1 : (Math.abs(index - currentImageIndex) <= 1 ? 0.3 : 0),
+                        transition: { type: 'spring', stiffness: 300, damping: 30 },
+                      }}
+                      style={{
+                        zIndex: index === currentImageIndex ? 10 : 5,
+                        transformOrigin: 'center center',
+                        userSelect: 'none',
+                        width: '100%',
+                      }}
                     />
-                  </motion.div>
-                ))}
-              </div>
+                  );
+                })
+              )}
             </div>
           </motion.div>
         )}
