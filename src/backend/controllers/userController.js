@@ -228,6 +228,29 @@ const getUserTasks = async (req, res) => {
   }
 };
 
+const updatePassword = async (req, res) => {
+  const { username, newPassword } = req.body;
+
+  if (!username || !newPassword) {
+    return res.status(400).json({ error: 'Username and newPassword are required' });
+  }
+
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    return res.json({ message: 'Password updated successfully' });
+  } catch (error) {
+    console.error(`updatePassword: Error updating password for user ${username}:`, error.message);
+    return res.status(500).json({ error: 'Failed to update password' });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
@@ -239,4 +262,5 @@ module.exports = {
   updateProfile,
   refreshToken,
   getUserTasks,
+  updatePassword,
 };

@@ -11,6 +11,7 @@ const {
   updateProfile,
   refreshToken,
   getUserTasks,
+  updatePassword,
 } = require('./userController');
 const {
   createProject,
@@ -51,6 +52,7 @@ module.exports = {
   getTaskProgressSSE,
   registerUser,
   loginUser,
+  updatePassword,
   getUserInfo: [authMiddleware, getUserInfo],
   createProject: [authMiddleware, createProject],
   getProjects: [authMiddleware, getProjects],

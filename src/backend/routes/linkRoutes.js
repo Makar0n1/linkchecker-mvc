@@ -40,4 +40,7 @@ router.put('/profile', linkController.updateProfile);
 router.post('/cancel-subscription', linkController.cancelSubscription);
 router.delete('/account', linkController.deleteAccount);
 
+// Новый маршрут для смены пароля
+router.post('/update-password', linkController.updatePassword);
+
 module.exports = router;
