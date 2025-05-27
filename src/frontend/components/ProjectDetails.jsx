@@ -318,21 +318,21 @@ const ProjectDetails = () => {
             </div>
           </div>
         )}
-        <div className="min-w-[250px] max-h-[200px] bg-gray-50 p-3 rounded-lg shadow-sm">
+        <div style={{ padding: "14px 0" }} className="min-w-[250px] max-h-[200px] bg-gray-50 p-3 rounded-lg shadow-sm">
           <h4 className="text-xs font-semibold text-gray-600">Link Types</h4>
           <Bar data={chartDataLinkTypes(stats)} options={{ responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, maintainAspectRatio: false }} height={60} />
         </div>
-        <div className="min-w-[250px] max-h-[200px] bg-gray-50 p-3 rounded-lg shadow-sm">
+        <div style={{ padding: "14px 0" }} className="min-w-[250px] max-h-[200px] bg-gray-50 p-3 rounded-lg shadow-sm">
           <h4 className="text-xs font-semibold text-gray-600">Statuses</h4>
           <Pie data={chartDataStatuses(stats)} options={{ responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, maintainAspectRatio: false }} height={60} />
         </div>
-        <div className="min-w-[250px] max-h-[200px] bg-gray-50 p-3 rounded-lg shadow-sm">
+        <div style={{ padding: "14px 0" }} className="min-w-[250px] max-h-[200px] bg-gray-50 p-3 rounded-lg shadow-sm">
           <h4 className="text-xs font-semibold text-gray-600">Response Codes</h4>
           <Bar data={chartDataResponseCodes(stats)} options={{ responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, maintainAspectRatio: false }} height={60} />
         </div>
-        <div className="min-w-[250px] max-h-[200px] bg-gray-50 p-3 rounded-lg shadow-sm">
+        <div style={{ padding: "14px 0" }} className="min-w-[250px] max-h-[200px] bg-gray-50 p-3 rounded-lg shadow-sm">
           <h4 className="text-xs font-semibold text-gray-600">Indexability</h4>
-          <Pie data={chartDataIndexability(stats)} options={{ responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, maintainAspectRatio: false }} height={60} />
+            <Pie data={chartDataIndexability(stats)} options={{ responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, maintainAspectRatio: false }} height={60}/>
         </div>
       </>
     );
