@@ -3,8 +3,11 @@
 @tailwind utilities;
 
 .will-change-height {
-    will-change: height;
-  }
+  will-change: height;
+}
 body {
-    overscroll-behavior: none;
+  overscroll-behavior: none;
+}
+.error-message {
+  @apply bg-red-100 p-3 rounded-lg border border-red-200;
 }

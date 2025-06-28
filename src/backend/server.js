@@ -7,18 +7,20 @@ const linkRoutes = require('./routes/linkRoutes');
 const WebSocket = require('ws');
 const Spreadsheet = require('./models/Spreadsheet');
 const Project = require('./models/Project');
+const authMiddleware = require('./controllers/middleware/authMiddleware');
 
-// Загружаем .env в зависимости от окружения
+// Загружаем .env из корня проекта
 const envPath = process.env.NODE_ENV === 'production'
   ? path.resolve(__dirname, '../../.env.prod')
   : path.resolve(__dirname, '../../.env');
-console.log('Server.js - Loading .env from:', envPath);
 dotenv.config({ path: envPath });
 
 console.log('Server.js - NODE_ENV:', process.env.NODE_ENV);
 console.log('Server.js - MONGODB_URI:', process.env.MONGODB_URI);
 console.log('Server.js - JWT_SECRET:', process.env.JWT_SECRET);
 console.log('Server.js - CORS origin:', process.env.FRONTEND_DOMAIN);
+console.log('Server.js - AES_SECRET defined:', !!process.env.AES_SECRET);
+console.log('Server.js - AES_IV defined:', !!process.env.AES_IV);
 
 const app = express();
 const port = process.env.BACKEND_PORT || 3000;
@@ -29,7 +31,6 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
   .then(async () => {
     console.log('Connected to MongoDB');
 
-    // Проверка и исправление данных в базе
     console.log('Checking database for missing userId in Spreadsheets and Projects...');
     const spreadsheetsWithoutUserId = await Spreadsheet.find({ userId: { $exists: false } });
     if (spreadsheetsWithoutUserId.length > 0) {
@@ -51,7 +52,6 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
     const projectsWithoutUserId = await Project.find({ userId: { $exists: false } });
     if (projectsWithoutUserId.length > 0) {
       console.error(`Found ${projectsWithoutUserId.length} Projects without userId:`, projectsWithoutUserId);
-      // Здесь можно добавить логику для исправления, но это может потребовать ручного вмешательства
     } else {
       console.log('All Projects have userId');
     }
@@ -77,7 +77,7 @@ const corsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-remember-me-token'],
   credentials: true,
 };
 app.use(cors(corsOptions));
@@ -88,7 +88,7 @@ app.options('*', (req, res) => {
   res.set({
     'Access-Control-Allow-Origin': 'https://link-check-pro.top',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-remember-me-token',
     'Access-Control-Allow-Credentials': 'true',
   });
   res.status(204).send();
@@ -102,6 +102,15 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} (Origin: ${req.headers.origin})`);
   next();
 });
+
+// Применяем маршруты без глобального authMiddleware, выборочно пропуская /encrypt-password и /decrypt-password
+app.use('/api/links', (req, res, next) => {
+  if (['/encrypt-password', '/decrypt-password'].includes(req.path)) {
+    console.log(`Bypassing authMiddleware for ${req.path}`);
+    return next();
+  }
+  authMiddleware(req, res, next);
+}, linkRoutes);
 
 // Запуск HTTP сервера
 const server = app.listen(port, () => {
@@ -133,9 +142,6 @@ app.use((req, res, next) => {
   req.wss = wss;
   next();
 });
-
-// Маршруты API
-app.use('/api/links', linkRoutes);
 
 // Обработка ошибок
 app.use((err, req, res, next) => {

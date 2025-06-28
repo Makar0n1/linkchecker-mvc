@@ -16,6 +16,8 @@ const userSchema = new mongoose.Schema({
   },
   autoPay: { type: Boolean, default: false },
   refreshToken: { type: String },
+  rememberMe: { type: Boolean, default: false }, // Новое поле для "Remember Me"
+  rememberMeToken: { type: String }, // Новое поле для долгосрочного токена
   profile: {
     firstName: String,
     lastName: String,
@@ -29,7 +31,7 @@ const userSchema = new mongoose.Schema({
 
 userSchema.pre('save', async function(next) {
   if (this.isModified('password')) {
-    console.log('Hashing password for user:', this.username); // Добавляем отладочный лог
+    console.log('Hashing password for user:', this.username);
     this.password = await bcrypt.hash(this.password, 10);
   }
   next();

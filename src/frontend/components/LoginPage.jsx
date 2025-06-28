@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import axios from 'axios';
@@ -6,28 +6,106 @@ import axios from 'axios';
 const LoginPage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
     : `${import.meta.env.VITE_BACKEND_DOMAIN}:${import.meta.env.VITE_BACKEND_PORT}/api/links`;
 
+  useEffect(() => {
+    const savedUsername = localStorage.getItem('username');
+    const encryptedPassword = localStorage.getItem('encryptedPassword');
+    const rememberMeToken = localStorage.getItem('rememberMeToken');
+
+    if (savedUsername && encryptedPassword && rememberMeToken) {
+      setLoading(true);
+      axios
+        .post(`${apiBaseUrl}/decrypt-password`, { encryptedPassword }) // Без заголовка Authorization
+        .then((response) => {
+          const decryptedPassword = response.data.decryptedPassword;
+          setUsername(savedUsername);
+          setPassword(decryptedPassword);
+          setRememberMe(true);
+
+          // Автоматический логин
+          axios
+            .post(
+              `${apiBaseUrl}/login`,
+              { username: savedUsername, password: decryptedPassword, rememberMe: true },
+              { headers: { 'x-remember-me-token': rememberMeToken } }
+            )
+            .then((response) => {
+              const { token, refreshToken, rememberMeToken: newToken } = response.data;
+              localStorage.setItem('token', token);
+              localStorage.setItem('refreshToken', refreshToken);
+              if (newToken) localStorage.setItem('rememberMeToken', newToken);
+              navigate('/app');
+            })
+            .catch((err) => {
+              setError(err.response?.data?.error || 'Failed to auto-login');
+              localStorage.removeItem('rememberMeToken');
+              localStorage.removeItem('encryptedPassword');
+            })
+            .finally(() => setLoading(false));
+        })
+        .catch((err) => {
+          setError(err.response?.data?.error || 'Failed to decrypt password');
+          localStorage.removeItem('encryptedPassword');
+          localStorage.removeItem('rememberMeToken');
+          setLoading(false);
+        });
+    }
+  }, [navigate]);
+
   const handleLogin = async (e) => {
     e.preventDefault();
+    setLoading(true);
+    setError(null);
+
     try {
-      const response = await axios.post(`${apiBaseUrl}/login`, { username, password });
-      
-      const { token, refreshToken } = response.data;
+      let encryptedPassword = null;
+      if (rememberMe) {
+        const response = await axios.post(
+          `${apiBaseUrl}/encrypt-password`,
+          { password }
+        ); // Без заголовка Authorization
+        encryptedPassword = response.data.encryptedPassword;
+      }
+
+      const headers = localStorage.getItem('rememberMeToken')
+        ? { 'x-remember-me-token': localStorage.getItem('rememberMeToken') }
+        : {};
+      const response = await axios.post(
+        `${apiBaseUrl}/login`,
+        { username, password, rememberMe },
+        { headers }
+      );
+
+      const { token, refreshToken, rememberMeToken } = response.data;
       localStorage.setItem('token', token);
       localStorage.setItem('refreshToken', refreshToken);
-      
-      setTimeout(() => {
-        navigate('/app');
-      }, 100);
+      if (rememberMe && encryptedPassword) {
+        localStorage.setItem('encryptedPassword', encryptedPassword);
+        localStorage.setItem('username', username);
+        if (rememberMeToken) localStorage.setItem('rememberMeToken', rememberMeToken);
+      } else {
+        localStorage.removeItem('encryptedPassword');
+        localStorage.removeItem('username');
+        localStorage.removeItem('rememberMeToken');
+      }
+
+      navigate('/app');
     } catch (err) {
-      console.error('Login error:', err.response?.data);
       setError(err.response?.data?.error || 'An error occurred during login');
+      if (err.response?.status === 403 && err.response?.data?.error.includes('Invalid rememberMe token')) {
+        localStorage.removeItem('rememberMeToken');
+        localStorage.removeItem('encryptedPassword');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -68,6 +146,9 @@ const LoginPage = () => {
       >
         <div className="container max-w-md mx-auto bg-white shadow-lg rounded-lg p-6">
           <h1 className="text-3xl font-semibold text-gray-800 text-center mb-6">Login</h1>
+          {error && (
+            <p className="text-red-500 mt-4 text-center text-sm error-message">{error}</p>
+          )}
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
             <input
               type="text"
@@ -75,6 +156,7 @@ const LoginPage = () => {
               onChange={(e) => setUsername(e.target.value)}
               placeholder="Username"
               className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+              disabled={loading}
             />
             <input
               type="password"
@@ -82,15 +164,32 @@ const LoginPage = () => {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
               className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+              disabled={loading}
             />
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                disabled={loading}
+              />
+              <label className="text-sm text-gray-700">Remember Me</label>
+            </div>
             <button
               type="submit"
-              className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
+              className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
+              disabled={loading}
             >
-              Login
+              {loading ? 'Logging in...' : 'Login'}
             </button>
           </form>
-          {error && <p className="text-red-500 mt-4 text-center text-sm">{error}</p>}
+          <p className="text-gray-600 text-center mt-4 text-sm">
+            Don't have an account?{' '}
+            <Link to="/register" className="text-green-600 hover:underline">
+              Register here
+            </Link>
+          </p>
         </div>
       </motion.div>
       <footer className="bg-gray-800 text-white py-4 sm:py-6">
