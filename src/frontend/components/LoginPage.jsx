@@ -23,7 +23,7 @@ const LoginPage = () => {
     if (savedUsername && encryptedPassword && rememberMeToken) {
       setLoading(true);
       axios
-        .post(`${apiBaseUrl}/decrypt-password`, { encryptedPassword }) // Без заголовка Authorization
+        .post(`${apiBaseUrl}/decrypt-password`, { encryptedPassword })
         .then((response) => {
           const decryptedPassword = response.data.decryptedPassword;
           setUsername(savedUsername);
@@ -71,7 +71,7 @@ const LoginPage = () => {
         const response = await axios.post(
           `${apiBaseUrl}/encrypt-password`,
           { password }
-        ); // Без заголовка Authorization
+        );
         encryptedPassword = response.data.encryptedPassword;
       }
 
@@ -184,12 +184,6 @@ const LoginPage = () => {
               {loading ? 'Logging in...' : 'Login'}
             </button>
           </form>
-          <p className="text-gray-600 text-center mt-4 text-sm">
-            Don't have an account?{' '}
-            <Link to="/register" className="text-green-600 hover:underline">
-              Register here
-            </Link>
-          </p>
         </div>
       </motion.div>
       <footer className="bg-gray-800 text-white py-4 sm:py-6">
