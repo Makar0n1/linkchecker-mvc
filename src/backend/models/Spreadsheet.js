@@ -24,7 +24,10 @@ const spreadsheetSchema = new mongoose.Schema({
     lastChecked: Date
   }],
   lastRun: Date,
-  scanCount: { type: Number, default: 0 } // Новое поле для подсчёта сканирований
+  scanCount: { type: Number, default: 0 }
 });
+
+// Уникальный индекс для предотвращения дублирования таблиц в рамках проекта
+spreadsheetSchema.index({ projectId: 1, spreadsheetId: 1, gid: 1 }, { unique: true });
 
 module.exports = mongoose.model('Spreadsheet', spreadsheetSchema);
