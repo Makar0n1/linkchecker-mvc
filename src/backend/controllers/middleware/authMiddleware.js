@@ -2,6 +2,13 @@ const jwt = require('jsonwebtoken');
 const User = require('../../models/User');
 
 const authMiddleware = async (req, res, next) => {
+  // Пропускаем публичные маршруты
+  const publicRoutes = ['/login', '/register', '/encrypt-password', '/decrypt-password'];
+  if (publicRoutes.includes(req.path)) {
+    console.log(`authMiddleware: Skipping for ${req.path}`);
+    return next();
+  }
+
   let token = req.headers.authorization?.split(' ')[1];
   if (!token) {
     token = req.query.token;
@@ -18,7 +25,6 @@ const authMiddleware = async (req, res, next) => {
     console.log(`authMiddleware: Successfully decoded token, userId=${req.userId}, method: ${req.method}, url: ${req.url}, token: ${token.substring(0, 10)}...`);
     next();
   } catch (error) {
-    // Проверка rememberMeToken, если обычный токен истек
     if (error.name === 'TokenExpiredError') {
       const rememberMeToken = req.headers['x-remember-me-token'] || req.query.rememberMeToken;
       if (!rememberMeToken) {
