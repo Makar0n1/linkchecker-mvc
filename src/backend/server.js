@@ -17,7 +17,8 @@ dotenv.config({ path: envPath });
 
 console.log('Server.js - NODE_ENV:', process.env.NODE_ENV);
 console.log('Server.js - MONGODB_URI:', process.env.MONGODB_URI);
-console.log('Server.js - JWT_SECRET:', process.env.JWT_SECRET);
+console.log('Server.js - JWT_SECRET:', process.env.JWT_SECRET ? 'set' : 'not set');
+console.log('Server.js - JWT_REMEMBER_ME_SECRET:', process.env.JWT_REMEMBER_ME_SECRET ? 'set' : 'not set');
 console.log('Server.js - CORS origin:', process.env.FRONTEND_DOMAIN);
 console.log('Server.js - AES_SECRET defined:', !!process.env.AES_SECRET);
 console.log('Server.js - AES_IV defined:', !!process.env.AES_IV);
@@ -103,9 +104,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Применяем маршруты без глобального authMiddleware, выборочно пропуская /encrypt-password и /decrypt-password
+// Применяем маршруты, исключая /login, /encrypt-password и /decrypt-password из authMiddleware
 app.use('/api/links', (req, res, next) => {
-  if (['/encrypt-password', '/decrypt-password'].includes(req.path)) {
+  if (['/login', '/encrypt-password', '/decrypt-password'].includes(req.path)) {
     console.log(`Bypassing authMiddleware for ${req.path}`);
     return next();
   }
