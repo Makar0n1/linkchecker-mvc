@@ -19,7 +19,6 @@ const GoogleSheets = ({
   runningIds,
   setRunningIds,
   setLoading,
-  setError,
   isAnalyzing,
   stats,
   renderStatsContent,
@@ -41,6 +40,7 @@ const GoogleSheets = ({
   const [taskIds, setTaskIds] = useState({});
   const [isTokenInvalid, setIsTokenInvalid] = useState(false);
   const [isRefreshingToken, setIsRefreshingToken] = useState(false);
+  const [error, setError] = useState(null); // Добавлено локальное состояние error
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -82,6 +82,7 @@ const GoogleSheets = ({
         console.error('Error refreshing token:', err.message, err.response?.data);
         setIsTokenInvalid(true);
         setIsRefreshingToken(false);
+        setError(err.response?.data?.error || 'Failed to refresh token');
         reject(err);
       }
     });
@@ -94,6 +95,7 @@ const GoogleSheets = ({
     if (!token) {
       console.error('No token found for fetchSpreadsheets, setting token invalid');
       setIsTokenInvalid(true);
+      setError('Authentication token missing. Please log in again.');
       return;
     }
     try {
@@ -101,6 +103,7 @@ const GoogleSheets = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       setSpreadsheets(response.data);
+      setError(null);
     } catch (err) {
       console.error('Error fetching spreadsheets:', err.message, err.response?.status);
       if (err.response?.status === 401) {
@@ -111,6 +114,7 @@ const GoogleSheets = ({
               headers: { Authorization: `Bearer ${token}` },
             });
             setSpreadsheets(response.data);
+            setError(null);
           }
         } catch (retryErr) {
           console.error('Retry fetchSpreadsheets failed:', retryErr.message);
@@ -127,6 +131,7 @@ const GoogleSheets = ({
     if (!token) {
       console.error('No token found for fetchActiveTasks, setting token invalid');
       setIsTokenInvalid(true);
+      setError('Authentication token missing. Please log in again.');
       return;
     }
     try {
@@ -159,6 +164,7 @@ const GoogleSheets = ({
       setProgressData(newProgressData);
       setRunningIds(Object.keys(newTaskIds));
       setIsProjectAnalyzing(Object.keys(newTaskIds).length > 0);
+      setError(null);
     } catch (err) {
       console.error('Error fetching active tasks:', err.message, err.response?.status);
       if (err.response?.status === 401) {
@@ -194,6 +200,7 @@ const GoogleSheets = ({
             setProgressData(newProgressData);
             setRunningIds(Object.keys(newTaskIds));
             setIsProjectAnalyzing(Object.keys(newTaskIds).length > 0);
+            setError(null);
           }
         } catch (retryErr) {
           console.error('Retry fetchActiveTasks failed:', retryErr.message);
@@ -208,6 +215,7 @@ const GoogleSheets = ({
     if (!token) {
       console.error(`No token found for fetching progress of task ${taskId}, setting token invalid`);
       setIsTokenInvalid(true);
+      setError('Authentication token missing. Please log in again.');
       return;
     }
 
@@ -316,6 +324,7 @@ const GoogleSheets = ({
     if (!token) {
       console.error(`No token found for SSE task ${taskId}, setting token invalid`);
       setIsTokenInvalid(true);
+      setError('Authentication token missing. Please log in again.');
       return null;
     }
 
@@ -332,7 +341,7 @@ const GoogleSheets = ({
             if (token) {
               console.log(`Restarting SSE with new token: ${token.substring(0, 10)}...`);
               eventSource.close();
-              return startSSE(spreadsheetId, taskId); // Перезапускаем SSE с новым токеном
+              return startSSE(spreadsheetId, taskId);
             }
           } catch (refreshErr) {
             console.error('Failed to refresh token for SSE:', refreshErr.message);
@@ -418,6 +427,7 @@ const GoogleSheets = ({
     if (!token) {
       console.error('No token found for fetchAnalysisStatus, setting token invalid');
       setIsTokenInvalid(true);
+      setError('Authentication token missing. Please log in again.');
       return;
     }
     try {
@@ -425,6 +435,7 @@ const GoogleSheets = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       setIsProjectAnalyzing(response.data.isAnalyzingSpreadsheet);
+      setError(null);
     } catch (err) {
       console.error('Error fetching analysis status:', err.message, err.response?.status);
       if (err.response?.status === 401) {
@@ -435,6 +446,7 @@ const GoogleSheets = ({
               headers: { Authorization: `Bearer ${token}` },
             });
             setIsProjectAnalyzing(response.data.isAnalyzingSpreadsheet);
+            setError(null);
           }
         } catch (retryErr) {
           console.error('Retry fetchAnalysisStatus failed:', retryErr.message);
@@ -508,6 +520,17 @@ const GoogleSheets = ({
         setLoading(false);
         return;
       }
+
+      // Проверка на дублирование таблицы
+      const isDuplicate = spreadsheets.some(
+        (s) => s.spreadsheetId === spreadsheetId && s.gid === parseInt(gid)
+      );
+      if (isDuplicate) {
+        setError('This spreadsheet (same spreadsheetId and gid) is already added to this project');
+        setLoading(false);
+        return;
+      }
+
       const response = await axios.post(
         `${apiBaseUrl}/${projectId}/spreadsheets`,
         { ...form, gid: parseInt(form.gid), intervalHours: parseInt(form.intervalHours) },
@@ -787,6 +810,18 @@ const GoogleSheets = ({
             className="ml-2 text-yellow-900 underline"
           >
             Log in
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+          {error}
+          <button
+            onClick={() => setError(null)}
+            className="ml-2 text-red-900 underline"
+          >
+            Close
           </button>
         </div>
       )}
