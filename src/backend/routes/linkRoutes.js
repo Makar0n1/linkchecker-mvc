@@ -5,8 +5,8 @@ const authMiddleware = require('../controllers/middleware/authMiddleware');
 
 router.post('/register', linkController.registerUser);
 router.post('/login', linkController.loginUser);
-router.post('/encrypt-password', linkController.encryptPassword); // Убрано authMiddleware
-router.post('/decrypt-password', linkController.decryptPassword); // Убрано authMiddleware
+router.post('/encrypt-password', linkController.encryptPassword);
+router.post('/decrypt-password', linkController.decryptPassword);
 router.get('/user', authMiddleware, linkController.getUserInfo);
 router.get('/user/tasks', authMiddleware, linkController.getUserTasks);
 router.get('/:projectId/analysis-status', authMiddleware, linkController.getAnalysisStatus);
