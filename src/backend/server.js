@@ -19,7 +19,6 @@ console.log('Server.js - NODE_ENV:', process.env.NODE_ENV);
 console.log('Server.js - MONGODB_URI:', process.env.MONGODB_URI);
 console.log('Server.js - JWT_SECRET:', process.env.JWT_SECRET ? 'set' : 'not set');
 console.log('Server.js - JWT_REMEMBER_ME_SECRET:', process.env.JWT_REMEMBER_ME_SECRET ? 'set' : 'not set');
-console.log('Server.js - CORS origin:', process.env.FRONTEND_DOMAIN);
 console.log('Server.js - AES_SECRET defined:', !!process.env.AES_SECRET);
 console.log('Server.js - AES_IV defined:', !!process.env.AES_IV);
 
@@ -32,6 +31,7 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
   .then(async () => {
     console.log('Connected to MongoDB');
 
+    // Проверка коллекций
     console.log('Checking database for missing userId in Spreadsheets and Projects...');
     const spreadsheetsWithoutUserId = await Spreadsheet.find({ userId: { $exists: false } });
     if (spreadsheetsWithoutUserId.length > 0) {
@@ -52,7 +52,7 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
 
     const projectsWithoutUserId = await Project.find({ userId: { $exists: false } });
     if (projectsWithoutUserId.length > 0) {
-      console.error(`Found ${projectsWithoutUserId.length} Projects without userId:`, projectsWithoutUserId);
+      console.error(`Found ${projectsWithoutUserId.length} Projects without userId:`, projectsWithoutUserId.map(p => p._id));
     } else {
       console.log('All Projects have userId');
     }
