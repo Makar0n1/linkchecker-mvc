@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const linkController = require('../controllers/linkController');
+const spreadsheetController = require('../controllers/spreadsheetController');
 
 router.post('/register', linkController.registerUser);
 router.post('/login', linkController.loginUser);
@@ -30,12 +31,12 @@ router.delete('/:projectId/links/:id', linkController.deleteLink);
 
 // Google Sheets (в рамках проекта)
 router.get('/projects/:projectId/activeTasks', linkController.getActiveTasks);
-router.post('/:projectId/spreadsheets', linkController.addSpreadsheet);
-router.put('/:projectId/spreadsheets/:spreadsheetId', linkController.editSpreadsheet);
-router.get('/:projectId/spreadsheets', linkController.getSpreadsheets);
-router.post('/:projectId/spreadsheets/:spreadsheetId/run', linkController.runSpreadsheetAnalysis);
-router.delete('/:projectId/spreadsheets/:spreadsheetId', linkController.deleteSpreadsheet);
-router.post('/:projectId/spreadsheets/:spreadsheetId/cancel', linkController.cancelSpreadsheetAnalysis);
+router.post('/:projectId/spreadsheets', spreadsheetController.addSpreadsheet);
+router.put('/:projectId/spreadsheets/:spreadsheetId', spreadsheetController.editSpreadsheet);
+router.get('/:projectId/spreadsheets', spreadsheetController.getSpreadsheets);
+router.post('/:projectId/spreadsheets/:spreadsheetId/run', spreadsheetController.runSpreadsheetAnalysis);
+router.delete('/:projectId/spreadsheets/:spreadsheetId', spreadsheetController.deleteSpreadsheet);
+router.post('/:projectId/spreadsheets/:spreadsheetId/cancel', spreadsheetController.cancelSpreadsheetAnalysis);
 
 // Профиль и подписка
 router.post('/select-plan', linkController.selectPlan);
