@@ -82,12 +82,10 @@ const ProjectDetails = () => {
         return;
       }
       try {
-        console.log(`Fetching ${source} stats for project:`, projectId, 'with token:', token);
         const response = await axios.get(`${apiBaseUrl}/projects/${projectId}/stats`, {
           headers: { Authorization: `Bearer ${token}` },
           params: { source },
         });
-        console.log(`${source} Stats response:`, response.data);
         setStatsFunc(response.data);
       } catch (err) {
         console.error(`Error fetching ${source} project stats:`, err);

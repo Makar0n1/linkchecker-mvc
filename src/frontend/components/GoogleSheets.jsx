@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
@@ -18,7 +18,7 @@ const GoogleSheets = ({
   setSpreadsheets,
   runningIds,
   setRunningIds,
-  setLoading,
+  setLoading: setParentLoading,
   isAnalyzing,
   stats,
   renderStatsContent,
@@ -34,13 +34,16 @@ const GoogleSheets = ({
     resultRangeEnd: '',
     intervalHours: 4,
   });
+  const [editForm, setEditForm] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [timers, setTimers] = useState({});
   const [isProjectAnalyzing, setIsProjectAnalyzing] = useState(isAnalyzing);
   const [progressData, setProgressData] = useState({});
   const [taskIds, setTaskIds] = useState({});
   const [isTokenInvalid, setIsTokenInvalid] = useState(false);
   const [isRefreshingToken, setIsRefreshingToken] = useState(false);
-  const [error, setError] = useState(null); // Добавлено локальное состояние error
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false); // Добавлено локальное состояние loading
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -66,7 +69,7 @@ const GoogleSheets = ({
       if (!refreshToken) {
         console.error('No refresh token found, setting token invalid');
         setIsTokenInvalid(true);
-        setIsRefreshingToken(false);
+        setError('Authentication token missing. Please log in again.');
         reject(new Error('No refresh token'));
         return;
       }
@@ -77,6 +80,7 @@ const GoogleSheets = ({
         console.log(`Token refreshed successfully, new token: ${newToken.substring(0, 10)}...`);
         setIsTokenInvalid(false);
         setIsRefreshingToken(false);
+        setError(null);
         resolve(newToken);
       } catch (err) {
         console.error('Error refreshing token:', err.message, err.response?.data);
@@ -99,6 +103,8 @@ const GoogleSheets = ({
       return;
     }
     try {
+      setLoading(true);
+      setParentLoading(true);
       const response = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -123,6 +129,9 @@ const GoogleSheets = ({
       } else {
         setError(err.response?.data?.error || 'Failed to fetch spreadsheets');
       }
+    } finally {
+      setLoading(false);
+      setParentLoading(false);
     }
   };
 
@@ -135,6 +144,8 @@ const GoogleSheets = ({
       return;
     }
     try {
+      setLoading(true);
+      setParentLoading(true);
       const response = await axios.get(`${apiBaseUrl}/${projectId}/active-spreadsheet-tasks`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -207,6 +218,9 @@ const GoogleSheets = ({
           setError('Failed to fetch active tasks after token refresh');
         }
       }
+    } finally {
+      setLoading(false);
+      setParentLoading(false);
     }
   };
 
@@ -220,6 +234,8 @@ const GoogleSheets = ({
     }
 
     try {
+      setLoading(true);
+      setParentLoading(true);
       const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -297,7 +313,7 @@ const GoogleSheets = ({
             setError('Please log in again to continue.');
           }
         } catch (retryErr) {
-          console.error('Retry fetchProgress failed:', retryErr.message, retryErr.response?.data);
+          console.error('Retry fetchProgress failed:', retryErr.message, err.response?.data);
           setError('Failed to fetch progress after token refresh. Please log in again.');
         }
       } else if (err.response?.status === 404) {
@@ -316,6 +332,9 @@ const GoogleSheets = ({
         setIsProjectAnalyzing(Object.keys(taskIds).length === 1);
         fetchSpreadsheets();
       }
+    } finally {
+      setLoading(false);
+      setParentLoading(false);
     }
   };
 
@@ -431,6 +450,8 @@ const GoogleSheets = ({
       return;
     }
     try {
+      setLoading(true);
+      setParentLoading(true);
       const response = await axios.get(`${apiBaseUrl}/${projectId}/analysis-status`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -453,6 +474,9 @@ const GoogleSheets = ({
           setError('Failed to fetch analysis status after token refresh');
         }
       }
+    } finally {
+      setLoading(false);
+      setParentLoading(false);
     }
   };
 
@@ -509,15 +533,42 @@ const GoogleSheets = ({
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  const handleEditChange = (e) => {
+    setEditForm({ ...editForm, [e.target.name]: e.target.value });
+  };
+
+  const openEditModal = (spreadsheet) => {
+    setEditForm({
+      _id: spreadsheet._id,
+      spreadsheetId: spreadsheet.spreadsheetId,
+      gid: spreadsheet.gid,
+      targetDomain: spreadsheet.targetDomain,
+      urlColumn: spreadsheet.urlColumn,
+      targetColumn: spreadsheet.targetColumn,
+      resultRangeStart: spreadsheet.resultRangeStart,
+      resultRangeEnd: spreadsheet.resultRangeEnd,
+      intervalHours: spreadsheet.intervalHours,
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const closeEditModal = () => {
+    setIsEditModalOpen(false);
+    setEditForm(null);
+    setError(null);
+  };
+
   const addSpreadsheet = async (e) => {
     e.preventDefault();
     let token = localStorage.getItem('token');
     setLoading(true);
+    setParentLoading(true);
     try {
       const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = form;
       if (!spreadsheetId || gid === '' || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
         setError('All fields are required');
         setLoading(false);
+        setParentLoading(false);
         return;
       }
 
@@ -528,6 +579,7 @@ const GoogleSheets = ({
       if (isDuplicate) {
         setError('This spreadsheet (same spreadsheetId and gid) is already added to this project');
         setLoading(false);
+        setParentLoading(false);
         return;
       }
 
@@ -581,6 +633,68 @@ const GoogleSheets = ({
       }
     } finally {
       setLoading(false);
+      setParentLoading(false);
+    }
+  };
+
+  const editSpreadsheet = async (e) => {
+    e.preventDefault();
+    let token = localStorage.getItem('token');
+    setLoading(true);
+    setParentLoading(true);
+    try {
+      const { _id, spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = editForm;
+      if (!spreadsheetId || gid === '' || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
+        setError('All fields are required');
+        setLoading(false);
+        setParentLoading(false);
+        return;
+      }
+
+      // Проверка на дублирование таблицы (кроме текущей)
+      const isDuplicate = spreadsheets.some(
+        (s) => s._id !== _id && s.spreadsheetId === spreadsheetId && s.gid === parseInt(gid)
+      );
+      if (isDuplicate) {
+        setError('This spreadsheet (same spreadsheetId and gid) is already added to this project');
+        setLoading(false);
+        setParentLoading(false);
+        return;
+      }
+
+      const response = await axios.put(
+        `${apiBaseUrl}/${projectId}/spreadsheets/${_id}`,
+        { ...editForm, gid: parseInt(gid), intervalHours: parseInt(intervalHours) },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      await fetchSpreadsheets();
+      closeEditModal();
+      setError(null);
+    } catch (err) {
+      console.error('Error editing spreadsheet:', err.message, err.response?.status);
+      if (err.response?.status === 401) {
+        try {
+          token = await refreshToken();
+          if (token) {
+            const response = await axios.put(
+              `${apiBaseUrl}/${projectId}/spreadsheets/${editForm._id}`,
+              { ...editForm, gid: parseInt(editForm.gid), intervalHours: parseInt(editForm.intervalHours) },
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            await fetchSpreadsheets();
+            closeEditModal();
+            setError(null);
+          }
+        } catch (retryErr) {
+          console.error('Retry editSpreadsheet failed:', retryErr.message);
+          setError(retryErr.response?.data?.error || 'Failed to edit spreadsheet after token refresh');
+        }
+      } else {
+        setError(err.response?.data?.error || 'Failed to edit spreadsheet');
+      }
+    } finally {
+      setLoading(false);
+      setParentLoading(false);
     }
   };
 
@@ -593,6 +707,7 @@ const GoogleSheets = ({
     }
     setRunningIds([...runningIds, spreadsheetId]);
     setLoading(true);
+    setParentLoading(true);
     setProgressData(prev => ({
       ...prev,
       [spreadsheetId]: {
@@ -645,7 +760,6 @@ const GoogleSheets = ({
         const errorMessage = err.response?.data?.error || 'Failed to run analysis';
         setError(errorMessage);
         setRunningIds(runningIds.filter(id => id !== spreadsheetId));
-        setLoading(false);
         setProgressData(prev => {
           const newProgress = { ...prev };
           delete newProgress[spreadsheetId];
@@ -657,12 +771,16 @@ const GoogleSheets = ({
           return newTaskIds;
         });
       }
+    } finally {
+      setLoading(false);
+      setParentLoading(false);
     }
   };
 
   const cancelAnalysis = async (spreadsheetId) => {
     let token = localStorage.getItem('token');
     setLoading(true);
+    setParentLoading(true);
     try {
       await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/cancel`, {}, {
         headers: { Authorization: `Bearer ${token}` },
@@ -720,12 +838,14 @@ const GoogleSheets = ({
       }
     } finally {
       setLoading(false);
+      setParentLoading(false);
     }
   };
 
   const deleteSpreadsheet = async (spreadsheetId) => {
     let token = localStorage.getItem('token');
     setLoading(true);
+    setParentLoading(true);
     try {
       await axios.delete(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -773,6 +893,7 @@ const GoogleSheets = ({
       }
     } finally {
       setLoading(false);
+      setParentLoading(false);
     }
   };
 
@@ -786,9 +907,10 @@ const GoogleSheets = ({
     }[status];
   };
 
-  const fadeInUp = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+  const modalVariants = {
+    hidden: { opacity: 0, scale: 0.95 },
+    visible: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: 'easeOut' } },
+    exit: { opacity: 0, scale: 0.95, transition: { duration: 0.2, ease: 'easeIn' } },
   };
 
   return (
@@ -796,7 +918,10 @@ const GoogleSheets = ({
       className="max-w-full mx-auto"
       initial="hidden"
       animate="visible"
-      variants={fadeInUp}
+      variants={{
+        hidden: { opacity: 0, y: 20 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+      }}
     >
       {isTokenInvalid && (
         <div className="mb-4 p-3 bg-yellow-100 text-yellow-700 rounded-lg">
@@ -847,17 +972,18 @@ const GoogleSheets = ({
             min={field.min}
             max={field.max}
             className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
-            disabled={isProjectAnalyzing || isTokenInvalid}
+            disabled={loading || isProjectAnalyzing || isTokenInvalid}
           />
         ))}
         <button
           type="submit"
-          className="col-span-2 bg-green-500 text-white p-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
-          disabled={isProjectAnalyzing || isTokenInvalid}
+          className="col-span-2 bg-green-500 text-white p-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
+          disabled={loading || isProjectAnalyzing || isTokenInvalid}
         >
-          Add Spreadsheet
+          {loading ? 'Adding...' : 'Add Spreadsheet'}
         </button>
       </form>
+
       <ul>
         {spreadsheets.map((s) => {
           const isRunning = runningIds.includes(s._id) || s.status === 'checking';
@@ -899,15 +1025,22 @@ const GoogleSheets = ({
                     <>
                       <button
                         onClick={() => runAnalysis(s._id)}
-                        disabled={isRunning || isProjectAnalyzing || isTokenInvalid}
-                        className={`bg-green-500 text-white px-4 py-1 rounded-lg ${isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
+                        disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
+                        className={`bg-green-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
                       >
                         {isRunning ? 'Running...' : 'Run'}
                       </button>
                       <button
+                        onClick={() => openEditModal(s)}
+                        disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
+                        className={`bg-blue-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'} transition-colors`}
+                      >
+                        Edit
+                      </button>
+                      <button
                         onClick={() => deleteSpreadsheet(s._id)}
-                        disabled={isRunning || isProjectAnalyzing || isTokenInvalid}
-                        className={`bg-red-500 text-white px-4 py-1 rounded-lg ${isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
+                        disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
+                        className={`bg-red-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
                       >
                         Delete
                       </button>
@@ -934,6 +1067,63 @@ const GoogleSheets = ({
           );
         })}
       </ul>
+
+      {/* Модальное окно для редактирования таблицы */}
+      <AnimatePresence>
+        {isEditModalOpen && (
+          <motion.div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            variants={modalVariants}
+          >
+            <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
+              <button
+                onClick={closeEditModal}
+                className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Edit Spreadsheet</h3>
+              <form onSubmit={editSpreadsheet} className="flex flex-col gap-4">
+                {[
+                  { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
+                  { name: 'gid', placeholder: 'GID' },
+                  { name: 'targetDomain', placeholder: 'Target Domain' },
+                  { name: 'urlColumn', placeholder: 'URL Column (e.g., D)' },
+                  { name: 'targetColumn', placeholder: 'Target Column (e.g., I)' },
+                  { name: 'resultRangeStart', placeholder: 'Result Start (e.g., L)' },
+                  { name: 'resultRangeEnd', placeholder: 'Result End (e.g., P)' },
+                  { name: 'intervalHours', placeholder: 'Interval (4-24)', type: 'number', min: 4, max: 24 },
+                ].map((field) => (
+                  <input
+                    key={field.name}
+                    name={field.name}
+                    value={editForm ? editForm[field.name] : ''}
+                    onChange={handleEditChange}
+                    placeholder={field.placeholder}
+                    type={field.type || 'text'}
+                    min={field.min}
+                    max={field.max}
+                    className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+                    disabled={loading}
+                  />
+                ))}
+                <button
+                  type="submit"
+                  className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
+                  disabled={loading}
+                >
+                  {loading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </form>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };
