@@ -8,7 +8,12 @@ const spreadsheetSchema = new mongoose.Schema({
   targetColumn: { type: String, required: true },
   resultRangeStart: { type: String, required: true },
   resultRangeEnd: { type: String, required: true },
-  intervalHours: { type: Number, required: true },
+  intervalHours: { 
+    type: Number, 
+    required: true, 
+    min: 0.083, // 5 минут
+    max: 672 // 28 дней
+  },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true },
   status: { type: String, enum: ['pending', 'checking', 'completed', 'error', 'inactive'], default: 'pending' },
@@ -34,7 +39,7 @@ spreadsheetSchema.index({ projectId: 1, spreadsheetId: 1, gid: 1 }, { unique: tr
 spreadsheetSchema.pre('findOneAndUpdate', async function(next) {
   const update = this.getUpdate();
   const query = this.getQuery();
-  const { projectId, spreadsheetId, gid } = update.$set || update;
+  const { projectId, spreadsheetId, gid, intervalHours } = update.$set || update;
 
   if (projectId && spreadsheetId && gid) {
     console.log(`Spreadsheet pre-update: Checking for duplicates, projectId=${projectId}, spreadsheetId=${spreadsheetId}, gid=${gid}, currentDocId=${query._id}`);
@@ -52,15 +57,36 @@ spreadsheetSchema.pre('findOneAndUpdate', async function(next) {
         return next(error);
       }
       console.log(`Spreadsheet pre-update: No duplicates found, proceeding with update`);
-      next();
     } catch (error) {
       console.error(`Spreadsheet pre-update: Error checking duplicates: ${error.message}`);
-      next(error);
+      return next(error);
     }
-  } else {
-    console.log(`Spreadsheet pre-update: No relevant fields to check for duplicates`);
-    next();
   }
+
+  // Логирование изменений intervalHours
+  if (intervalHours !== undefined) {
+    if (intervalHours < 1) {
+      console.log(`Spreadsheet pre-update: intervalHours set to ${intervalHours} hours (< 1 hour), spreadsheetId=${query._id}`);
+    } else if (intervalHours > 24) {
+      console.log(`Spreadsheet pre-update: intervalHours set to ${intervalHours} hours (> 24 hours), spreadsheetId=${query._id}`);
+    } else {
+      console.log(`Spreadsheet pre-update: intervalHours set to ${intervalHours} hours, spreadsheetId=${query._id}`);
+    }
+  }
+
+  next();
+});
+
+// Middleware для логирования создания
+spreadsheetSchema.pre('save', function(next) {
+  if (this.intervalHours < 1) {
+    console.log(`Spreadsheet pre-save: intervalHours set to ${this.intervalHours} hours (< 1 hour), spreadsheetId=${this._id}`);
+  } else if (this.intervalHours > 24) {
+    console.log(`Spreadsheet pre-save: intervalHours set to ${this.intervalHours} hours (> 24 hours), spreadsheetId=${this._id}`);
+  } else {
+    console.log(`Spreadsheet pre-save: intervalHours set to ${this.intervalHours} hours, spreadsheetId=${this._id}`);
+  }
+  next();
 });
 
 module.exports = mongoose.model('Spreadsheet', spreadsheetSchema);
