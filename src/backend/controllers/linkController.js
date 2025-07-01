@@ -34,6 +34,7 @@ const {
 } = require('./linkAnalysisController');
 const {
   addSpreadsheet,
+  editSpreadsheet,
   getSpreadsheets,
   deleteSpreadsheet,
   analyzeSpreadsheet,
@@ -47,8 +48,6 @@ const { encryptPassword, decryptPassword } = require('./authUtils');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
-const Spreadsheet = require('../models/Spreadsheet');
-const mongoose = require('mongoose');
 
 // Передаем analyzeSpreadsheet в loadPendingTasks
 loadPendingTasks(analyzeSpreadsheet);
@@ -186,7 +185,7 @@ const verifyRememberMeToken = async (req, res) => {
     const user = await User.findById(decoded.userId);
     if (!user || user.rememberMeToken !== rememberMeToken) {
       console.error(`verifyRememberMeToken: Invalid token for userId=${decoded.userId}`);
-      return res.status(403).json({ error: 'Invalid rememberMe token' });
+      return res.status(404).json({ error: 'Invalid rememberMe token' });
     }
 
     const newToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
@@ -194,209 +193,7 @@ const verifyRememberMeToken = async (req, res) => {
     res.json({ token: newToken });
   } catch (error) {
     console.error(`verifyRememberMeToken: Error: ${error.message}`);
-    res.status(403).json({ error: 'Invalid rememberMe token' });
-  }
-};
-
-// Обновленная функция addSpreadsheet с проверкой дубликатов
-const addSpreadsheetWithDuplicateCheck = async (req, res) => {
-  const { projectId } = req.params;
-  const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = req.body;
-
-  console.log(`addSpreadsheet: Received projectId=${projectId}, spreadsheetId=${spreadsheetId}, gid=${gid}, userId=${req.userId}, token=${req.headers.authorization?.slice(0, 20)}...`);
-
-  try {
-    if (!req.userId) {
-      console.error(`addSpreadsheet: Missing userId for projectId=${projectId}`);
-      return res.status(401).json({ error: 'User authentication required' });
-    }
-
-    const user = await User.findById(req.userId);
-    if (!user) {
-      console.error(`addSpreadsheet: User not found for userId=${req.userId}`);
-      return res.status(404).json({ error: 'User not found' });
-    }
-    if (!user.isSuperAdmin && user.plan === 'free') {
-      console.log(`addSpreadsheet: Google Sheets integration not available on Free plan for userId=${req.userId}`);
-      return res.status(403).json({ message: 'Google Sheets integration is not available on Free plan' });
-    }
-
-    // Явно преобразуем projectId в ObjectId
-    let projectObjectId;
-    try {
-      projectObjectId = mongoose.Types.ObjectId(projectId);
-      console.log(`addSpreadsheet: Converted projectId=${projectId} to ObjectId=${projectObjectId}`);
-    } catch (error) {
-      console.error(`addSpreadsheet: Invalid projectId=${projectId}: ${error.message}`);
-      return res.status(400).json({ error: 'Invalid project ID format' });
-    }
-
-    // Проверяем существование проекта
-    const project = await Project.findOne({ _id: projectObjectId, userId: req.userId });
-    if (!project) {
-      console.error(`addSpreadsheet: Project not found for projectId=${projectId}, userId=${req.userId}`);
-      // Дополнительная проверка: существует ли проект вообще
-      const projectExists = await Project.findById(projectObjectId);
-      console.log(`addSpreadsheet: Project check - exists=${!!projectExists}, userIdMatch=${projectExists ? projectExists.userId.toString() === req.userId : 'N/A'}`);
-      return res.status(404).json({ error: 'Project not found or does not belong to user' });
-    }
-
-    const spreadsheets = await Spreadsheet.find({ projectId: projectObjectId, userId: req.userId });
-    const planLimits = {
-      basic: 1,
-      pro: 5,
-      premium: 20,
-      enterprise: Infinity,
-    };
-    const maxSpreadsheets = user.isSuperAdmin ? Infinity : planLimits[user.plan];
-    if (spreadsheets.length >= maxSpreadsheets) {
-      console.error(`addSpreadsheet: Spreadsheet limit exceeded for userId=${req.userId}, plan=${user.plan}, currentCount=${spreadsheets.length}, max=${maxSpreadsheets}`);
-      return res.status(403).json({ message: 'Spreadsheet limit exceeded for your plan' });
-    }
-
-    if (!spreadsheetId || gid === undefined || gid === null || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || intervalHours === undefined) {
-      console.error(`addSpreadsheet: Missing required fields for projectId=${projectId}: spreadsheetId=${spreadsheetId}, gid=${gid}, targetDomain=${targetDomain}, urlColumn=${urlColumn}, targetColumn=${targetColumn}, resultRangeStart=${resultRangeStart}, resultRangeEnd=${resultRangeEnd}, intervalHours=${intervalHours}`);
-      return res.status(400).json({ error: 'All fields required' });
-    }
-
-    // Проверка на дубликаты
-    const existingSpreadsheet = await Spreadsheet.findOne({
-      spreadsheetId,
-      gid: parseInt(gid),
-      projectId: projectObjectId,
-    });
-    if (existingSpreadsheet) {
-      console.error(`addSpreadsheet: Duplicate spreadsheet detected: spreadsheetId=${spreadsheetId}, gid=${gid}, projectId=${projectId}`);
-      return res.status(400).json({ error: 'Spreadsheet with this spreadsheetId and gid already exists in this project' });
-    }
-
-    const planIntervalLimits = {
-      basic: 24,
-      pro: 4,
-      premium: 1,
-      enterprise: 1,
-    };
-    const minInterval = user.isSuperAdmin ? 1 : planLimits[user.plan];
-    if (parseInt(intervalHours) < minInterval) {
-      console.error(`addSpreadsheet: Interval too short: ${intervalHours} hours, min=${minInterval} for plan=${user.plan}`);
-      return res.status(403).json({ message: `Interval must be at least ${minInterval} hours for your plan` });
-    }
-
-    const spreadsheet = new Spreadsheet({
-      spreadsheetId,
-      gid: parseInt(gid),
-      targetDomain,
-      urlColumn,
-      targetColumn,
-      resultRangeStart,
-      resultRangeEnd,
-      intervalHours: parseInt(intervalHours),
-      userId: req.userId,
-      projectId: projectObjectId,
-      status: 'pending',
-    });
-    await spreadsheet.save();
-    console.log(`addSpreadsheet: Successfully added spreadsheetId=${spreadsheetId}, gid=${gid} for projectId=${projectId}, userId=${req.userId}`);
-    res.status(201).json(spreadsheet);
-  } catch (error) {
-    console.error(`addSpreadsheet: Error for projectId=${projectId}, userId=${req.userId}: ${error.message}`);
-    res.status(500).json({ error: 'Error adding spreadsheet', details: error.message });
-  }
-};
-
-// Новая функция editSpreadsheet
-const editSpreadsheet = async (req, res) => {
-  const { projectId, spreadsheetId } = req.params;
-  const { spreadsheetId: newSpreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = req.body;
-
-  console.log(`editSpreadsheet: Received projectId=${projectId}, spreadsheetId=${spreadsheetId}, newSpreadsheetId=${newSpreadsheetId}, gid=${gid}, userId=${req.userId}, token=${req.headers.authorization?.slice(0, 20)}...`);
-
-  try {
-    if (!req.userId) {
-      console.error(`editSpreadsheet: Missing userId for projectId=${projectId}, spreadsheetId=${spreadsheetId}`);
-      return res.status(401).json({ error: 'User authentication required' });
-    }
-
-    const user = await User.findById(req.userId);
-    if (!user) {
-      console.error(`editSpreadsheet: User not found for userId=${req.userId}`);
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Явно преобразуем projectId и spreadsheetId в ObjectId
-    let projectObjectId, spreadsheetObjectId;
-    try {
-      projectObjectId = mongoose.Types.ObjectId(projectId);
-      spreadsheetObjectId = mongoose.Types.ObjectId(spreadsheetId);
-      console.log(`editSpreadsheet: Converted projectId=${projectId} to ObjectId=${projectObjectId}, spreadsheetId=${spreadsheetId} to ObjectId=${spreadsheetObjectId}`);
-    } catch (error) {
-      console.error(`editSpreadsheet: Invalid ID format - projectId=${projectId}, spreadsheetId=${spreadsheetId}: ${error.message}`);
-      return res.status(400).json({ error: 'Invalid project or spreadsheet ID format' });
-    }
-
-    // Проверяем существование проекта
-    const project = await Project.findOne({ _id: projectObjectId, userId: req.userId });
-    if (!project) {
-      console.error(`editSpreadsheet: Project not found for projectId=${projectId}, userId=${req.userId}`);
-      const projectExists = await Project.findById(projectObjectId);
-      console.log(`editSpreadsheet: Project check - exists=${!!projectExists}, userIdMatch=${projectExists ? projectExists.userId.toString() === req.userId : 'N/A'}`);
-      return res.status(404).json({ error: 'Project not found or does not belong to user' });
-    }
-
-    // Проверяем существование таблицы
-    const spreadsheet = await Spreadsheet.findOne({ _id: spreadsheetObjectId, projectId: projectObjectId, userId: req.userId });
-    if (!spreadsheet) {
-      console.error(`editSpreadsheet: Spreadsheet not found for spreadsheetId=${spreadsheetId}, projectId=${projectId}, userId=${req.userId}`);
-      return res.status(404).json({ error: 'Spreadsheet not found or does not belong to project' });
-    }
-
-    // Валидация входных данных
-    if (!newSpreadsheetId || gid === undefined || gid === null || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || intervalHours === undefined) {
-      console.error(`editSpreadsheet: Missing required fields for spreadsheetId=${spreadsheetId}: newSpreadsheetId=${newSpreadsheetId}, gid=${gid}, targetDomain=${targetDomain}, urlColumn=${urlColumn}, targetColumn=${targetColumn}, resultRangeStart=${resultRangeStart}, resultRangeEnd=${resultRangeEnd}, intervalHours=${intervalHours}`);
-      return res.status(400).json({ error: 'All fields required' });
-    }
-
-    // Проверка на дубликаты (исключая текущую таблицу)
-    const existingSpreadsheet = await Spreadsheet.findOne({
-      spreadsheetId: newSpreadsheetId,
-      gid: parseInt(gid),
-      projectId: projectObjectId,
-      _id: { $ne: spreadsheetObjectId },
-    });
-    if (existingSpreadsheet) {
-      console.error(`editSpreadsheet: Duplicate spreadsheet detected: newSpreadsheetId=${newSpreadsheetId}, gid=${gid}, projectId=${projectId}`);
-      return res.status(400).json({ error: 'Spreadsheet with this spreadsheetId and gid already exists in this project' });
-    }
-
-    // Проверка интервала
-    const planIntervalLimits = {
-      basic: 24,
-      pro: 4,
-      premium: 1,
-      enterprise: 1,
-    };
-    const minInterval = user.isSuperAdmin ? 1 : planIntervalLimits[user.plan];
-    if (parseInt(intervalHours) < minInterval) {
-      console.error(`editSpreadsheet: Interval too short: ${intervalHours} hours, min=${minInterval} for plan=${user.plan}`);
-      return res.status(403).json({ message: `Interval must be at least ${minInterval} hours for your plan` });
-    }
-
-    // Обновляем таблицу
-    spreadsheet.spreadsheetId = newSpreadsheetId;
-    spreadsheet.gid = parseInt(gid);
-    spreadsheet.targetDomain = targetDomain;
-    spreadsheet.urlColumn = urlColumn;
-    spreadsheet.targetColumn = targetColumn;
-    spreadsheet.resultRangeStart = resultRangeStart;
-    spreadsheet.resultRangeEnd = resultRangeEnd;
-    spreadsheet.intervalHours = parseInt(intervalHours);
-    await spreadsheet.save();
-
-    console.log(`editSpreadsheet: Successfully updated spreadsheetId=${spreadsheetId} to newSpreadsheetId=${newSpreadsheetId}, gid=${gid} for projectId=${projectId}, userId=${req.userId}`);
-    res.json(spreadsheet);
-  } catch (error) {
-    console.error(`editSpreadsheet: Error for projectId=${projectId}, spreadsheetId=${spreadsheetId}, userId=${req.userId}: ${error.message}`);
-    res.status(500).json({ error: 'Error updating spreadsheet', details: error.message });
+    res.status(404).json({ error: 'Invalid rememberMe token' });
   }
 };
 
@@ -415,7 +212,7 @@ module.exports = {
   deleteLink: [authMiddleware, deleteLink],
   deleteAllLinks: [authMiddleware, deleteAllLinks],
   checkLinks: [authMiddleware, checkLinks],
-  addSpreadsheet: [authMiddleware, addSpreadsheetWithDuplicateCheck],
+  addSpreadsheet: [authMiddleware, addSpreadsheet],
   editSpreadsheet: [authMiddleware, editSpreadsheet],
   getSpreadsheets: [authMiddleware, getSpreadsheets],
   runSpreadsheetAnalysis: [authMiddleware, runSpreadsheetAnalysis],
