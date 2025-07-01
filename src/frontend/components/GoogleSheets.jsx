@@ -598,11 +598,11 @@ const GoogleSheets = ({
   const showTimer = setTimeout(() => {
     setShowNotification(true);
     console.log('Notification shown');
-  }, 3000);
+  }, 1500);
 
   const hideTimer = setTimeout(() => {
     setShowNotification(false);
-  }, 13000); // 3 + 10 секунд
+  }, 11500); // 3 + 10 секунд
 
   return () => {
     clearTimeout(showTimer);
