@@ -1179,16 +1179,16 @@ const GoogleSheets = ({
           </svg>
         </button>
       </div>
-      {[
-  { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
-  { name: 'gid', placeholder: 'GID' },
-  { name: 'targetDomain', placeholder: 'Target domain' },
-  { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
-  { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
-  { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
-  { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
-].map((field) => (
-        <div key={field.name} className="relative">
+        {[
+          { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
+          { name: 'gid', placeholder: 'GID' },
+          { name: 'targetDomain', placeholder: 'Target domain' },
+          { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
+          { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
+          { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
+          { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
+        ].map((field) => (
+        <div key={field.name} className="relative google-sheet-fields">
           <input
             name={field.name}
             value={form[field.name]}
