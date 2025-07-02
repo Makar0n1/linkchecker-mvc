@@ -63,6 +63,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
         link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
         link.isIndexable === false ? link.indexabilityStatus : '',
         isLinkFound ? 'True' : 'False',
+        new Date().toISOString().split('T')[0], // Добавляем дату анализа в формате YYYY-MM-DD
       ];
     });
 
@@ -216,6 +217,15 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
           booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'False' }] }, format: { backgroundColor: { red: 1, green: 0.88, blue: 0.7 } } }
         },
         index: 6
+      }
+    },
+    {
+      addConditionalFormatRule: {
+        rule: {
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 5, endColumnIndex: startColumnIndex + 6 }],
+          booleanRule: { condition: { type: 'NOT_BLANK' }, format: { textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 } } } }
+        },
+        index: 7
       }
     }
   ];
