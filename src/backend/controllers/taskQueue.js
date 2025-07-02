@@ -119,7 +119,7 @@ const triggerNextTask = async () => {
         projectId: task.projectId,
         type: task.type,
         req: null,
-        res: null,
+        res: null, // Устанавливаем res как null для не-HTTP задач
         userId: task.data.userId || project.userId,
         wss: null,
         data: task.data,
@@ -138,9 +138,6 @@ const triggerNextTask = async () => {
             .then(updatedLinks => Promise.all(updatedLinks.map(link => link.save())))
             .then(updatedLinks => {
               console.log(`checkLinks handler: Completed for project ${task.projectId}`);
-              if (task.res && !task.res.headersSent) {
-                task.res.json(updatedLinks);
-              }
               const wssLocal = task.wss;
               if (wssLocal) {
                 wssLocal.clients.forEach(client => {
@@ -153,9 +150,6 @@ const triggerNextTask = async () => {
             })
             .catch(error => {
               console.error(`checkLinks handler: Error for project ${task.projectId}: ${error.message}`);
-              if (task.res && !task.res.headersSent) {
-                task.res.status(500).json({ error: 'Error checking links', details: error.message });
-              }
               callback(error);
             })
             .finally(() => {
@@ -164,6 +158,7 @@ const triggerNextTask = async () => {
                 project.save()
                   .then(() => console.log(`checkLinks handler: Set isAnalyzingManual to false for project ${task.projectId}`))
                   .catch(err => console.error(`checkLinks handler: Error setting isAnalyzingManual to false for project ${task.projectId}: ${err.message}`));
+                triggerNextTask(); // Запускаем следующую задачу
               }
             });
         },
@@ -212,13 +207,13 @@ const triggerNextTask = async () => {
         projectId: task.projectId,
         type: task.type,
         req: null,
-        res: null,
+        res: null, // Устанавливаем res как null для не-HTTP задач
         userId,
         wss: null,
         spreadsheetId: task.data.spreadsheetId,
         data: task.data,
         handler: async (task, callback) => {
-          console.log(`loadPendingTasks handler: Processing runSpreadsheetAnalysis task ${task.taskId} for project ${task.projectId}, spreadsheet ${task.spreadsheetId}, userId=${task.userId}`);
+          console.log(`triggerNextTask handler: Processing runSpreadsheetAnalysis task ${task.taskId} for project ${task.projectId}, spreadsheet ${task.spreadsheetId}, userId=${task.userId}`);
           let project, spreadsheet;
           try {
             project = await Project.findOne({ _id: task.projectId, userId: task.userId });
@@ -233,14 +228,14 @@ const triggerNextTask = async () => {
 
             project.isAnalyzingSpreadsheet = true;
             await project.save();
-            console.log(`loadPendingTasks handler: Set isAnalyzingSpreadsheet to true for project ${task.projectId}`);
+            console.log(`triggerNextTask handler: Set isAnalyzingSpreadsheet to true for project ${task.projectId}`);
 
             spreadsheet.status = 'checking';
             await spreadsheet.save();
-            console.log(`loadPendingTasks handler: Set spreadsheet ${task.spreadsheetId} status to checking`);
+            console.log(`triggerNextTask handler: Set spreadsheet ${task.spreadsheetId} status to checking`);
 
             cancelAnalysis.value = false;
-            console.log(`loadPendingTasks handler: Calling analyzeSpreadsheet with userId=${task.userId} for task ${task.taskId}`);
+            console.log(`triggerNextTask handler: Calling analyzeSpreadsheet with userId=${task.userId} for task ${task.taskId}`);
             const { analyzeSpreadsheet } = require('./spreadsheetController'); // Ленивый импорт
             await analyzeSpreadsheet(spreadsheet, task.data.maxLinks, task.projectId, task.wss, task.taskId, task.userId, task);
 
@@ -252,12 +247,9 @@ const triggerNextTask = async () => {
             spreadsheet.lastRun = new Date();
             spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
             await spreadsheet.save();
-            console.log(`loadPendingTasks handler: Set spreadsheet ${task.spreadsheetId} status to completed`);
+            console.log(`triggerNextTask handler: Set spreadsheet ${task.spreadsheetId} status to completed`);
 
-            console.log(`loadPendingTasks handler: Analysis completed for spreadsheet ${task.spreadsheetId}`);
-            if (task.res && !task.res.headersSent) {
-              task.res.json({ message: 'Analysis completed', taskId: task.taskId });
-            }
+            console.log(`triggerNextTask handler: Analysis completed for spreadsheet ${task.spreadsheetId}`);
             const wssLocal = task.wss;
             if (wssLocal) {
               wssLocal.clients.forEach(client => {
@@ -268,32 +260,26 @@ const triggerNextTask = async () => {
             }
             callback(null);
           } catch (error) {
-            console.error(`loadPendingTasks handler: Error analyzing spreadsheet ${task.spreadsheetId} in project ${task.projectId}: ${error.message}`);
+            console.error(`triggerNextTask handler: Error analyzing spreadsheet ${task.spreadsheetId} in project ${task.projectId}: ${error.message}`);
             if (spreadsheet) {
               spreadsheet.status = error.message === 'Analysis cancelled' ? 'pending' : 'error';
               spreadsheet.scanCount = (spreadsheet.scanCount || 0) + 1;
               await spreadsheet.save();
-              console.log(`loadPendingTasks handler: Set spreadsheet ${task.spreadsheetId} status to ${spreadsheet.status}`);
-            }
-            if (task.res && !task.res.headersSent) {
-              if (error.message === 'Analysis cancelled') {
-                task.res.json({ message: 'Analysis cancelled' });
-              } else {
-                task.res.status(500).json({ error: 'Error analyzing spreadsheet', details: error.message });
-              }
+              console.log(`triggerNextTask handler: Set spreadsheet ${task.spreadsheetId} status to ${spreadsheet.status}`);
             }
             callback(error);
           } finally {
             if (project) {
               project.isAnalyzingSpreadsheet = false;
               await project.save();
-              console.log(`loadPendingTasks handler: Set isAnalyzingSpreadsheet to false for project ${task.projectId}`);
+              console.log(`triggerNextTask handler: Set isAnalyzingSpreadsheet to false for project ${task.projectId}`);
               const user = await User.findById(task.userId);
               if (user) {
                 user.activeTasks.delete(task.projectId);
                 await user.save();
-                console.log(`loadPendingTasks handler: Removed task ${task.taskId} from activeTasks for user ${task.userId}`);
+                console.log(`triggerNextTask handler: Removed task ${task.taskId} from activeTasks for user ${task.userId}`);
               }
+              triggerNextTask(); // Запускаем следующую задачу
             }
           }
         },
