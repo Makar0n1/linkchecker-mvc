@@ -11,3 +11,6 @@ body {
 .error-message {
   @apply bg-red-100 p-3 rounded-lg border border-red-200;
 }
+.google-sheet-fields {
+  padding: 0 1.5px;
+}
