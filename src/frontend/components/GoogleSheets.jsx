@@ -1108,7 +1108,6 @@ const GoogleSheets = ({
   };
 
   return (
-    
     <motion.div
       className="max-w-full mx-auto"
       initial="hidden"
@@ -1145,81 +1144,81 @@ const GoogleSheets = ({
           </button>
         </div>
       )}
-      <AnimatePresence>
-    {showNotification && (
-      <motion.div
-        className="fixed top-[320px] right-[65px] bg-blue-100 text-blue-700 text-sm px-3 py-2 rounded-tl-md rounded-tr-md rounded-bl-md shadow-md z-[9999] pointer-events-none"
-        variants={{
-          hidden: { opacity: 0, y: -10 },
-          visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } },
-          exit: { opacity: 0, y: -10, transition: { duration: 0.5, ease: 'easeIn' } },
-        }}
-        initial="hidden"
-        animate="visible"
-        exit="exit"
-      >
-        Сперва ознакомьтесь с информацией перед добавлением
-      </motion.div>
-    )}
-  </AnimatePresence>
 
+      <AnimatePresence>
+        {showNotification && (
+          <motion.div
+            className="hidden sm:block fixed top-[320px] right-[65px] bg-blue-100 text-blue-700 text-sm px-3 py-2 rounded-tl-md rounded-tr-md rounded-bl-md shadow-md z-[9999] pointer-events-none"
+            variants={{
+              hidden: { opacity: 0, y: -10 },
+              visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } },
+              exit: { opacity: 0, y: -10, transition: { duration: 0.5, ease: 'easeIn' } },
+            }}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
+            Сперва ознакомьтесь с информацией перед добавлением
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="relative">
-    <form onSubmit={addSpreadsheet} className="mb-6 grid grid-cols-2 gap-4">
-      <div className="col-span-2 flex items-center justify-between mb-2">
-        <h3 className="text-lg font-semibold text-gray-800">Add Google Sheet</h3>
-        <button
-          type="button"
-          onClick={openInfoModal}
-          className="text-gray-500 hover:text-gray-700"
-          title="Инструкция по добавлению"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </button>
-      </div>
-        {[
-          { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
-          { name: 'gid', placeholder: 'GID' },
-          { name: 'targetDomain', placeholder: 'Target domain' },
-          { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
-          { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
-          { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
-          { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
-        ].map((field) => (
-        <div key={field.name} className="relative google-sheet-fields">
-          <input
-            name={field.name}
-            value={form[field.name]}
+        <form onSubmit={addSpreadsheet} className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="col-span-1 sm:col-span-2 flex items-center justify-between mb-2">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-800">Add Google Sheet</h3>
+            <button
+              type="button"
+              onClick={openInfoModal}
+              className="text-gray-500 hover:text-gray-700"
+              title="Инструкция по добавлению"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          </div>
+          {[
+            { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
+            { name: 'gid', placeholder: 'GID' },
+            { name: 'targetDomain', placeholder: 'Target domain' },
+            { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
+            { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
+            { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
+            { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
+          ].map((field) => (
+            <div key={field.name} className="relative google-sheet-fields">
+              <input
+                name={field.name}
+                value={form[field.name]}
+                onChange={handleFormChange}
+                placeholder={field.placeholder}
+                type="text"
+                className="p-3 sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
+                disabled={loading || isProjectAnalyzing || isTokenInvalid}
+              />
+            </div>
+          ))}
+          <select
+            name="intervalHours"
+            value={form.intervalHours}
             onChange={handleFormChange}
-            placeholder={field.placeholder}
-            type="text"
-            className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
+            className="p-3 sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
             disabled={loading || isProjectAnalyzing || isTokenInvalid}
-          />
-        </div>
-      ))}
-      <select
-        name="intervalHours"
-        value={form.intervalHours}
-        onChange={handleFormChange}
-        className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
-        disabled={loading || isProjectAnalyzing || isTokenInvalid}
-      >
-        {intervalOptions.map(option => (
-          <option key={option.value} value={option.value}>{option.label}</option>
-        ))}
-      </select>
-      <button
-        type="submit"
-        className="col-span-2 bg-green-500 text-white p-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
-        disabled={loading || isProjectAnalyzing || isTokenInvalid}
-      >
-        {loading ? 'Adding...' : 'Add spreadsheet'}
-      </button>
-    </form>
-  </div>
+          >
+            {intervalOptions.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            className="col-span-1 sm:col-span-2 bg-green-500 text-white p-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
+            disabled={loading || isProjectAnalyzing || isTokenInvalid}
+          >
+            {loading ? 'Adding...' : 'Add spreadsheet'}
+          </button>
+        </form>
+      </div>
 
       <ul>
         {spreadsheets.map((s) => {
@@ -1248,37 +1247,35 @@ const GoogleSheets = ({
                     <p>Next scan in: {timers[s._id] || 'Calculating...'}</p>
                   </div>
                 </div>
-                <div className="flex gap-2 sm:ml-auto">
+                <div className="flex flex-col sm:flex-row gap-2 sm:ml-auto">
                   {(s.status === 'checking' || isRunning) && isProjectAnalyzing ? (
-                    <>
-                      <button
-                        onClick={() => cancelAnalysis(s._id)}
-                        className="bg-red-500 text-white px-4 py-1 rounded-lg hover:bg-red-600 transition-colors"
-                        disabled={isTokenInvalid}
-                      >
-                        Cancel
-                      </button>
-                    </>
+                    <button
+                      onClick={() => cancelAnalysis(s._id)}
+                      className="bg-red-500 text-white px-3 py-1 sm:px-4 sm:py-1 rounded-lg hover:bg-red-600 transition-colors"
+                      disabled={isTokenInvalid}
+                    >
+                      Cancel
+                    </button>
                   ) : (
                     <>
                       <button
                         onClick={() => runAnalysis(s._id)}
                         disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
-                        className={`bg-green-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
+                        className={`bg-green-500 text-white px-3 py-1 sm:px-4 sm:py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
                       >
-                       {isRunning ? 'Running...' : 'Start'}
+                        {isRunning ? 'Running...' : 'Start'}
                       </button>
                       <button
                         onClick={() => openEditModal(s)}
                         disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
-                        className={`bg-yellow-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-yellow-600'} transition-colors`}
+                        className={`bg-yellow-500 text-white px-3 py-1 sm:px-4 sm:py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-yellow-600'} transition-colors`}
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => deleteSpreadsheet(s._id)}
                         disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
-                        className={`bg-red-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
+                        className={`bg-red-500 text-white px-3 py-1 sm:px-4 sm:py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
                       >
                         Delete
                       </button>
@@ -1308,161 +1305,158 @@ const GoogleSheets = ({
 
       {/* Модальное окно для редактирования таблицы */}
       <AnimatePresence>
-    {isEditModalOpen && (
-      <motion.div
-        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        initial="hidden"
-        animate="visible"
-        exit="exit"
-        variants={modalVariants}
-      >
-        <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
-          <button
-            onClick={closeEditModal}
-            className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+        {isEditModalOpen && (
+          <motion.div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            variants={modalVariants}
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Редактировать таблицу</h3>
-          <form onSubmit={editSpreadsheet} className="flex flex-col gap-4">
-            {[
-  { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
-  { name: 'gid', placeholder: 'GID' },
-  { name: 'targetDomain', placeholder: 'Target domain' },
-  { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
-  { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
-  { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
-  { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
-].map((field) => (
-              <div key={field.name} className="relative">
-                <input
-                  name={field.name}
-                  value={editForm ? editForm[field.name] : ''}
+            <div className="relative bg-white rounded-lg shadow-lg w-full max-w-[90vw] mx-4 p-4 sm:p-6 overflow-y-auto max-h-[80vh]">
+              <button
+                onClick={closeEditModal}
+                className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-4">Редактировать таблицу</h3>
+              <form onSubmit={editSpreadsheet} className="flex flex-col gap-4">
+                {[
+                  { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
+                  { name: 'gid', placeholder: 'GID' },
+                  { name: 'targetDomain', placeholder: 'Target domain' },
+                  { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
+                  { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
+                  { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
+                  { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
+                ].map((field) => (
+                  <div key={field.name} className="relative google-sheet-fields">
+                    <input
+                      name={field.name}
+                      value={editForm ? editForm[field.name] : ''}
+                      onChange={handleEditChange}
+                      placeholder={field.placeholder}
+                      type="text"
+                      className="p-[1.5px] sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
+                      disabled={loading}
+                    />
+                  </div>
+                ))}
+                <select
+                  name="intervalHours"
+                  value={editForm ? editForm.intervalHours : ''}
                   onChange={handleEditChange}
-                  placeholder={field.placeholder}
-                  type="text"
-                  className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
+                  className="p-[1.5px] sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
                   disabled={loading}
-                />
-                {(field.name === 'resultRangeStart' || field.name === 'resultRangeEnd') && (
-                  <p className="text-gray-500 text-xs mt-1">
-                    The result range must include 6 columns (e.g., L:Q), with the last column reserved for the analysis date.
-                  </p>
-                )}
-              </div>
-            ))}
-            <select
-              name="intervalHours"
-              value={editForm ? editForm.intervalHours : ''}
-              onChange={handleEditChange}
-              className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
-              disabled={loading}
-            >
-              {intervalOptions.map(option => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
-              disabled={loading}
-            >
-              {loading ? 'Сохранение...' : 'Сохранить изменения'}
-            </button>
-          </form>
-        </div>
-      </motion.div>
-    )}
-  </AnimatePresence>
+                >
+                  {intervalOptions.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
+                  disabled={loading}
+                >
+                  {loading ? 'Сохранение...' : 'Сохранить изменения'}
+                </button>
+              </form>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Модальное окно с инструкцией */}
-  <AnimatePresence>
-    {isInfoModalOpen && (
-      <motion.div
-        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        initial="hidden"
-        animate="visible"
-        exit="exit"
-        variants={modalVariants}
-      >
-        <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
-          <button
-            onClick={closeInfoModal}
-            className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+      <AnimatePresence>
+        {isInfoModalOpen && (
+          <motion.div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            variants={modalVariants}
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Инструкция по добавлению Google Таблицы</h3>
-          <p className="text-gray-600">
-            Чтобы сервис мог работать с вашей Google Таблицей, необходимо добавить почту сервисного аккаунта в редакторы таблицы. Перейдите в настройки доступа вашей Google Таблицы и добавьте следующий адрес электронной почты в список редакторов:
-          </p>
-          <div className="flex items-center mt-2">
-            {SERVICE_ACCOUNT_EMAIL ? (
-              <p className="text-gray-800 py-1 px-2 rounded-lg bg-gray-200 font-semibold text-[12px] break-all">{SERVICE_ACCOUNT_EMAIL}</p>
-            ) : (
-              <p className="text-red-600 text-sm">Адрес сервисного аккаунта не задан. Обратитесь к администратору.</p>
-            )}
-            <button
-              onClick={handleCopyEmail}
-              className={`ml-2 px-2 py-1 rounded-lg text-sm transition-colors ${isCopied ? 'bg-green-200 text-green-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-              title="Скопировать email"
-              disabled={!SERVICE_ACCOUNT_EMAIL}
-            >
-              {isCopied ? 'Скопировано!' : 'Скопировать'}
-            </button>
-          </div>
-          <p className="text-gray-600 mt-4">
-            Результаты анализа будут занимать 6 столбцов в таблице. Рекомендуется в первой строке указанного диапазона добавить заголовки столбцов (слева направо): <strong>"Статус", "Ответ сайта", "Индексируемость", "Причина не индексации", "Наличие ссылки", "Дата сканирования"</strong>. Ранее требовалось указывать 5 столбцов, например, L:P (L, M, N, O, P), но теперь необходимо указывать 6 столбцов, например, L:Q (L, M, N, O, P, Q). Если вы укажете менее или более 6 столбцов, появится уведомление об ошибке.
-          </p>
-          <p className="text-gray-600 mt-2">
-            После этого вы сможете успешно добавить таблицу для анализа в этом интерфейсе.
-          </p>
-          <button
-            onClick={closeInfoModal}
-            className="mt-4 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
+            <div className="relative bg-white rounded-lg shadow-lg w-full max-w-[90vw] mx-4 p-4 sm:p-6 overflow-y-auto max-h-[80vh]">
+              <button
+                onClick={closeInfoModal}
+                className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-4">Инструкция по добавлению Google Таблицы</h3>
+              <p className="text-gray-600">
+                Чтобы сервис мог работать с вашей Google Таблицей, необходимо добавить почту сервисного аккаунта в редакторы таблицы. Перейдите в настройки доступа вашей Google Таблицы и добавьте следующий адрес электронной почты в список редакторов:
+              </p>
+              <div className="flex items-center mt-2">
+                {SERVICE_ACCOUNT_EMAIL ? (
+                  <p className="text-gray-800 py-1 px-2 rounded-lg bg-gray-200 font-semibold text-[12px] break-all">{SERVICE_ACCOUNT_EMAIL}</p>
+                ) : (
+                  <p className="text-red-600 text-sm">Адрес сервисного аккаунта не задан. Обратитесь к администратору.</p>
+                )}
+                <button
+                  onClick={handleCopyEmail}
+                  className={`ml-2 px-2 py-1 rounded-lg text-sm transition-colors ${isCopied ? 'bg-green-200 text-green-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                  title="Скопировать email"
+                  disabled={!SERVICE_ACCOUNT_EMAIL}
+                >
+                  {isCopied ? 'Скопировано!' : 'Скопировать'}
+                </button>
+              </div>
+              <p className="text-gray-600 mt-4">
+                Результаты анализа будут занимать 6 столбцов в таблице. Рекомендуется в первой строке указанного диапазона добавить заголовки столбцов (слева направо): <strong>"Статус", "Ответ сайта", "Индексируемость", "Причина не индексации", "Наличие ссылки", "Дата сканирования"</strong>. Ранее требовалось указывать 5 столбцов, например, L:P (L, M, N, O, P), но теперь необходимо указывать 6 столбцов, например, L:Q (L, M, N, O, P, Q). Если вы укажете менее или более 6 столбцов, появится уведомление об ошибке.
+              </p>
+              <p className="text-gray-600 mt-2">
+                После этого вы сможете успешно добавить таблицу для анализа в этом интерфейсе.
+              </p>
+              <button
+                onClick={closeInfoModal}
+                className="mt-4 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
+              >
+                Понятно
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Модальное окно с предупреждением */}
+      <AnimatePresence>
+        {isWarningModalOpen && (
+          <motion.div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            variants={modalVariants}
           >
-            Понятно
-          </button>
-        </div>
-      </motion.div>
-    )}
-  </AnimatePresence>
-  <AnimatePresence>
-    {isWarningModalOpen && (
-      <motion.div
-        className="fixed inset-0 border-red=500 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        initial="hidden"
-        animate="visible"
-        exit="exit"
-        variants={modalVariants}
-      >
-        <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
-          <button
-            onClick={() => setIsWarningModalOpen(false)}
-            className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Внимание</h3>
-          <p className="text-gray-600">
-            Внимание: {warningMessage}
-          </p>
-          <button
-            onClick={() => setIsWarningModalOpen(false)}
-            className="mt-4 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
-          >
-            Я понимаю, приму меры
-          </button>
-        </div>
-      </motion.div>
-    )}
-  </AnimatePresence>
+            <div className="relative bg-white rounded-lg shadow-lg w-full max-w-[90vw] mx-4 p-4 sm:p-6 overflow-y-auto max-h-[80vh]">
+              <button
+                onClick={() => setIsWarningModalOpen(false)}
+                className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-4">Внимание</h3>
+              <p className="text-gray-600">
+                Внимание: {warningMessage}
+              </p>
+              <button
+                onClick={() => setIsWarningModalOpen(false)}
+                className="mt-4 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
+              >
+                Я понимаю, приму меры
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };
