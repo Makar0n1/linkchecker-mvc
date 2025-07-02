@@ -74,6 +74,9 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
       return;
     }
 
+    // Вычисляем конечный столбец (например, Q)
+    const startCol = resultRangeStart.match(/^[A-Z]+/)[0];
+    const endCol = String.fromCharCode(resultRangeStart.charCodeAt(0) + 5); // L + 5 = Q
     const batchUpdates = [];
     let currentStartRow = rowIndices[0];
     let currentValues = [];
@@ -83,7 +86,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
       if (rowIndex !== previousRow + 1) {
         // Завершаем текущий диапазон и начинаем новый
         if (currentValues.length > 0) {
-          const range = `${sheetName}!${resultRangeStart}${currentStartRow}:${resultRangeEnd}${previousRow}`;
+          const range = `${sheetName}!${startCol}${currentStartRow}:${endCol}${previousRow}`;
           batchUpdates.push({
             range,
             values: currentValues,
@@ -98,7 +101,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
 
     // Добавляем последний диапазон
     if (currentValues.length > 0) {
-      const range = `${sheetName}!${resultRangeStart}${currentStartRow}:${resultRangeEnd}${previousRow}`;
+      const range = `${sheetName}!${startCol}${currentStartRow}:${endCol}${previousRow}`;
       batchUpdates.push({
         range,
         values: currentValues,
@@ -122,6 +125,57 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
   } catch (error) {
     console.error(`Error exporting to Google Sheets (${spreadsheetId}):`, error.message);
     throw error;
+  }
+};
+
+const checkResultRangeEmpty = async (spreadsheetId, gid, resultRangeStart, resultRangeEnd) => {
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId,
+    });
+
+    const sheet = spreadsheet.data.sheets.find(sheet => sheet.properties.sheetId === parseInt(gid));
+    if (!sheet) {
+      console.error(`checkResultRangeEmpty: Sheet with GID ${gid} not found in spreadsheet ${spreadsheetId}`);
+      throw new Error(`Sheet with GID ${gid} not found`);
+    }
+
+    const sheetName = sheet.properties.title;
+    const startCol = resultRangeStart.match(/^[A-Z]+/)[0];
+    const endCol = resultRangeEnd.match(/^[A-Z]+/)[0];
+    const range = `${sheetName}!${startCol}2:${endCol}`;
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range,
+    });
+
+    const rows = response.data.values || [];
+    console.log(`checkResultRangeEmpty: Checked range ${range} in spreadsheet ${spreadsheetId}, found ${rows.length} rows`);
+
+    const nonEmptyCells = [];
+    rows.forEach((row, rowIndex) => {
+      row.forEach((cell, colIndex) => {
+        if (cell && cell.trim()) {
+          const colLetter = String.fromCharCode(startCol.charCodeAt(0) + colIndex);
+          nonEmptyCells.push(`${colLetter}${rowIndex + 2}`);
+        }
+      });
+    });
+
+    if (nonEmptyCells.length > 0) {
+      console.warn(`checkResultRangeEmpty: Non-empty cells found in range ${range}: ${nonEmptyCells.join(', ')}`);
+      return {
+        isEmpty: false,
+        warning: `Указанный диапазон (${range}) содержит данные в ячейках: ${nonEmptyCells.join(', ')}. Пожалуйста, сохраните ваши данные и очистите или переформатируйте этот диапазон перед анализом, так как он будет перезаписан результатами анализа ссылок.`,
+      };
+    }
+
+    console.log(`checkResultRangeEmpty: Range ${range} is empty`);
+    return { isEmpty: true };
+  } catch (error) {
+    console.error(`checkResultRangeEmpty: Error checking range in spreadsheet ${spreadsheetId}:`, error.message);
+    return { isEmpty: true, warning: `Не удалось проверить диапазон ${range} из-за ошибки: ${error.message}. Добавление таблицы продолжается.` };
   }
 };
 
@@ -254,4 +308,5 @@ module.exports = {
   exportLinksToGoogleSheetsBatch,
   formatGoogleSheet,
   columnLetterToIndex,
+  checkResultRangeEmpty,
 };
