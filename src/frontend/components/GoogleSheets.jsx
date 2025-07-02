@@ -53,6 +53,8 @@ const GoogleSheets = ({
   const [loading, setLoading] = useState(false);
   const [taskTimestamps, setTaskTimestamps] = useState({});
   const [isCopied, setIsCopied] = useState(false);
+  const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
+  const [warningMessage, setWarningMessage] = useState('');
 
   const apiBaseUrl = import.meta.env.MODE === 'production'
     ? `${import.meta.env.VITE_BACKEND_DOMAIN}/api/links`
@@ -72,6 +74,22 @@ const GoogleSheets = ({
     { value: '336', label: '14 days' },
     { value: '672', label: '28 days' },
   ];
+  const validateResultRange = (start, end) => {
+    const getColumnIndex = (col) => {
+      if (!col || typeof col !== 'string') return -1;
+      return col.toUpperCase().charCodeAt(0) - 65; // A=0, B=1, ..., Z=25
+    };
+
+    const startIndex = getColumnIndex(start);
+    const endIndex = getColumnIndex(end);
+
+    if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
+      return false;
+    }
+
+    const columnCount = endIndex - startIndex + 1;
+    return columnCount === 6; // Требуется ровно 6 столбцов
+  };
 
   // Форматирование интервала для отображения в UI
   const formatInterval = (intervalHours) => {
@@ -140,7 +158,7 @@ const GoogleSheets = ({
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), 2000); // Сброс через 2 секунды
       } else {
-        setError('Не удалось скопировать email: отсутствует разрешение на доступ к буферу обмена');
+        setError('Failed to copy email: permission to access the clipboard is missing');
       }
     } catch (err) {
       console.error('Failed to copy email:', err.message);
@@ -675,7 +693,15 @@ const GoogleSheets = ({
     try {
       const { spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = form;
       if (!spreadsheetId || gid === '' || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
-        setError('Все поля обязательны для заполнения');
+        setError('All fields are required');
+        setLoading(false);
+        setParentLoading(false);
+        return;
+      }
+
+      // Проверка диапазона результатов
+      if (!validateResultRange(resultRangeStart, resultRangeEnd)) {
+        setError('The result range must include exactly 6 columns (e.g., L:Q)');
         setLoading(false);
         setParentLoading(false);
         return;
@@ -686,17 +712,26 @@ const GoogleSheets = ({
         (s) => s.spreadsheetId === spreadsheetId && s.gid === parseInt(gid)
       );
       if (isDuplicate) {
-        setError('Эта таблица (с таким spreadsheetId и gid) уже добавлена в проект');
+        setError('This spreadsheet (with the given spreadsheetId and gid) has already been added to the project');
         setLoading(false);
         setParentLoading(false);
         return;
       }
 
+      console.log('Adding spreadsheet with data:', { projectId, spreadsheetId, gid: parseInt(gid), targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours: parseFloat(intervalHours) });
       const response = await axios.post(
         `${apiBaseUrl}/${projectId}/spreadsheets`,
         { ...form, gid: parseInt(gid), intervalHours: parseFloat(intervalHours) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      console.log('Add spreadsheet response:', response.data);
+      
+      // Проверяем warning в ответе
+      if (response.data.warning) {
+        setWarningMessage(response.data.warning);
+        setIsWarningModalOpen(true);
+      }
+
       await fetchSpreadsheets();
       setForm({
         spreadsheetId: '',
@@ -715,11 +750,20 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
+            console.log('Retrying add spreadsheet with new token:', token.substring(0, 10));
             const response = await axios.post(
               `${apiBaseUrl}/${projectId}/spreadsheets`,
               { ...form, gid: parseInt(form.gid), intervalHours: parseFloat(form.intervalHours) },
               { headers: { Authorization: `Bearer ${token}` } }
             );
+            console.log('Retry add spreadsheet response:', response.data);
+            
+            // Проверяем warning в ответе при повторной попытке
+            if (response.data.warning) {
+              setWarningMessage(response.data.warning);
+              setIsWarningModalOpen(true);
+            }
+
             await fetchSpreadsheets();
             setForm({
               spreadsheetId: '',
@@ -735,10 +779,10 @@ const GoogleSheets = ({
           }
         } catch (retryErr) {
           console.error('Retry addSpreadsheet failed:', retryErr.message, retryErr.response?.data);
-          setError(retryErr.response?.data?.error || 'Не удалось добавить таблицу после обновления токена');
+          setError(retryErr.response?.data?.error || 'Failed to add spreadsheet after token refresh');
         }
       } else {
-        setError(err.response?.data?.error || 'Не удалось добавить таблицу');
+        setError(err.response?.data?.error || 'Failed to add spreadsheet');
       }
     } finally {
       setLoading(false);
@@ -754,7 +798,15 @@ const GoogleSheets = ({
     try {
       const { _id, spreadsheetId, gid, targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours } = editForm;
       if (!spreadsheetId || gid === '' || !targetDomain || !urlColumn || !targetColumn || !resultRangeStart || !resultRangeEnd || !intervalHours) {
-        setError('Все поля обязательны для заполнения');
+        setError('All fields are required');
+        setLoading(false);
+        setParentLoading(false);
+        return;
+      }
+
+      // Проверка диапазона результатов
+      if (!validateResultRange(resultRangeStart, resultRangeEnd)) {
+        setError('The result range must include exactly 6 columns (e.g., L:Q)');
         setLoading(false);
         setParentLoading(false);
         return;
@@ -765,17 +817,19 @@ const GoogleSheets = ({
         (s) => s._id !== _id && s.spreadsheetId === spreadsheetId && s.gid === parseInt(gid)
       );
       if (isDuplicate) {
-        setError('Эта таблица (с таким spreadsheetId и gid) уже добавлена в проект');
+        setError('This spreadsheet (with the given spreadsheetId and gid) has already been added to the project');
         setLoading(false);
         setParentLoading(false);
         return;
       }
 
+      console.log('Editing spreadsheet with data:', { _id, projectId, spreadsheetId, gid: parseInt(gid), targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours: parseFloat(intervalHours) });
       const response = await axios.put(
         `${apiBaseUrl}/${projectId}/spreadsheets/${_id}`,
         { ...editForm, gid: parseInt(gid), intervalHours: parseFloat(intervalHours) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      console.log('Edit spreadsheet response:', response.data);
       await fetchSpreadsheets();
       closeEditModal();
       setError(null);
@@ -785,21 +839,23 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
+            console.log('Retrying edit spreadsheet with new token:', token.substring(0, 10));
             const response = await axios.put(
               `${apiBaseUrl}/${projectId}/spreadsheets/${editForm._id}`,
               { ...editForm, gid: parseInt(editForm.gid), intervalHours: parseFloat(editForm.intervalHours) },
               { headers: { Authorization: `Bearer ${token}` } }
             );
+            console.log('Retry edit spreadsheet response:', response.data);
             await fetchSpreadsheets();
             closeEditModal();
             setError(null);
           }
         } catch (retryErr) {
           console.error('Retry editSpreadsheet failed:', retryErr.message, retryErr.response?.data);
-          setError(retryErr.response?.data?.error || 'Не удалось отредактировать таблицу после обновления токена');
+          setError(retryErr.response?.data?.error || 'Failed to edit spreadsheet after token refresh');
         }
       } else {
-        setError(err.response?.data?.error || `Не удалось отредактировать таблицу: ${err.message}`);
+        setError(err.response?.data?.error || `Failed to edit spreadsheet: ${err.message}`);
       }
     } finally {
       setLoading(false);
@@ -810,7 +866,7 @@ const GoogleSheets = ({
   const runAnalysis = async (spreadsheetId) => {
     let token = localStorage.getItem('token');
     if (!token) {
-      setError('Отсутствует токен авторизации. Пожалуйста, войдите снова.');
+      setError('Authorization token is missing. Please log in again.');
       navigate('/login');
       return;
     }
@@ -861,11 +917,11 @@ const GoogleSheets = ({
           }
         } catch (retryErr) {
           console.error('Retry runAnalysis failed:', retryErr.message, retryErr.response?.data);
-          setError(retryErr.response?.data?.error || 'Не удалось запустить анализ после обновления токена');
+          setError(retryErr.response?.data?.error || 'Failed to start analysis after token refresh');
         }
       } else {
-        const errorMessage = err.response?.data?.error || 'Не удалось запустить анализ';
-        setError(errorMessage.includes('already in progress') ? 'Анализ таблицы уже выполняется' : errorMessage.includes('not found') ? 'Таблица не найдена' : errorMessage);
+        const errorMessage = err.response?.data?.error || 'Failed to start analysis';
+        setError(errorMessage.includes('already in progress') ? 'Spreadsheet analysis is already in progress' : errorMessage.includes('not found') ? 'Spreadsheet not found' : errorMessage);
         setRunningIds(runningIds.filter(id => id !== spreadsheetId));
         setProgressData(prev => {
           const newProgress = { ...prev };
@@ -953,10 +1009,10 @@ const GoogleSheets = ({
           }
         } catch (retryErr) {
           console.error('Retry cancelAnalysis failed:', retryErr.message, retryErr.response?.data);
-          setError(retryErr.response?.data?.error || 'Не удалось отменить анализ после обновления токена');
+          setError(retryErr.response?.data?.error || 'Failed to cancel analysis after token refresh');
         }
       } else {
-        setError(err.response?.data?.error || 'Не удалось отменить анализ');
+        setError(err.response?.data?.error || 'Failed to cancel analysis');
       }
     } finally {
       setLoading(false);
@@ -1018,10 +1074,10 @@ const GoogleSheets = ({
           }
         } catch (retryErr) {
           console.error('Retry deleteSpreadsheet failed:', retryErr.message, retryErr.response?.data);
-          setError(retryErr.response?.data?.error || 'Не удалось удалить таблицу после обновления токена');
+          setError(retryErr.response?.data?.error || 'Failed to delete spreadsheet after token refresh');
         }
       } else {
-        setError(err.response?.data?.error || 'Не удалось удалить таблицу');
+        setError(err.response?.data?.error || 'Failed to delete spreadsheet');
       }
     } finally {
       setLoading(false);
@@ -1109,62 +1165,61 @@ const GoogleSheets = ({
 
 
       <div className="relative">
-      <form onSubmit={addSpreadsheet} className="mb-6 grid grid-cols-2 gap-4">
-        <div className="col-span-2 flex items-center justify-between mb-2">
-          <h3 className="text-lg font-semibold text-gray-800">Add Google Sheet</h3>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={openInfoModal}
-              className="text-gray-500 hover:text-gray-700"
-              title="Инструкция по добавлению"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </button>
-          </div>
-        </div>
-          {[
-            { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
-            { name: 'gid', placeholder: 'GID' },
-            { name: 'targetDomain', placeholder: 'Target Domain' },
-            { name: 'urlColumn', placeholder: 'URL Column (e.g., D)' },
-            { name: 'targetColumn', placeholder: 'Target Column (e.g., I)' },
-            { name: 'resultRangeStart', placeholder: 'Result Range Start (e.g., L)' },
-            { name: 'resultRangeEnd', placeholder: 'Result Range End (e.g., P)' },
-          ].map((field) => (
-            <input
-              key={field.name}
-              name={field.name}
-              value={form[field.name]}
-              onChange={handleFormChange}
-              placeholder={field.placeholder}
-              type="text"
-              className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
-              disabled={loading || isProjectAnalyzing || isTokenInvalid}
-            />
-          ))}
-          <select
-            name="intervalHours"
-            value={form.intervalHours}
-            onChange={handleFormChange}
-            className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
-            disabled={loading || isProjectAnalyzing || isTokenInvalid}
-          >
-            {intervalOptions.map(option => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="col-span-2 bg-green-500 text-white p-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
-            disabled={loading || isProjectAnalyzing || isTokenInvalid}
-          >
-            {loading ? 'Adding...' : 'Add Spreadsheet'}
-          </button>
-        </form>
+    <form onSubmit={addSpreadsheet} className="mb-6 grid grid-cols-2 gap-4">
+      <div className="col-span-2 flex items-center justify-between mb-2">
+        <h3 className="text-lg font-semibold text-gray-800">Add Google Sheet</h3>
+        <button
+          type="button"
+          onClick={openInfoModal}
+          className="text-gray-500 hover:text-gray-700"
+          title="Инструкция по добавлению"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </button>
       </div>
+      {[
+  { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
+  { name: 'gid', placeholder: 'GID' },
+  { name: 'targetDomain', placeholder: 'Target domain' },
+  { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
+  { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
+  { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
+  { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
+].map((field) => (
+        <div key={field.name} className="relative">
+          <input
+            name={field.name}
+            value={form[field.name]}
+            onChange={handleFormChange}
+            placeholder={field.placeholder}
+            type="text"
+            className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
+            disabled={loading || isProjectAnalyzing || isTokenInvalid}
+          />
+        </div>
+      ))}
+      <select
+        name="intervalHours"
+        value={form.intervalHours}
+        onChange={handleFormChange}
+        className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+        disabled={loading || isProjectAnalyzing || isTokenInvalid}
+      >
+        {intervalOptions.map(option => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        className="col-span-2 bg-green-500 text-white p-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
+        disabled={loading || isProjectAnalyzing || isTokenInvalid}
+      >
+        {loading ? 'Adding...' : 'Add spreadsheet'}
+      </button>
+    </form>
+  </div>
 
       <ul>
         {spreadsheets.map((s) => {
@@ -1183,14 +1238,14 @@ const GoogleSheets = ({
                   <div className="flex items-center gap-2">
                     <span className={`w-4 h-4 rounded-full ${statusColor(s.status, isRunning)} flex-shrink-0`}></span>
                     <span className="text-gray-700 break-all">
-                      {s.spreadsheetId} - {s.targetDomain} - Каждые {formatInterval(s.intervalHours)}
+                      {s.spreadsheetId} - {s.targetDomain} - Every {formatInterval(s.intervalHours)}
                     </span>
                   </div>
                   <div className="text-gray-600 text-sm">
-                    <p>Сканов: {s.scanCount || 0}</p>
-                    <p>Статус: {progress.status === 'pending' ? 'Ожидание' : progress.status === 'checking' ? 'Проверка' : progress.status === 'completed' ? 'Завершено' : 'Не начато'}</p>
-                    <p>Последний скан: {s.lastRun ? new Date(s.lastRun).toLocaleString('ru-RU') : 'Никогда'}</p>
-                    <p>Следующий скан через: {timers[s._id] || 'Вычисление...'}</p>
+                    <p>Scans: {s.scanCount || 0}</p>
+                    <p>Status: {progress.status === 'pending' ? 'Waiting' : progress.status === 'checking' ? 'Checking' : progress.status === 'completed' ? 'Completed' : 'Not started'}</p>
+                    <p>Last scan: {s.lastRun ? new Date(s.lastRun).toLocaleString('en-US') : 'Never'}</p>
+                    <p>Next scan in: {timers[s._id] || 'Calculating...'}</p>
                   </div>
                 </div>
                 <div className="flex gap-2 sm:ml-auto">
@@ -1201,7 +1256,7 @@ const GoogleSheets = ({
                         className="bg-red-500 text-white px-4 py-1 rounded-lg hover:bg-red-600 transition-colors"
                         disabled={isTokenInvalid}
                       >
-                        Отменить
+                        Cancel
                       </button>
                     </>
                   ) : (
@@ -1211,21 +1266,21 @@ const GoogleSheets = ({
                         disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
                         className={`bg-green-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'} transition-colors`}
                       >
-                        {isRunning ? 'Выполняется...' : 'Запустить'}
+                       {isRunning ? 'Running...' : 'Start'}
                       </button>
                       <button
                         onClick={() => openEditModal(s)}
                         disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
-                        className={`bg-blue-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-600'} transition-colors`}
+                        className={`bg-yellow-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-yellow-600'} transition-colors`}
                       >
-                        Редактировать
+                        Edit
                       </button>
                       <button
                         onClick={() => deleteSpreadsheet(s._id)}
                         disabled={loading || isRunning || isProjectAnalyzing || isTokenInvalid}
                         className={`bg-red-500 text-white px-4 py-1 rounded-lg ${loading || isRunning || isProjectAnalyzing || isTokenInvalid ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'} transition-colors`}
                       >
-                        Удалить
+                        Delete
                       </button>
                     </>
                   )}
@@ -1253,68 +1308,74 @@ const GoogleSheets = ({
 
       {/* Модальное окно для редактирования таблицы */}
       <AnimatePresence>
-        {isEditModalOpen && (
-          <motion.div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            variants={modalVariants}
+    {isEditModalOpen && (
+      <motion.div
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        variants={modalVariants}
+      >
+        <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
+          <button
+            onClick={closeEditModal}
+            className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
           >
-            <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
-              <button
-                onClick={closeEditModal}
-                className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Редактировать таблицу</h3>
-              <form onSubmit={editSpreadsheet} className="flex flex-col gap-4">
-                {[
-                  { name: 'spreadsheetId', placeholder: 'ID таблицы' },
-                  { name: 'gid', placeholder: 'GID' },
-                  { name: 'targetDomain', placeholder: 'Целевой домен' },
-                  { name: 'urlColumn', placeholder: 'Столбец URL (например, D)' },
-                  { name: 'targetColumn', placeholder: 'Целевой столбец (например, I)' },
-                  { name: 'resultRangeStart', placeholder: 'Начало диапазона результатов (например, L)' },
-                  { name: 'resultRangeEnd', placeholder: 'Конец диапазона результатов (например, P)' },
-                ].map((field) => (
-                  <input
-                    key={field.name}
-                    name={field.name}
-                    value={editForm ? editForm[field.name] : ''}
-                    onChange={handleEditChange}
-                    placeholder={field.placeholder}
-                    type="text"
-                    className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
-                    disabled={loading}
-                  />
-                ))}
-                <select
-                  name="intervalHours"
-                  value={editForm ? editForm.intervalHours : ''}
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Редактировать таблицу</h3>
+          <form onSubmit={editSpreadsheet} className="flex flex-col gap-4">
+            {[
+  { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
+  { name: 'gid', placeholder: 'GID' },
+  { name: 'targetDomain', placeholder: 'Target domain' },
+  { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
+  { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
+  { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
+  { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
+].map((field) => (
+              <div key={field.name} className="relative">
+                <input
+                  name={field.name}
+                  value={editForm ? editForm[field.name] : ''}
                   onChange={handleEditChange}
-                  className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+                  placeholder={field.placeholder}
+                  type="text"
+                  className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
                   disabled={loading}
-                >
-                  {intervalOptions.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
-                  disabled={loading}
-                >
-                  {loading ? 'Сохранение...' : 'Сохранить изменения'}
-                </button>
-              </form>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                />
+                {(field.name === 'resultRangeStart' || field.name === 'resultRangeEnd') && (
+                  <p className="text-gray-500 text-xs mt-1">
+                    The result range must include 6 columns (e.g., L:Q), with the last column reserved for the analysis date.
+                  </p>
+                )}
+              </div>
+            ))}
+            <select
+              name="intervalHours"
+              value={editForm ? editForm.intervalHours : ''}
+              onChange={handleEditChange}
+              className="p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+              disabled={loading}
+            >
+              {intervalOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
+              disabled={loading}
+            >
+              {loading ? 'Сохранение...' : 'Сохранить изменения'}
+            </button>
+          </form>
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
 
       {/* Модальное окно с инструкцией */}
   <AnimatePresence>
@@ -1354,6 +1415,9 @@ const GoogleSheets = ({
               {isCopied ? 'Скопировано!' : 'Скопировать'}
             </button>
           </div>
+          <p className="text-gray-600 mt-4">
+            Результаты анализа будут занимать 6 столбцов в таблице. Рекомендуется в первой строке указанного диапазона добавить заголовки столбцов (слева направо): <strong>"Статус", "Ответ сайта", "Индексируемость", "Причина не индексации", "Наличие ссылки", "Дата сканирования"</strong>. Ранее требовалось указывать 5 столбцов, например, L:P (L, M, N, O, P), но теперь необходимо указывать 6 столбцов, например, L:Q (L, M, N, O, P, Q). Если вы укажете менее или более 6 столбцов, появится уведомление об ошибке.
+          </p>
           <p className="text-gray-600 mt-2">
             После этого вы сможете успешно добавить таблицу для анализа в этом интерфейсе.
           </p>
@@ -1362,6 +1426,38 @@ const GoogleSheets = ({
             className="mt-4 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
           >
             Понятно
+          </button>
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+  <AnimatePresence>
+    {isWarningModalOpen && (
+      <motion.div
+        className="fixed inset-0 border-red=500 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        variants={modalVariants}
+      >
+        <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
+          <button
+            onClick={() => setIsWarningModalOpen(false)}
+            className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Внимание</h3>
+          <p className="text-gray-600">
+            Внимание: {warningMessage}
+          </p>
+          <button
+            onClick={() => setIsWarningModalOpen(false)}
+            className="mt-4 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md"
+          >
+            Я понимаю, приму меры
           </button>
         </div>
       </motion.div>
