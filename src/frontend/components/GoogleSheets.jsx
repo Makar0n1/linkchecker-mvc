@@ -97,7 +97,6 @@ const GoogleSheets = ({
   let refreshPromise = null;
   const refreshToken = async () => {
     if (isRefreshingToken) {
-      console.log('Waiting for ongoing token refresh...');
       return refreshPromise;
     }
 
@@ -115,7 +114,6 @@ const GoogleSheets = ({
         const response = await axios.post(`${apiBaseUrl}/refresh-token`, { refreshToken });
         const newToken = response.data.token;
         localStorage.setItem('token', newToken);
-        console.log(`Token refreshed successfully, new token: ${newToken.substring(0, 10)}...`);
         setIsTokenInvalid(false);
         setIsRefreshingToken(false);
         setError(null);
@@ -142,7 +140,6 @@ const GoogleSheets = ({
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), 2000); // Сброс через 2 секунды
       } else {
-        console.log('Clipboard permission not granted.');
         setError('Не удалось скопировать email: отсутствует разрешение на доступ к буферу обмена');
       }
     } catch (err) {
@@ -173,11 +170,9 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
-            console.log('Retrying fetch spreadsheets with new token:', token.substring(0, 10));
             const response = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            console.log('Retry fetch spreadsheets response:', response.data);
             setSpreadsheets(response.data);
             setError(null);
           }
@@ -227,7 +222,6 @@ const GoogleSheets = ({
         const updatedTaskIds = { ...newTaskIds };
         Object.keys(prev).forEach(spreadsheetId => {
           if (!newTaskIds[spreadsheetId]) {
-            console.log(`Task for spreadsheet ${spreadsheetId} is no longer active, removing...`);
             delete updatedTaskIds[spreadsheetId];
           }
         });
@@ -244,11 +238,9 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
-            console.log('Retrying fetch active tasks with new token:', token.substring(0, 10));
             const response = await axios.get(`${apiBaseUrl}/${projectId}/active-spreadsheet-tasks`, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            console.log('Retry fetch active tasks response:', response.data);
             const tasks = response.data;
             const newTaskIds = {};
             const newProgressData = {};
@@ -268,7 +260,6 @@ const GoogleSheets = ({
               const updatedTaskIds = { ...newTaskIds };
               Object.keys(prev).forEach(spreadsheetId => {
                 if (!newTaskIds[spreadsheetId]) {
-                  console.log(`Task for spreadsheet ${spreadsheetId} is no longer active, removing...`);
                   delete updatedTaskIds[spreadsheetId];
                 }
               });
@@ -305,11 +296,9 @@ const GoogleSheets = ({
     try {
       setLoading(true);
       setParentLoading(true);
-      console.log('Fetching progress for taskId:', taskId, 'spreadsheetId:', spreadsheetId);
       const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('Fetch progress response:', response.data);
       const data = response.data;
       setProgressData(prev => ({
         ...prev,
@@ -326,7 +315,6 @@ const GoogleSheets = ({
         [spreadsheetId]: Date.now(),
       }));
       if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-        console.log(`Task ${taskId} completed with status ${data.status}, cleaning up...`);
         if (data.status === 'failed') {
           setError('Analysis failed. Please try again or check the logs.');
         }
@@ -355,11 +343,9 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
-            console.log('Retrying fetch progress with new token:', token.substring(0, 10));
             const response = await axios.get(`${apiBaseUrl}/${projectId}/task-progress/${taskId}`, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            console.log('Retry fetch progress response:', response.data);
             const data = response.data;
             setProgressData(prev => ({
               ...prev,
@@ -376,7 +362,6 @@ const GoogleSheets = ({
               [spreadsheetId]: Date.now(),
             }));
             if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-              console.log(`Task ${taskId} completed with status ${data.status}, cleaning up...`);
               if (data.status === 'failed') {
                 setError('Analysis failed. Please try again or check the logs.');
               }
@@ -407,7 +392,6 @@ const GoogleSheets = ({
           setError('Failed to fetch progress after token refresh. Please log in again.');
         }
       } else if (err.response?.status === 404) {
-        console.log(`Task ${taskId} not found, cleaning up...`);
         setRunningIds(prev => prev.filter(id => id !== spreadsheetId));
         setTaskIds(prev => {
           const newTaskIds = { ...prev };
@@ -442,12 +426,10 @@ const GoogleSheets = ({
       return null;
     }
 
-    console.log('Starting SSE for taskId:', taskId, 'spreadsheetId:', spreadsheetId);
     const eventSource = new EventSource(`${apiBaseUrl}/${projectId}/task-progress-sse/${taskId}?token=${token}`);
 
     eventSource.onmessage = async (event) => {
       const data = JSON.parse(event.data);
-      console.log('SSE message received:', data);
       if (data.error) {
         console.error(`SSE error for task ${taskId}:`, data.error);
         eventSource.close();
@@ -455,7 +437,6 @@ const GoogleSheets = ({
           try {
             token = await refreshToken();
             if (token) {
-              console.log('Restarting SSE with new token:', token.substring(0, 10));
               eventSource.close();
               return startSSE(spreadsheetId, taskId);
             }
@@ -465,7 +446,6 @@ const GoogleSheets = ({
           }
         } else {
           if (data.error.includes('Task not found')) {
-            console.log(`Task ${taskId} not found via SSE, cleaning up...`);
             setError('Task not found. Please try again.');
           }
           if (data.status === 'failed') {
@@ -507,7 +487,6 @@ const GoogleSheets = ({
         [spreadsheetId]: Date.now(),
       }));
       if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-        console.log(`Task ${taskId} completed with status ${data.status}, cleaning up...`);
         if (data.status === 'failed') {
           setError('Analysis failed. Please try again or check the logs.');
         }
@@ -568,7 +547,6 @@ const GoogleSheets = ({
         const taskTimestamp = taskTimestamps[spreadsheetId];
         const taskProgress = progressData[spreadsheetId];
         if (taskTimestamp && (now - taskTimestamp > STALE_THRESHOLD) && taskProgress?.status !== 'completed') {
-          console.log(`Task for spreadsheet ${spreadsheetId} is stale, cancelling...`);
           await cancelAnalysis(spreadsheetId);
           setError(`Task for spreadsheet ${spreadsheetId} was cancelled due to inactivity.`);
         }
@@ -581,34 +559,29 @@ const GoogleSheets = ({
 
   // Управление уведомлением
   useEffect(() => {
+    // Если модальное окно открыто или есть таблицы — не показываем уведомление
+    if (isInfoModalOpen || hasNotificationShown.current || spreadsheets.length > 0) {
+      setShowNotification(false);
+      return;
+    }
 
-  // Если модальное окно открыто — не показываем уведомление
-  if (isInfoModalOpen) {
-    setShowNotification(false);
-    return;
-  }
+    // Помечаем, что уже показывали
+    hasNotificationShown.current = true;
 
-  // Если уже показывали — ничего не делаем
-  if (hasNotificationShown.current) return;
+    // Таймеры на показ и скрытие
+    const showTimer = setTimeout(() => {
+      setShowNotification(true);
+    }, 1000);
 
-  // Помечаем, что уже показывали
-  hasNotificationShown.current = true;
+    const hideTimer = setTimeout(() => {
+      setShowNotification(false);
+    }, 5000); // 3 + 10 секунд
 
-  // Таймеры на показ и скрытие
-  const showTimer = setTimeout(() => {
-    setShowNotification(true);
-    console.log('Notification shown');
-  }, 1500);
-
-  const hideTimer = setTimeout(() => {
-    setShowNotification(false);
-  }, 11500); // 3 + 10 секунд
-
-  return () => {
-    clearTimeout(showTimer);
-    clearTimeout(hideTimer);
-  };
-}, [isInfoModalOpen]);
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+    };
+  }, [isInfoModalOpen, spreadsheets.length]);
 
   useEffect(() => {
     fetchSpreadsheets();
@@ -719,13 +692,11 @@ const GoogleSheets = ({
         return;
       }
 
-      console.log('Adding spreadsheet with data:', { projectId, spreadsheetId, gid: parseInt(gid), targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours: parseFloat(intervalHours) });
       const response = await axios.post(
         `${apiBaseUrl}/${projectId}/spreadsheets`,
         { ...form, gid: parseInt(gid), intervalHours: parseFloat(intervalHours) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      console.log('Add spreadsheet response:', response.data);
       await fetchSpreadsheets();
       setForm({
         spreadsheetId: '',
@@ -744,13 +715,11 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
-            console.log('Retrying add spreadsheet with new token:', token.substring(0, 10));
             const response = await axios.post(
               `${apiBaseUrl}/${projectId}/spreadsheets`,
               { ...form, gid: parseInt(form.gid), intervalHours: parseFloat(form.intervalHours) },
               { headers: { Authorization: `Bearer ${token}` } }
             );
-            console.log('Retry add spreadsheet response:', response.data);
             await fetchSpreadsheets();
             setForm({
               spreadsheetId: '',
@@ -802,13 +771,11 @@ const GoogleSheets = ({
         return;
       }
 
-      console.log('Editing spreadsheet with data:', { _id, projectId, spreadsheetId, gid: parseInt(gid), targetDomain, urlColumn, targetColumn, resultRangeStart, resultRangeEnd, intervalHours: parseFloat(intervalHours) });
       const response = await axios.put(
         `${apiBaseUrl}/${projectId}/spreadsheets/${_id}`,
         { ...editForm, gid: parseInt(gid), intervalHours: parseFloat(intervalHours) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      console.log('Edit spreadsheet response:', response.data);
       await fetchSpreadsheets();
       closeEditModal();
       setError(null);
@@ -818,13 +785,11 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
-            console.log('Retrying edit spreadsheet with new token:', token.substring(0, 10));
             const response = await axios.put(
               `${apiBaseUrl}/${projectId}/spreadsheets/${editForm._id}`,
               { ...editForm, gid: parseInt(editForm.gid), intervalHours: parseFloat(editForm.intervalHours) },
               { headers: { Authorization: `Bearer ${token}` } }
             );
-            console.log('Retry edit spreadsheet response:', response.data);
             await fetchSpreadsheets();
             closeEditModal();
             setError(null);
@@ -853,11 +818,9 @@ const GoogleSheets = ({
     setLoading(true);
     setParentLoading(true);
     try {
-      console.log('Running analysis for projectId:', projectId, 'spreadsheetId:', spreadsheetId);
       const response = await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/run`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('Run analysis response:', response.data);
       const { taskId } = response.data;
       setTaskIds(prev => ({
         ...prev,
@@ -870,7 +833,6 @@ const GoogleSheets = ({
       const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('Fetch updated spreadsheets response:', updated.data);
       setSpreadsheets(updated.data);
       setError(null);
     } catch (err) {
@@ -879,11 +841,9 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
-            console.log('Retrying run analysis with new token:', token.substring(0, 10));
             const response = await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/run`, {}, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            console.log('Retry run analysis response:', response.data);
             const { taskId } = response.data;
             setTaskIds(prev => ({
               ...prev,
@@ -896,7 +856,6 @@ const GoogleSheets = ({
             const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            console.log('Retry fetch updated spreadsheets response:', updated.data);
             setSpreadsheets(updated.data);
             setError(null);
           }
@@ -935,15 +894,12 @@ const GoogleSheets = ({
     setLoading(true);
     setParentLoading(true);
     try {
-      console.log('Cancelling analysis for projectId:', projectId, 'spreadsheetId:', spreadsheetId);
       const response = await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/cancel`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('Cancel analysis response:', response.data);
       const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('Fetch updated spreadsheets response:', updated.data);
       setSpreadsheets(updated.data);
       setRunningIds(runningIds.filter(id => id !== spreadsheetId));
       setProgressData(prev => {
@@ -969,15 +925,12 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
-            console.log('Retrying cancel analysis with new token:', token.substring(0, 10));
             const response = await axios.post(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}/cancel`, {}, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            console.log('Retry cancel analysis response:', response.data);
             const updated = await axios.get(`${apiBaseUrl}/${projectId}/spreadsheets`, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            console.log('Retry fetch updated spreadsheets response:', updated.data);
             setSpreadsheets(updated.data);
             setRunningIds(runningIds.filter(id => id !== spreadsheetId));
             setProgressData(prev => {
@@ -1016,11 +969,9 @@ const GoogleSheets = ({
     setLoading(true);
     setParentLoading(true);
     try {
-      console.log('Deleting spreadsheet for projectId:', projectId, 'spreadsheetId:', spreadsheetId);
       const response = await axios.delete(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('Delete spreadsheet response:', response.data);
       setSpreadsheets(spreadsheets.filter(s => s._id !== spreadsheetId));
       setError(null);
       setProgressData(prev => {
@@ -1044,11 +995,9 @@ const GoogleSheets = ({
         try {
           token = await refreshToken();
           if (token) {
-            console.log('Retrying delete spreadsheet with new token:', token.substring(0, 10));
             const response = await axios.delete(`${apiBaseUrl}/${projectId}/spreadsheets/${spreadsheetId}`, {
               headers: { Authorization: `Bearer ${token}` },
             });
-            console.log('Retry delete spreadsheet response:', response.data);
             setSpreadsheets(spreadsheets.filter(s => s._id !== spreadsheetId));
             setError(null);
             setProgressData(prev => {
