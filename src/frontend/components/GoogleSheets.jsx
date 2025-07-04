@@ -1379,7 +1379,7 @@ const GoogleSheets = ({
             exit="exit"
             variants={modalVariants}
           >
-            <div className="relative bg-white rounded-lg shadow-lg w-full max-w-[90vw] mx-4 p-4 sm:p-6 overflow-y-auto max-h-[80vh]">
+            <div className="relative modal-mobile bg-white rounded-lg shadow-lg w-full max-w-[30vw] mx-4 p-4 sm:p-6 overflow-y-auto max-h-[75vh]">
               <button
                 onClick={closeInfoModal}
                 className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
