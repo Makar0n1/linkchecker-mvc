@@ -73,9 +73,9 @@ const startCol = resultRangeStart.match(/^[A-Z]+/)[0];
 const endCol = resultRangeEnd.match(/^[A-Z]+/)[0];
 const startIndex = columnLetterToIndex(startCol);
 const endIndex = columnLetterToIndex(endCol);
-if (endIndex - startIndex !== 5) {
-  console.error(`addSpreadsheet: Invalid result range ${resultRangeStart}:${resultRangeEnd}, must span exactly 6 columns (e.g., L:Q)`);
-  return res.status(400).json({ error: 'Result range must span exactly 6 columns (e.g., L:Q)' });
+if (endIndex - startIndex !== 4) {
+  console.error(`addSpreadsheet: Invalid result range ${resultRangeStart}:${resultRangeEnd}, must span exactly 5 columns (e.g., L:P)`);
+  return res.status(400).json({ error: 'Result range must span exactly 5 columns (e.g., L:P)' });
 }
 // Проверка, что диапазон результатов пуст
 const rangeCheck = await checkResultRangeEmpty(spreadsheetId, gid, resultRangeStart, resultRangeEnd);
@@ -180,14 +180,14 @@ const editSpreadsheet = async (req, res) => {
       console.error(`editSpreadsheet: Missing required fields for spreadsheetId=${spreadsheetId}: newSpreadsheetId=${newSpreadsheetId}, gid=${gid}, targetDomain=${targetDomain}, urlColumn=${urlColumn}, targetColumn=${targetColumn}, resultRangeStart=${resultRangeStart}, resultRangeEnd=${resultRangeEnd}, intervalHours=${intervalHours}`);
       return res.status(400).json({ error: 'All fields required' });
     }
-    // Валидация диапазона результатов (должно быть 6 столбцов: L-P для данных, Q для даты)
+    // Валидация диапазона результатов (должно быть 5 столбцов: L-P)
     const startCol = resultRangeStart.match(/^[A-Z]+/)[0];
     const endCol = resultRangeEnd.match(/^[A-Z]+/)[0];
     const startIndex = columnLetterToIndex(startCol);
     const endIndex = columnLetterToIndex(endCol);
-    if (endIndex - startIndex !== 5) {
-      console.error(`editSpreadsheet: Invalid result range ${resultRangeStart}:${resultRangeEnd}, must span exactly 6 columns (e.g., L:Q)`);
-      return res.status(400).json({ error: 'Result range must span exactly 6 columns (e.g., L:Q)' });
+    if (endIndex - startIndex !== 4) {
+      console.error(`editSpreadsheet: Invalid result range ${resultRangeStart}:${resultRangeEnd}, must span exactly 5 columns (e.g., L:P)`);
+      return res.status(400).json({ error: 'Result range must span exactly 5 columns (e.g., L:P)' });
     }
 
     // Проверка интервала
