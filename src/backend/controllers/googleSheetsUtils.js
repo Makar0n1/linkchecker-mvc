@@ -54,6 +54,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
   try {
     // Подготовка данных для экспорта
     const dataMap = {};
+    const scanDate = new Date().toISOString().split('T')[0]; // Дата сканирования в формате YYYY-MM-DD
     links.forEach(link => {
       const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
       const isLinkFound = link.status === 'active' && link.rel !== 'not found';
@@ -62,8 +63,7 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
         responseCode,
         link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
         link.isIndexable === false ? link.indexabilityStatus : '',
-        isLinkFound ? 'True' : 'False',
-        new Date().toISOString().split('T')[0], // Добавляем дату анализа в формате YYYY-MM-DD
+        isLinkFound ? `True  (${scanDate})` : `False (${scanDate})`, // Наличие ссылки с датой
       ];
     });
 
@@ -74,9 +74,9 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
       return;
     }
 
-    // Вычисляем конечный столбец (например, Q)
+    // Вычисляем конечный столбец (например, P)
     const startCol = resultRangeStart.match(/^[A-Z]+/)[0];
-    const endCol = String.fromCharCode(resultRangeStart.charCodeAt(0) + 5); // L + 5 = Q
+    const endCol = String.fromCharCode(resultRangeStart.charCodeAt(0) + 4); // L + 4 = P
     const batchUpdates = [];
     let currentStartRow = rowIndices[0];
     let currentValues = [];
@@ -259,7 +259,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
       addConditionalFormatRule: {
         rule: {
           ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 4, endColumnIndex: startColumnIndex + 5 }],
-          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'True' }] }, format: { backgroundColor: { red: 0.83, green: 0.92, blue: 0.83 } } }
+          booleanRule: { condition: { type: 'TEXT_CONTAINS', values: [{ userEnteredValue: 'True' }] }, format: { backgroundColor: { red: 0.83, green: 0.92, blue: 0.83 } } }
         },
         index: 5
       }
@@ -268,18 +268,9 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
       addConditionalFormatRule: {
         rule: {
           ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 4, endColumnIndex: startColumnIndex + 5 }],
-          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'False' }] }, format: { backgroundColor: { red: 1, green: 0.88, blue: 0.7 } } }
+          booleanRule: { condition: { type: 'TEXT_CONTAINS', values: [{ userEnteredValue: 'False' }] }, format: { backgroundColor: { red: 1, green: 0.88, blue: 0.7 } } }
         },
         index: 6
-      }
-    },
-    {
-      addConditionalFormatRule: {
-        rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 5, endColumnIndex: startColumnIndex + 6 }],
-          booleanRule: { condition: { type: 'NOT_BLANK' }, format: { textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 } } } }
-        },
-        index: 7
       }
     }
   ];
