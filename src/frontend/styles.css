@@ -8,7 +8,7 @@
 body {
   overscroll-behavior: none;
 }
-.error-message {
+.error-message { 
   @apply bg-red-100 p-3 rounded-lg border border-red-200;
 }
 .google-sheet-fields {
@@ -19,3 +19,10 @@ body {
     max-width: 90vw;
   }
 }
+
+@media screen and (max-width: 640px) {
+  .modal-mobile-warn {
+    max-width: 90vw;
+  }
+}
+
