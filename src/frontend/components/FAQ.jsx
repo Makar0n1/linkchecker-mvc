@@ -215,6 +215,25 @@ const FAQ = () => {
     exit: { opacity: 0, transition: { duration: 0.2, ease: 'easeIn' } },
   };
 
+  const activeTabRef = useRef(activeTab);
+
+  useEffect(() => {
+    // Восстановить activeTab из localStorage при монтировании
+    const savedTab = localStorage.getItem('activeTab');
+    if (savedTab && ['create', 'manual', 'spreadsheets'].includes(savedTab)) {
+      setActiveTab(savedTab);
+      activeTabRef.current = savedTab;
+    }
+  }, []);
+
+  useEffect(() => {
+    // Сохранять activeTab в localStorage при изменении
+    if (activeTab !== activeTabRef.current) {
+      localStorage.setItem('activeTab', activeTab);
+      activeTabRef.current = activeTab;
+    }
+  }, [activeTab]);
+
   return (
     <motion.div
       className="max-w-full mx-auto p-4 sm:p-6 bg-white rounded-lg shadow-md overflow-hidden"
@@ -237,33 +256,33 @@ const FAQ = () => {
 
       {/* Вкладки */}
       <div className="border-b border-gray-200 mb-6">
-        <nav className="flex space-x-4">
+        <nav className="flex">
           <button
             onClick={() => setActiveTab('create')}
-            className={`py-2 px-4 text-sm font-medium rounded-t-lg transition-colors duration-200 ${
+            className={`py-2 px-4 text-sm bg-gray-100 font-medium rounded-t-lg transition-colors duration-200 ${
               activeTab === 'create'
                 ? 'bg-green-500 text-white border-b-2 border-green-500'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'
             }`}
           >
             Create Project
           </button>
           <button
             onClick={() => setActiveTab('manual')}
-            className={`py-2 px-4 text-sm font-medium rounded-t-lg transition-colors duration-200 ${
+            className={`py-2 px-4 text-sm bg-gray-100 font-medium rounded-t-lg transition-colors duration-200 ${
               activeTab === 'manual'
                 ? 'bg-green-500 text-white border-b-2 border-green-500'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'
             }`}
           >
             Manual Links
           </button>
           <button
             onClick={() => setActiveTab('spreadsheets')}
-            className={`py-2 px-4 text-sm font-medium rounded-t-lg transition-colors duration-200 ${
+            className={`py-2 px-4 text-sm bg-gray-100 font-medium rounded-t-lg transition-colors duration-200 ${
               activeTab === 'spreadsheets'
                 ? 'bg-green-500 text-white border-b-2 border-green-500'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'
             }`}
           >
             Google Sheets
