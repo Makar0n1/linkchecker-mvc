@@ -88,7 +88,7 @@ const GoogleSheets = ({
     }
 
     const columnCount = endIndex - startIndex + 1;
-    return columnCount === 6; // Требуется ровно 6 столбцов
+    return columnCount === 5; // Требуется ровно 5 столбцов
   };
 
   // Форматирование интервала для отображения в UI
@@ -701,7 +701,7 @@ const GoogleSheets = ({
 
       // Проверка диапазона результатов
       if (!validateResultRange(resultRangeStart, resultRangeEnd)) {
-        setError('The result range must include exactly 6 columns (e.g., L:Q)');
+        setError('The result range must include exactly 5 columns (e.g., L:P)');
         setLoading(false);
         setParentLoading(false);
         return;
@@ -806,7 +806,7 @@ const GoogleSheets = ({
 
       // Проверка диапазона результатов
       if (!validateResultRange(resultRangeStart, resultRangeEnd)) {
-        setError('The result range must include exactly 6 columns (e.g., L:Q)');
+        setError('The result range must include exactly 5 columns (e.g., L:P)');
         setLoading(false);
         setParentLoading(false);
         return;
@@ -1185,7 +1185,7 @@ const GoogleSheets = ({
             { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
             { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
             { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
-            { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
+            { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., P)' },
           ].map((field) => (
             <div key={field.name} className="relative google-sheet-fields">
               <input
@@ -1194,7 +1194,7 @@ const GoogleSheets = ({
                 onChange={handleFormChange}
                 placeholder={field.placeholder}
                 type="text"
-                className="p-3 sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
+                className="p-[1.5px] sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
                 disabled={loading || isProjectAnalyzing || isTokenInvalid}
               />
             </div>
@@ -1203,7 +1203,7 @@ const GoogleSheets = ({
             name="intervalHours"
             value={form.intervalHours}
             onChange={handleFormChange}
-            className="p-3 sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+            className="p-[1.5px] sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
             disabled={loading || isProjectAnalyzing || isTokenInvalid}
           >
             {intervalOptions.map(option => (
@@ -1292,9 +1292,9 @@ const GoogleSheets = ({
                     ></div>
                   </div>
                   <div className="text-gray-600 text-sm">
-                    <p>Прогресс: {progress.progress}%</p>
-                    <p>Обработано: {progress.processedLinks} / {progress.totalLinks} ссылок</p>
-                    <p>Осталось времени: {progress.estimatedTimeRemaining} секунд</p>
+                    <p>Progress: {progress.progress}%</p>
+                    <p>Processed: {progress.processedLinks} / {progress.totalLinks} links</p>
+                    <p>Time remaining: {progress.estimatedTimeRemaining} seconds</p>
                   </div>
                 </div>
               )}
@@ -1305,69 +1305,69 @@ const GoogleSheets = ({
 
       {/* Модальное окно для редактирования таблицы */}
       <AnimatePresence>
-        {isEditModalOpen && (
-          <motion.div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            variants={modalVariants}
+    {isEditModalOpen && (
+      <motion.div
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        variants={modalVariants}
+      >
+        <div className="relative modal-mobile-edit bg-white rounded-lg shadow-lg w-full max-w-[30vw] mx-4 p-4 sm:p-6 overflow-y-auto max-h-[75vh]">
+          <button
+            onClick={closeEditModal}
+            className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
           >
-            <div className="relative bg-white modal-mobile-edit rounded-lg shadow-lg w-full max-w-[30vw] mx-4 p-4 sm:p-6 overflow-y-auto max-h-[75vh]">
-              <button
-                onClick={closeEditModal}
-                className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-              <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-4">Редактировать таблицу</h3>
-              <form onSubmit={editSpreadsheet} className="flex flex-col gap-4">
-                {[
-                  { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
-                  { name: 'gid', placeholder: 'GID' },
-                  { name: 'targetDomain', placeholder: 'Target domain' },
-                  { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
-                  { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
-                  { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
-                  { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., Q)' },
-                ].map((field) => (
-                  <div key={field.name} className="relative google-sheet-fields">
-                    <input
-                      name={field.name}
-                      value={editForm ? editForm[field.name] : ''}
-                      onChange={handleEditChange}
-                      placeholder={field.placeholder}
-                      type="text"
-                      className="p-[1.5px] sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
-                      disabled={loading}
-                    />
-                  </div>
-                ))}
-                <select
-                  name="intervalHours"
-                  value={editForm ? editForm.intervalHours : ''}
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-4">Редактировать таблицу</h3>
+          <form onSubmit={editSpreadsheet} className="flex flex-col gap-4">
+            {[
+              { name: 'spreadsheetId', placeholder: 'Spreadsheet ID' },
+              { name: 'gid', placeholder: 'GID' },
+              { name: 'targetDomain', placeholder: 'Target domain' },
+              { name: 'urlColumn', placeholder: 'URL column (e.g., D)' },
+              { name: 'targetColumn', placeholder: 'Target column (e.g., I)' },
+              { name: 'resultRangeStart', placeholder: 'Result range start (e.g., L)' },
+              { name: 'resultRangeEnd', placeholder: 'Result range end (e.g., P)' },
+            ].map((field) => (
+              <div key={field.name} className="relative google-sheet-fields">
+                <input
+                  name={field.name}
+                  value={editForm ? editForm[field.name] : ''}
                   onChange={handleEditChange}
-                  className="p-[1.5px] sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+                  placeholder={field.placeholder}
+                  type="text"
+                  className="p-[1.5px] sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50 w-full"
                   disabled={loading}
-                >
-                  {intervalOptions.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
-                  disabled={loading}
-                >
-                  {loading ? 'Сохранение...' : 'Сохранить изменения'}
-                </button>
-              </form>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                />
+              </div>
+            ))}
+            <select
+              name="intervalHours"
+              value={editForm ? editForm.intervalHours : ''}
+              onChange={handleEditChange}
+              className="p-[1.5px] sm:p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300 shadow-sm bg-gray-50"
+              disabled={loading}
+            >
+              {intervalOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors shadow-md disabled:bg-green-300"
+              disabled={loading}
+            >
+              {loading ? 'Сохранение...' : 'Сохранить изменения'}
+            </button>
+          </form>
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
 
       {/* Модальное окно с инструкцией */}
       <AnimatePresence>
@@ -1408,7 +1408,7 @@ const GoogleSheets = ({
                 </button>
               </div>
               <p className="text-gray-600 mt-4">
-                Результаты анализа будут занимать 6 столбцов в таблице. Рекомендуется в первой строке указанного диапазона добавить заголовки столбцов (слева направо): <strong>"Статус", "Ответ сайта", "Индексируемость", "Причина не индексации", "Наличие ссылки", "Дата сканирования"</strong>. Ранее требовалось указывать 5 столбцов, например, L:P (L, M, N, O, P), но теперь необходимо указывать 6 столбцов, например, L:Q (L, M, N, O, P, Q). Если вы укажете менее или более 6 столбцов, появится уведомление об ошибке.
+                Результаты анализа будут занимать 5 столбцов в таблице. Рекомендуется в первой строке указанного диапазона добавить заголовки столбцов (слева направо): <strong>"Статус", "Ответ сайта", "Индексируемость", "Причина не индексации", "Наличие ссылки"</strong>. Указывайте диапазон из 5 столбцов, например, L:P (L, M, N, O, P). Если вы укажете менее или более 5 столбцов, появится уведомление об ошибке.
               </p>
               <p className="text-gray-600 mt-2">
                 После этого вы сможете успешно добавить таблицу для анализа в этом интерфейсе.
