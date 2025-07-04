@@ -26,3 +26,9 @@ body {
   }
 }
 
+@media screen and (max-width: 640px) {
+  .modal-mobile-edit {
+    max-width: 90vw;
+  }
+}
+
