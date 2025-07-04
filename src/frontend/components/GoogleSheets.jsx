@@ -742,6 +742,7 @@ const GoogleSheets = ({
     setIsInfoModalOpen(false);
   };
 
+  // Обновить addSpreadsheet
   const addSpreadsheet = async (e) => {
     e.preventDefault();
     let token = localStorage.getItem('token');
@@ -784,6 +785,9 @@ const GoogleSheets = ({
       );
       console.log('Add spreadsheet response:', response.data);
       
+      // Закрываем модалку добавления
+      closeAddModal();
+      
       // Проверяем warning в ответе
       if (response.data.warning) {
         setWarningMessage(response.data.warning);
@@ -816,6 +820,9 @@ const GoogleSheets = ({
               { headers: { Authorization: `Bearer ${token}` } }
             );
             console.log('Retry add spreadsheet response:', response.data);
+            
+            // Закрываем модалку добавления
+            closeAddModal();
             
             // Проверяем warning в ответе при повторной попытке
             if (response.data.warning) {
