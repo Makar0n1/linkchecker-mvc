@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
@@ -237,6 +237,25 @@ const ProjectDetails = () => {
       setLoading(false);
     }
   };
+
+  const activeTabRef = useRef(activeTab);
+
+  useEffect(() => {
+    // Восстановить activeTab из localStorage для текущего projectId при монтировании
+    const savedTab = localStorage.getItem(`activeTab_${projectId}`);
+    if (savedTab && ['manual', 'sheets'].includes(savedTab)) {
+      setActiveTab(savedTab);
+      activeTabRef.current = savedTab;
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    // Сохранять activeTab в localStorage для текущего projectId при изменении
+    if (activeTab !== activeTabRef.current) {
+      localStorage.setItem(`activeTab_${projectId}`, activeTab);
+      activeTabRef.current = activeTab;
+    }
+  }, [activeTab, projectId]);
 
   const chartDataLinkTypes = (stats) => stats ? {
     labels: ['Dofollow', 'Nofollow'],
