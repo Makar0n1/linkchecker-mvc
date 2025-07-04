@@ -22,7 +22,7 @@ const ProjectDetails = () => {
   const [spreadsheetStats, setSpreadsheetStats] = useState(null);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [isAddLinksModalOpen, setIsAddLinksModalOpen] = useState(false);
-  const [isStatsExpanded, setIsStatsExpanded] = useState(true);
+  const [isStatsExpanded, setIsStatsExpanded] = useState(false);
 
   const [links, setLinks] = useState([]);
   const [urlList, setUrlList] = useState('');
@@ -366,23 +366,23 @@ const ProjectDetails = () => {
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
-        <nav className="flex space-x-4">
+        <nav className="flex">
           <button
             onClick={() => setActiveTab('manual')}
-            className={`py-2 px-4 text-sm font-medium rounded-t-lg transition-colors duration-200 ${
+            className={`py-2 px-4 text-sm bg-gray-100 font-medium rounded-t-lg transition-colors duration-200 ${
               activeTab === 'manual'
                 ? 'bg-green-500 text-white border-b-2 border-green-500'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'
             }`}
           >
             Manual Links
           </button>
           <button
             onClick={() => setActiveTab('sheets')}
-            className={`py-2 px-4 text-sm font-medium rounded-t-lg transition-colors duration-200 ${
+            className={`py-2 px-4 text-sm bg-gray-100 font-medium rounded-t-lg transition-colors duration-200 ${
               activeTab === 'sheets'
                 ? 'bg-green-500 text-white border-b-2 border-green-500'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'
             }`}
           >
             Google Sheets
