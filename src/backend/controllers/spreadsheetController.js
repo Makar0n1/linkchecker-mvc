@@ -270,6 +270,13 @@ const deleteSpreadsheet = async (req, res) => {
       projectId,
     });
     console.log(`deleteSpreadsheet: Deleted FrontendLinks for spreadsheet ${spreadsheetId}`);
+    // Удаляем связанные задачи AnalysisTask
+    await AnalysisTask.deleteMany({
+      projectId,
+      'data.spreadsheetId': spreadsheetId,
+      type: 'runSpreadsheetAnalysis',
+    });
+    console.log(`deleteSpreadsheet: Deleted AnalysisTasks for spreadsheet ${spreadsheetId} in project ${projectId}`)
 
     res.json({ message: 'Spreadsheet deleted' });
   } catch (error) {
