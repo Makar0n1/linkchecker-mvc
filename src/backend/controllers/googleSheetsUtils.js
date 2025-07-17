@@ -58,12 +58,14 @@ const exportLinksToGoogleSheetsBatch = async (spreadsheetId, links, resultRangeS
     links.forEach(link => {
       const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
       const isLinkFound = link.status === 'active' && link.rel !== 'not found';
+      const canonicalIssue = link.canonicalUrl && link.url !== link.canonicalUrl ? 'canonicalized' : '';
+      const indexabilityStatus = link.indexabilityStatus || canonicalIssue || '';
       dataMap[link.rowIndex] = [
         (responseCode === '200' || responseCode === '304') && link.isIndexable && isLinkFound ? 'OK' : 'Problem',
         responseCode,
         link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
-        link.isIndexable === false ? link.indexabilityStatus : '',
-        isLinkFound ? `True  (${scanDate})` : `False (${scanDate})`, // Наличие ссылки с датой
+        indexabilityStatus, // Выводим indexabilityStatus или canonicalized
+        isLinkFound ? `True (${scanDate})` : `False (${scanDate})`, // Наличие ссылки с датой
       ];
     });
 
@@ -214,7 +216,13 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
       addConditionalFormatRule: {
         rule: {
           ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex, endColumnIndex: startColumnIndex + 1 }],
-          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'OK' }] }, format: { backgroundColor: { red: 0.83, green: 0.92, blue: 0.83 } } }
+          booleanRule: {
+            condition: {
+              type: 'CUSTOM_FORMULA',
+              values: [{ userEnteredValue: `=AND($${String.fromCharCode(65 + startColumnIndex)}2="OK",$${String.fromCharCode(65 + startColumnIndex + 3)}2="canonicalized")` }]
+            },
+            format: { backgroundColor: { red: 1, green: 0.88, blue: 0.7 } } // Жёлтый фон, как у False
+          },
         },
         index: 0
       }
@@ -223,7 +231,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
       addConditionalFormatRule: {
         rule: {
           ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex, endColumnIndex: startColumnIndex + 1 }],
-          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Problem' }] }, format: { backgroundColor: { red: 0.98, green: 0.82, blue: 0.82 } } }
+          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'OK' }] }, format: { backgroundColor: { red: 0.83, green: 0.92, blue: 0.83 } } }
         },
         index: 1
       }
@@ -231,8 +239,8 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 2, endColumnIndex: startColumnIndex + 3 }],
-          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Yes' }] }, format: { textFormat: { foregroundColor: { red: 0, green: 0.4, blue: 0 } } } }
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex, endColumnIndex: startColumnIndex + 1 }],
+          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Problem' }] }, format: { backgroundColor: { red: 0.98, green: 0.82, blue: 0.82 } } }
         },
         index: 2
       }
@@ -241,7 +249,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
       addConditionalFormatRule: {
         rule: {
           ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 2, endColumnIndex: startColumnIndex + 3 }],
-          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'No' }] }, format: { textFormat: { foregroundColor: { red: 0.8, green: 0, blue: 0 } } } }
+          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Yes' }] }, format: { textFormat: { foregroundColor: { red: 0, green: 0.4, blue: 0 } } } }
         },
         index: 3
       }
@@ -250,7 +258,7 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
       addConditionalFormatRule: {
         rule: {
           ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 2, endColumnIndex: startColumnIndex + 3 }],
-          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Unknown' }] }, format: { textFormat: { foregroundColor: { red: 0.4, green: 0.4, blue: 0.4 } } } }
+          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'No' }] }, format: { textFormat: { foregroundColor: { red: 0.8, green: 0, blue: 0 } } } }
         },
         index: 4
       }
@@ -258,8 +266,8 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
     {
       addConditionalFormatRule: {
         rule: {
-          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 4, endColumnIndex: startColumnIndex + 5 }],
-          booleanRule: { condition: { type: 'TEXT_CONTAINS', values: [{ userEnteredValue: 'True' }] }, format: { backgroundColor: { red: 0.83, green: 0.92, blue: 0.83 } } }
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 2, endColumnIndex: startColumnIndex + 3 }],
+          booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: 'Unknown' }] }, format: { textFormat: { foregroundColor: { red: 0.4, green: 0.4, blue: 0.4 } } } }
         },
         index: 5
       }
@@ -268,9 +276,18 @@ const formatGoogleSheet = async (spreadsheetId, maxRows, gid, resultRangeStart, 
       addConditionalFormatRule: {
         rule: {
           ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 4, endColumnIndex: startColumnIndex + 5 }],
-          booleanRule: { condition: { type: 'TEXT_CONTAINS', values: [{ userEnteredValue: 'False' }] }, format: { backgroundColor: { red: 1, green: 0.88, blue: 0.7 } } }
+          booleanRule: { condition: { type: 'TEXT_CONTAINS', values: [{ userEnteredValue: 'True' }] }, format: { backgroundColor: { red: 0.83, green: 0.92, blue: 0.83 } } }
         },
         index: 6
+      }
+    },
+    {
+      addConditionalFormatRule: {
+        rule: {
+          ranges: [{ sheetId: gid, startRowIndex: 1, endRowIndex: maxRows, startColumnIndex: startColumnIndex + 4, endColumnIndex: startColumnIndex + 5 }],
+          booleanRule: { condition: { type: 'TEXT_CONTAINS', values: [{ userEnteredValue: 'False' }] }, format: { backgroundColor: { red: 1, green: 0.88, blue: 0.7 } } }
+        },
+        index: 7
       }
     }
   ];
