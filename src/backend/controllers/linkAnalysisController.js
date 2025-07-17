@@ -189,13 +189,13 @@ const extractPageData = async (page, link, response, loadTime, finalUrl) => {
   }
 
   link.canonicalUrl = $('link[rel="canonical"]').attr('href') || null;
-  if (link.isIndexable && link.canonicalUrl) {
-    const currentUrl = finalUrl.toLowerCase().replace(/\/$/, '');
-    const canonicalNormalized = link.canonicalUrl.toLowerCase().replace(/\/$/, '');
-    if (currentUrl !== canonicalNormalized) {
-      link.indexabilityStatus = 'canonical mismatch';
-    }
+if (link.isIndexable && link.canonicalUrl) {
+  const currentUrl = finalUrl.toLowerCase().replace(/\/$/, '');
+  const canonicalNormalized = link.canonicalUrl.toLowerCase().replace(/\/$/, '');
+  if (currentUrl !== canonicalNormalized) {
+    link.indexabilityStatus = 'canonicalized';
   }
+}
 
   link.responseCode = response ? response.status().toString() : 'Timeout';
   link.loadTime = loadTime;
