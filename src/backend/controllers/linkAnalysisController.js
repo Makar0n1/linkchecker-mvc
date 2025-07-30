@@ -83,17 +83,23 @@ const normalizeUrl = (url) => {
 const navigateToPage = async (page, url, selectedAgent) => {
   await page.setUserAgent(selectedAgent.ua);
   await page.setExtraHTTPHeaders(selectedAgent.headers);
-
   await page.setViewport({ width: 1920, height: 1080 });
 
   await page.setRequestInterception(true);
+  page.removeAllListeners('request');
   page.on('request', (req) => {
-    if (['image', 'stylesheet', 'font', 'media', 'script'].includes(req.resourceType())) {
-      req.continue();
-    } else {
-      req.continue();
-    }
-  });
+  const type = req.resourceType();
+  const url = req.url();
+
+  if (
+    ['media', 'font'].includes(type) ||
+    (type === 'image' && !url.includes('logo') && !url.includes('icon'))
+  ) {
+    req.abort();
+  } else {
+    req.continue();
+  }
+});
 
   const startTime = Date.now();
   let response;
@@ -102,18 +108,22 @@ const navigateToPage = async (page, url, selectedAgent) => {
   try {
     console.log(`Navigating to ${url}`);
     response = await page.goto(url, {
-      waitUntil: 'domcontentloaded',
+      waitUntil: ['domcontentloaded', 'networkidle2'],
       timeout: 120000,
-      ignoreHTTPSErrors: true,
     });
-    finalUrl = await page.url();
-    console.log(`Page loaded with status: ${response ? response.status() : 'No response'}, Final URL: ${finalUrl}`);
+    finalUrl = page.url();
+    console.log(`Page loaded with status: ${response?.status() || 'No response'}, Final URL: ${finalUrl}`);
   } catch (error) {
     console.error(`Navigation failed for ${url}:`, error.message);
     throw error;
   }
 
-  return { response, loadTime: Date.now() - startTime, finalUrl };
+  return {
+    response,
+    status: response?.status() || null,
+    loadTime: Date.now() - startTime,
+    finalUrl,
+  };
 };
 
 const extractPageData = async (page, link, response, loadTime, finalUrl) => {
