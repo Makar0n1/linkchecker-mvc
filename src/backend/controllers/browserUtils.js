@@ -1,4 +1,6 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin())
 
 const initializeBrowser = async () => {
   console.log('Initializing new browser for task...');
@@ -42,7 +44,7 @@ const resolveShortUrl = async (shortUrl) => {
     try {
       tempBrowser = await initializeBrowser();
       const tempPage = await tempBrowser.newPage();
-      const response = await tempPage.goto(shortUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+      const response = await tempPage.goto(shortUrl, { waitUntil: ['domcontentloaded', 'networkidle2'], timeout: 10000 });
       const resolvedUrl = response.url();
       await tempPage.close();
       return resolvedUrl;
