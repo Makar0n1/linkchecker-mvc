@@ -21,6 +21,7 @@ const {
   getLinks,
   deleteLink,
   deleteAllLinks,
+  exportLinksToExcel
 } = require('./projectController');
 const {
   checkLinkStatus,
@@ -201,6 +202,7 @@ module.exports = {
   getTaskProgress,
   getTaskProgressSSE,
   registerUser,
+  exportLinksToExcel,
   loginUser: loginUserWithRememberMe,
   updatePassword,
   getUserInfo: [authMiddleware, getUserInfo],
