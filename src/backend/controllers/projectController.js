@@ -171,15 +171,17 @@ const exportLinksToExcel = async (req, res) => {
       const isLinkFound = link.status === 'active' && link.rel !== 'not found';
       const indexabilityStatus = link.indexabilityStatus || (link.canonicalUrl && link.url !== link.canonicalUrl ? 'canonicalized' : '') || '';
       return {
-        URL: link.url,
+        URL: link.url || '',
         Status: (responseCode === '200' || responseCode === '304') && link.isIndexable && isLinkFound ? 'OK' : 'Problem',
-        'Response Code': responseCode,
+        'Response Code': responseCode || '',
         Indexability: link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
         'Indexability Status': indexabilityStatus,
-        'Link Found': isLinkFound ? `True (${link.lastChecked ? link.lastChecked.toISOString().split('T')[0] : 'N/A'})` : `False (${link.lastChecked ? link.lastChecked.toISOString().split('T')[0] : 'N/A'})`,
+        'Link Found': isLinkFound ? true : false,
         'Last Checked': link.lastChecked ? link.lastChecked.toISOString().split('T')[0] : 'N/A'
       };
     });
+
+    console.log(`exportLinksToExcel: Prepared ${data.length} rows for project ${projectId}`, JSON.stringify(data, null, 2));
 
     // Создаём Excel-файл
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -193,17 +195,23 @@ const exportLinksToExcel = async (req, res) => {
       { wch: 15 }, // Response Code
       { wch: 15 }, // Indexability
       { wch: 20 }, // Indexability Status
-      { wch: 20 }, // Link Found
+      { wch: 15 }, // Link Found
       { wch: 15 }  // Last Checked
     ];
 
     // Формируем бинарный буфер
-    const buffer = XLSX.writeFile(workbook, 'xlsx', { compression: true });
+    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', compression: true });
+    if (!buffer) {
+      console.error(`exportLinksToExcel: Failed to generate buffer for project ${projectId}`);
+      return res.status(500).json({ error: 'Failed to generate Excel file' });
+    }
 
     // Отправляем файл
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename=Manual_Links_${projectId}_${new Date().toISOString().split('T')[0]}.xlsx`);
-    res.send(buffer);
+    res.status(200).send(Buffer.from(buffer));
+
+    console.log(`exportLinksToExcel: Successfully sent Excel file for project ${projectId}`);
   } catch (error) {
     console.error(`exportLinksToExcel: Error exporting links for project ${projectId}:`, error);
     res.status(500).json({ error: 'Error exporting links to Excel', details: error.message });
