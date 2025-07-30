@@ -2,6 +2,7 @@ const Project = require('../models/Project');
 const User = require('../models/User');
 const FrontendLink = require('../models/FrontendLink');
 const Spreadsheet = require('../models/Spreadsheet');
+const XLSX = require('xlsx');
 
 const createProject = async (req, res) => {
   const { name } = req.body;
@@ -155,6 +156,60 @@ const deleteAllLinks = async (req, res) => {
   }
 };
 
+const exportLinksToExcel = async (req, res) => {
+  const { projectId } = req.params;
+  try {
+    const project = await Project.findOne({ _id: projectId, userId: req.userId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const links = await FrontendLink.find({ projectId, source: 'manual' });
+    if (links.length === 0) return res.status(400).json({ error: 'No manual links found to export' });
+
+    // Формируем данные для Excel
+    const data = links.map(link => {
+      const responseCode = link.responseCode || (link.status === 'timeout' ? 'Timeout' : '200');
+      const isLinkFound = link.status === 'active' && link.rel !== 'not found';
+      const indexabilityStatus = link.indexabilityStatus || (link.canonicalUrl && link.url !== link.canonicalUrl ? 'canonicalized' : '') || '';
+      return {
+        URL: link.url,
+        Status: (responseCode === '200' || responseCode === '304') && link.isIndexable && isLinkFound ? 'OK' : 'Problem',
+        'Response Code': responseCode,
+        Indexability: link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
+        'Indexability Status': indexabilityStatus,
+        'Link Found': isLinkFound ? `True (${link.lastChecked ? link.lastChecked.toISOString().split('T')[0] : 'N/A'})` : `False (${link.lastChecked ? link.lastChecked.toISOString().split('T')[0] : 'N/A'})`,
+        'Last Checked': link.lastChecked ? link.lastChecked.toISOString().split('T')[0] : 'N/A'
+      };
+    });
+
+    // Создаём Excel-файл
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Manual Links');
+
+    // Настраиваем заголовки столбцов
+    worksheet['!cols'] = [
+      { wch: 40 }, // URL
+      { wch: 10 }, // Status
+      { wch: 15 }, // Response Code
+      { wch: 15 }, // Indexability
+      { wch: 20 }, // Indexability Status
+      { wch: 20 }, // Link Found
+      { wch: 15 }  // Last Checked
+    ];
+
+    // Формируем бинарный буфер
+    const buffer = XLSX.writeFile(workbook, 'xlsx', { compression: true });
+
+    // Отправляем файл
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Manual_Links_${projectId}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    res.send(buffer);
+  } catch (error) {
+    console.error(`exportLinksToExcel: Error exporting links for project ${projectId}:`, error);
+    res.status(500).json({ error: 'Error exporting links to Excel', details: error.message });
+  }
+};
+
 module.exports = {
   createProject,
   getProjects,
@@ -163,4 +218,5 @@ module.exports = {
   getLinks,
   deleteLink,
   deleteAllLinks,
+  exportLinksToExcel
 };
