@@ -139,6 +139,44 @@ const ManualLinks = ({
     return ws;
   };
 
+  const handleExportLinks = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token missing. Please log in again.');
+        return;
+      }
+
+      const response = await axios.get(`${apiBaseUrl}/${projectId}/links/export`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob',
+      });
+
+      const today = new Date();
+      const formattedDate = today.toISOString().split('T')[0];
+      const fileName = `Manual_Links_${projectId}_${formattedDate}.xlsx`;
+
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, fileName);
+
+      setError(null);
+    } catch (err) {
+      console.error('Error exporting links:', err.message, err.response?.status);
+      if (err.response?.status === 401) {
+        setError('Authentication token missing. Please log in again.');
+      } else if (err.response?.status === 404) {
+        setError('Project not found');
+      } else if (err.response?.status === 400) {
+        setError('No manual links found to export');
+      } else {
+        setError(err.response?.data?.error || 'Failed to export links');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchLinks();
 
@@ -193,37 +231,6 @@ const ManualLinks = ({
     }
   };
 
-  const handleExportToCSV = () => {
-    if (!links || links.length === 0) return;
-
-    const csvRows = [];
-    const headers = [
-      '#,URL,Target Domain,Status,Response Code,Indexable,Rel,Link Type,Canonical URL',
-    ];
-    csvRows.push(headers.join(','));
-
-    links.forEach((link, index) => {
-      const status = getStatus(link);
-      const row = [
-        index + 1,
-        `"${link.url}"`,
-        link.targetDomains && link.targetDomains.length > 0 ? `"${link.targetDomains.join(', ')}"` : 'N/A',
-        status,
-        status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.responseCode || 'N/A',
-        status === 'Not checked yet...' || status === 'Checking' ? 'N/A' :
-          link.isIndexable === null ? 'Unknown' : link.isIndexable ? 'Yes' : 'No',
-        status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.rel || 'none',
-        status === 'Not checked yet...' || status === 'Checking' ? 'N/A' : link.rel === 'not found' ? 'not found' : link.linkType || 'not found',
-        link.canonicalUrl ? `"${link.canonicalUrl}"` : 'None',
-      ];
-      csvRows.push(row.join(','));
-    });
-
-    const csvContent = csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    saveAs(blob, `links_analysis_${projectId}.csv`);
-  };
-
   const handleMouseEnterLink = (linkId) => {
     setHoveredLinkId(linkId);
   };
@@ -248,78 +255,90 @@ const ManualLinks = ({
       variants={fadeInUp}
     >
       <div ref={buttonsRef} className="mb-6 flex items-center gap-3 sm:gap-4 border-b border-gray-200 pb-4">
-  {/* Mobile Buttons (in a row) */}
-  <div className="sm:hidden flex overflow-x-auto gap-3">
-    <button
-      onClick={() => wrappedHandleCheckLinks(projectId)}
-      disabled={loading}
-      className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm whitespace-nowrap"
-    >
-      {loading ? 'Checking...' : 'Check All'}
-    </button>
-    <button
-      onClick={() => handleDeleteAllLinks(projectId)}
-      disabled={loading || links.length === 0}
-      className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm whitespace-nowrap"
-    >
-      {loading ? 'Deleting...' : 'Delete All'}
-    </button>
-    <button
-      onClick={() => setIsAddLinksModalOpen(true)}
-      className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 transition-colors shadow-md"
-    >
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-      </svg>
-    </button>
-  </div>
+        {/* Mobile Buttons (in a row) */}
+        <div className="sm:hidden flex overflow-x-auto gap-3">
+          <button
+            onClick={() => wrappedHandleCheckLinks(projectId)}
+            disabled={loading}
+            className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm whitespace-nowrap"
+          >
+            {loading ? 'Checking...' : 'Check All'}
+          </button>
+          <button
+            onClick={() => handleDeleteAllLinks(projectId)}
+            disabled={loading || links.length === 0}
+            className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm whitespace-nowrap"
+          >
+            {loading ? 'Deleting...' : 'Delete All'}
+          </button>
+          <button
+            onClick={handleExportLinks}
+            disabled={loading || links.length === 0}
+            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 disabled:bg-blue-300 transition-colors shadow-md text-sm whitespace-nowrap"
+          >
+            Export to Excel
+          </button>
+          <button
+            onClick={() => setIsAddLinksModalOpen(true)}
+            className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 transition-colors shadow-md"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
 
-  {/* Desktop Buttons (in a row with + justified to the right) */}
-  <div className="hidden sm:flex items-center justify-between gap-4 w-full">
-    <div className="flex gap-4">
-      <button
-        onClick={() => wrappedHandleCheckLinks(projectId)}
-        disabled={loading}
-        className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
-      >
-        {loading ? 'Checking...' : 'Check All Links'}
-      </button>
-      <button
-        onClick={() => handleDeleteAllLinks(projectId)}
-        disabled={loading || links.length === 0}
-        className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm sm:text-base"
-      >
-        {loading ? 'Deleting...' : 'Delete All Links'}
-      </button>
-      
-      <div className="min-w-[100px] p-2">
-          <h3 className="text-[10px] font-semibold text-gray-600">Unique Domains</h3>
-          <p className="text-sm font-bold text-gray-800">{domainSummary.uniqueDomains}</p>
+        {/* Desktop Buttons (in a row with + justified to the right) */}
+        <div className="hidden sm:flex items-center justify-between gap-4 w-full">
+          <div className="flex gap-4">
+            <button
+              onClick={() => wrappedHandleCheckLinks(projectId)}
+              disabled={loading}
+              className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
+            >
+              {loading ? 'Checking...' : 'Check All Links'}
+            </button>
+            <button
+              onClick={() => handleDeleteAllLinks(projectId)}
+              disabled={loading || links.length === 0}
+              className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm sm:text-base"
+            >
+              {loading ? 'Deleting...' : 'Delete All Links'}
+            </button>
+            <button
+              onClick={handleExportLinks}
+              disabled={loading || links.length === 0}
+              className="bg-blue-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-blue-600 disabled:bg-blue-300 transition-colors shadow-md text-sm sm:text-base"
+            >
+              Export to Excel
+            </button>
+            <div className="min-w-[100px] p-2">
+              <h3 className="text-[10px] font-semibold text-gray-600">Unique Domains</h3>
+              <p className="text-sm font-bold text-gray-800">{domainSummary.uniqueDomains}</p>
+            </div>
+            <div className="min-w-[100px] p-2">
+              <h3 className="text-[10px] font-semibold text-gray-600">Total Links</h3>
+              <p className="text-sm font-bold text-gray-800">{domainSummary.totalLinks}</p>
+            </div>
+            <div className="min-w-[100px] p-2">
+              <h3 className="text-[10px] font-semibold text-gray-600">Avg Load Time</h3>
+              <p className="text-sm font-bold text-gray-800">{avgLoadTime} s</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex overflow-x-auto gap-3 my-2">
+              <button
+                onClick={() => setIsAddLinksModalOpen(true)}
+                className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 transition-colors shadow-md"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="min-w-[100px] p-2">
-          <h3 className="text-[10px] font-semibold text-gray-600">Total Links</h3>
-          <p className="text-sm font-bold text-gray-800">{domainSummary.totalLinks}</p>
-        </div>
-        <div className="min-w-[100px] p-2">
-          <h3 className="text-[10px] font-semibold text-gray-600">Avg Load Time</h3>
-          <p className="text-sm font-bold text-gray-800">{avgLoadTime} s</p>
-        </div>
-    </div>
-    <div className="flex items-center gap-4">
-      
-      <div className="flex overflow-x-auto gap-3 my-2">
-        <button
-        onClick={() => setIsAddLinksModalOpen(true)}
-        className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 transition-colors shadow-md"
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-        </svg>
-      </button>
       </div>
-    </div>
-  </div>
-</div>
       {error && <p className="text-red-500 mb-6 text-sm">{error}</p>}
       <div className="rounded-lg shadow-sm overflow-x-auto">
         <table ref={tableRef} className="w-full max-w-full bg-white border border-gray-200 table-auto min-w-full">
