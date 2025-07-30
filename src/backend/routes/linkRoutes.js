@@ -28,7 +28,7 @@ router.get('/:projectId/links', linkController.getLinks);
 router.delete('/:projectId/links', linkController.deleteAllLinks);
 router.post('/:projectId/links/check', linkController.checkLinks);
 router.delete('/:projectId/links/:id', linkController.deleteLink);
-router.get('/:projectId/links/export', inkController.exportLinksToExcel);
+router.get('/:projectId/links/export', linkController.exportLinksToExcel);
 
 // Google Sheets (в рамках проекта)
 router.get('/projects/:projectId/activeTasks', linkController.getActiveTasks);
