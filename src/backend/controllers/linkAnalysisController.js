@@ -6,8 +6,7 @@ const Project = require('../models/Project');
 const User = require('../models/User');
 const FrontendLink = require('../models/FrontendLink');
 const userAgents = require('./userAgents');
-const { initializeBrowser, closeBrowser, resolveShortUrl } = require('./browserUtils');
-const { detectCaptcha, handleCaptcha } = require('./captchaUtils');
+const { createContext, closeContext, resolveShortUrl } = require('./playwrightUtils');
 const { analysisQueue } = require('./taskQueue');
 
 const validateUrlAndTask = async (link) => {
@@ -81,40 +80,40 @@ const normalizeUrl = (url) => {
 };
 
 const navigateToPage = async (page, url, selectedAgent) => {
-  await page.setUserAgent(selectedAgent.ua);
+  // Playwright: установка заголовков через context.setExtraHTTPHeaders или напрямую
   await page.setExtraHTTPHeaders(selectedAgent.headers);
-  await page.setViewport({ width: 1920, height: 1080 });
-
-  await page.setRequestInterception(true);
-  page.removeAllListeners('request');
-  page.on('request', (req) => {
-  const type = req.resourceType();
-  const url = req.url();
-
-  if (
-    ['media', 'font'].includes(type) ||
-    (type === 'image' && !url.includes('logo') && !url.includes('icon'))
-  ) {
-    req.abort();
-  } else {
-    req.continue();
-  }
-});
+  
+  // Playwright: перехват запросов через page.route()
+  await page.route('**/*', (route) => {
+    const request = route.request();
+    const resourceType = request.resourceType();
+    const requestUrl = request.url();
+    
+    // Блокируем медиа, шрифты и изображения (кроме logo/icon)
+    if (
+      ['media', 'font'].includes(resourceType) ||
+      (resourceType === 'image' && !requestUrl.includes('logo') && !requestUrl.includes('icon'))
+    ) {
+      route.abort();
+    } else {
+      route.continue();
+    }
+  });
 
   const startTime = Date.now();
   let response;
   let finalUrl = url;
 
   try {
-    console.log(`Navigating to ${url}`);
+    console.log(`[NavigateToPage] Navigating to ${url} with UA: ${selectedAgent.ua.substring(0, 50)}...`);
     response = await page.goto(url, {
-      waitUntil: ['domcontentloaded', 'networkidle2'],
+      waitUntil: 'domcontentloaded',
       timeout: 120000,
     });
     finalUrl = page.url();
-    console.log(`Page loaded with status: ${response?.status() || 'No response'}, Final URL: ${finalUrl}`);
+    console.log(`[NavigateToPage] ✅ Page loaded with status: ${response?.status() || 'No response'}, Final URL: ${finalUrl}`);
   } catch (error) {
-    console.error(`Navigation failed for ${url}:`, error.message);
+    console.error(`[NavigateToPage] ❌ Navigation failed for ${url}:`, error.message);
     throw error;
   }
 
@@ -127,49 +126,52 @@ const navigateToPage = async (page, url, selectedAgent) => {
 };
 
 const extractPageData = async (page, link, response, loadTime, finalUrl) => {
-  let $ = cheerio.load(await page.evaluate(() => document.documentElement.outerHTML));
+  // Playwright: получаем HTML через page.content()
+  let $ = cheerio.load(await page.content());
 
   const statusCode = response ? response.status() : null;
   if (statusCode === 200 || statusCode === 304) {
     try {
-      console.log(`Attempting to scroll page for ${link.url} (status: ${statusCode})`);
+      console.log(`[ExtractPageData] Attempting to scroll page for ${link.url} (status: ${statusCode})`);
+      
+      // Playwright: скроллинг страницы
       await page.evaluate(async () => {
         const targetElement = document.querySelector('footer') ||
           Array.from(document.querySelectorAll('*:not(script):not(style)'))
             .find(el => el.textContent.includes('©') || el.textContent.toLowerCase().includes('copyright'));
+        
         if (targetElement) {
           targetElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
         } else {
           window.scrollTo(0, document.body.scrollHeight);
         }
-
+        
         await new Promise(resolve => setTimeout(resolve, 1000));
-
         window.scrollTo(0, document.body.scrollHeight);
       });
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      console.log(`Successfully scrolled page twice for ${link.url}`);
+      // Playwright: waitForTimeout вместо Promise
+      await page.waitForTimeout(2000);
+      console.log(`[ExtractPageData] ✅ Successfully scrolled page twice for ${link.url}`);
     } catch (scrollError) {
-      console.error(`Failed to scroll page for ${link.url}:`, scrollError.message);
+      console.error(`[ExtractPageData] ⚠️ Failed to scroll page for ${link.url}:`, scrollError.message);
     }
   }
 
-  // Ждём полной загрузки страницы, включая динамический контент
-  await page.waitForFunction(
-    () => document.readyState === 'complete',
-    { timeout: 10000 },
-  ).catch(() => console.log(`Timeout waiting for page to fully load for ${link.url}`));
+  // Playwright: ожидание загрузки страницы
+  await page.waitForLoadState('domcontentloaded', { timeout: 10000 })
+    .catch(() => console.log(`[ExtractPageData] Timeout waiting for page to fully load for ${link.url}`));
 
   // Дополнительная задержка для асинхронного контента
   const randomDelay = Math.floor(Math.random() * 2000) + 1000;
-  await new Promise(resolve => setTimeout(resolve, randomDelay));
+  await page.waitForTimeout(randomDelay);
 
+  // Playwright: получаем обновленный HTML после скроллинга
   let content;
   try {
-    content = await page.evaluate(() => document.documentElement.outerHTML);
+    content = await page.content();
   } catch (error) {
-    console.error(`Failed to extract HTML for ${link.url}:`, error.message);
+    console.error(`[ExtractPageData] ❌ Failed to extract HTML for ${link.url}:`, error.message);
     link.status = 'broken';
     link.errorDetails = `Failed to extract HTML: ${error.message}`;
     link.isIndexable = false;
@@ -177,7 +179,7 @@ const extractPageData = async (page, link, response, loadTime, finalUrl) => {
     link.responseCode = 'Error';
     link.overallStatus = 'Problem';
     await link.save();
-    return { isMetaRobotsFound: false, linksFound: null, captchaType: 'none', captchaToken: null };
+    return { isMetaRobotsFound: false, linksFound: null };
   }
 
   $ = cheerio.load(content);
@@ -376,10 +378,10 @@ if (link.isIndexable && link.canonicalUrl) {
   const cleanTargetDomains = link.targetDomains.map(domain => normalizeUrl(domain));
   const linksFound = await findLinkForDomains(cleanTargetDomains);
 
-  return { isMetaRobotsFound, linksFound, captchaType: 'none', captchaToken: null };
+  return { isMetaRobotsFound, linksFound };
 };
 
-const updateLinkStatus = (link, isMetaRobotsFound, linksFound, captchaType, captchaToken) => {
+const updateLinkStatus = (link, isMetaRobotsFound, linksFound) => {
   const isLinkFound = linksFound !== null;
   const hasUsefulData = isLinkFound || isMetaRobotsFound;
 
@@ -389,9 +391,9 @@ const updateLinkStatus = (link, isMetaRobotsFound, linksFound, captchaType, capt
       link.rel = linksFound.rel || '';
       link.anchorText = linksFound.anchorText;
       const relValues = link.rel ? link.rel.toLowerCase().split(' ') : [];
-      console.log(`Link ${link.url}: rel="${link.rel}", relValues=${relValues}`); // Отладка
+      console.log(`[UpdateLinkStatus] Link ${link.url}: rel="${link.rel}", relValues=${relValues}`);
       link.linkType = relValues.includes('nofollow') ? 'nofollow' : 'dofollow';
-      link.errorDetails = captchaType !== 'none' ? `${captchaType} solved, token: ${captchaToken}` : link.errorDetails || '';
+      link.errorDetails = link.errorDetails || '';
     } else {
       link.status = 'active';
       link.rel = 'not found';
@@ -413,24 +415,28 @@ const updateLinkStatus = (link, isMetaRobotsFound, linksFound, captchaType, capt
 };
 
 const checkLinkStatus = async (link) => {
-  let browser;
+  let context;
   let page;
   let attempt = 0;
   const maxAttempts = 3;
-  console.log(`Starting analysis for link: ${link.url}`);
+  console.log(`[CheckLinkStatus] 🔍 Starting analysis for link: ${link.url}`);
 
   const { isValid, link: updatedLink } = await validateUrlAndTask(link);
   if (!isValid) return updatedLink;
 
   while (attempt < maxAttempts) {
     try {
-      console.log(`Attempt ${attempt + 1} to check link ${link.url}`);
+      console.log(`[CheckLinkStatus] 🔄 Attempt ${attempt + 1}/${maxAttempts} to check link ${link.url}`);
 
-      browser = await initializeBrowser();
-      page = await browser.newPage();
-      await page.setDefaultNavigationTimeout(120000);
-
+      // Playwright: создаем контекст с user agent для ротации
       const selectedAgent = userAgents[attempt % userAgents.length];
+      context = await createContext({ userAgent: selectedAgent.ua });
+      page = await context.newPage();
+      
+      // Playwright: устанавливаем таймауты
+      page.setDefaultNavigationTimeout(120000);
+      page.setDefaultTimeout(120000);
+
       let response, loadTime, finalUrl;
       try {
         const navigationResult = await navigateToPage(page, link.url, selectedAgent);
@@ -476,38 +482,38 @@ const checkLinkStatus = async (link) => {
         }
       }
 
-      const { isMetaRobotsFound, linksFound, captchaType, captchaToken } = await extractPageData(page, link, response, loadTime, finalUrl);
-      updateLinkStatus(link, isMetaRobotsFound, linksFound, captchaType, captchaToken);
+      const { isMetaRobotsFound, linksFound } = await extractPageData(page, link, response, loadTime, finalUrl);
+      updateLinkStatus(link, isMetaRobotsFound, linksFound);
 
       await link.save();
-      console.log(`Finished analysis for link: ${link.url}, status: ${link.status}, overallStatus: ${link.overallStatus}`);
+      console.log(`[CheckLinkStatus] ✅ Finished analysis for link: ${link.url}, status: ${link.status}, overallStatus: ${link.overallStatus}`);
       return link;
     } catch (error) {
-      console.error(`Error on attempt ${attempt + 1} for ${link.url}:`, error.message);
+      console.error(`[CheckLinkStatus] ❌ Error on attempt ${attempt + 1} for ${link.url}:`, error.message);
       attempt++;
       if (attempt >= maxAttempts) {
-        console.error(`Max attempts reached for ${link.url}, marking as broken`);
+        console.error(`[CheckLinkStatus] ⛔ Max attempts reached for ${link.url}, marking as broken`);
         link.status = 'broken';
         link.errorDetails = `Failed after ${maxAttempts} attempts: ${error.message}`;
         link.overallStatus = 'Problem';
         await link.save();
         return link;
       }
-      if (browser) {
-        await closeBrowser(browser);
-        browser = null;
+      if (context) {
+        await closeContext(context);
+        context = null;
       }
       await new Promise(resolve => setTimeout(resolve, 2000));
     } finally {
       if (page) {
-        await page.close().catch(err => console.error(`Error closing page for ${link.url}:`, err));
+        await page.close().catch(err => console.error(`[CheckLinkStatus] Error closing page for ${link.url}:`, err.message));
         page = null;
       }
-      if (browser) {
-        await closeBrowser(browser);
-        browser = null;
+      if (context) {
+        await closeContext(context);
+        context = null;
       }
-      console.log(`Browser closed for ${link.url}`);
+      console.log(`[CheckLinkStatus] 🔒 Context closed for ${link.url}`);
     }
   }
 };
@@ -665,6 +671,8 @@ const checkLinks = async (req, res) => {
   const userId = req.userId;
 
   try {
+    console.log(`[CheckLinks] 🔍 Starting manual links analysis for project ${projectId}`);
+    
     const project = await Project.findOne({ _id: projectId, userId });
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
@@ -679,75 +687,63 @@ const checkLinks = async (req, res) => {
       return res.status(400).json({ error: 'No links found to analyze' });
     }
 
+    // Создаем задачу анализа
     const task = new AnalysisTask({
       projectId,
       userId,
       type: 'checkLinks',
       status: 'pending',
+      totalLinks: links.length,
+      processedLinks: 0,
+      progress: 0,
       data: { userId, projectId },
     });
     await task.save();
+    console.log(`[CheckLinks] ✅ Created analysis task ${task._id} with ${links.length} links`);
 
+    // Обновляем пользователя
     const user = await User.findById(userId);
-    user.activeTasks.set(projectId, task._id.toString());
+    user.activeTasks.set(projectId.toString(), task._id.toString());
     await user.save();
 
+    // Обновляем ссылки с taskId
     await FrontendLink.updateMany(
       { projectId, userId, source: 'manual' },
-      { $set: { taskId: task._id } }
+      { $set: { taskId: task._id, status: 'pending' } }
     );
-    console.log(`Updated FrontendLinks with taskId=${task._id} for project ${projectId}`);
+    console.log(`[CheckLinks] 📋 Updated ${links.length} links with taskId=${task._id}`);
 
-    const updatedLinks = await FrontendLink.find({ projectId, userId, source: 'manual' });
+    // Помечаем проект как анализируемый
+    project.isAnalyzingManual = true;
+    await project.save();
 
-    analysisQueue.push({
-      taskId: task._id,
-      projectId,
-      type: 'checkLinks',
-      req,
-      res,
-      userId,
-      wss: req.wss,
-      handler: async (task, callback) => {
-        console.log(`checkLinks handler: Starting analysis for project ${projectId}`);
-        let project;
-        try {
-          project = await Project.findOne({ _id: task.projectId, userId: task.userId });
-          if (!project) throw new Error('Project not found in handler');
-          project.isAnalyzingManual = true;
-          await project.save();
+    // НОВОЕ: Добавляем задачи в BullMQ очередь
+    const { addLinkAnalysisJobs, monitorTaskCompletion } = require('./taskQueue');
+    const result = await addLinkAnalysisJobs(task._id, projectId, userId, 'manual');
+    console.log(`[CheckLinks] ✅ Added ${result.added} jobs to BullMQ queue`);
+    
+    // Запускаем мониторинг завершения задачи
+    monitorTaskCompletion(task._id, projectId, userId, 'manual');
+    
+    // Отправляем WebSocket событие о начале анализа
+    const { broadcastAnalysisStarted } = require('../utils/websocketBroadcast');
+    broadcastAnalysisStarted(projectId, task._id.toString());
 
-          const processedLinks = await processLinksInBatches(updatedLinks, 20, projectId, task.wss, null, task.taskId);
-
-          console.log(`Finished link check for project ${projectId}`);
-          callback(null);
-        } catch (error) {
-          console.error(`Error in checkLinks for project ${projectId}:`, error);
-          callback(error);
-        } finally {
-          if (project) {
-            project.isAnalyzingManual = false;
-            await project.save();
-            console.log(`checkLinks handler: Set isAnalyzingManual to false for project ${projectId}`);
-          }
-          const user = await User.findById(task.userId);
-          if (user) {
-            user.activeTasks.delete(projectId);
-            await user.save();
-            console.log(`Cleared active task for project ${projectId} from user ${task.userId}`);
-          }
-          await AnalysisTask.findByIdAndDelete(task.taskId);
-          console.log(`Deleted AnalysisTask ${task.taskId} after completion`);
-        }
-      },
+    // Возвращаем успешный ответ сразу (задачи обрабатываются асинхронно)
+    res.json({ 
+      taskId: task._id, 
+      message: 'Analysis started',
+      totalLinks: links.length,
+      queuedJobs: result.added,
     });
-
-    res.json({ taskId: task._id });
   } catch (error) {
-    console.error('Error starting link check:', error);
-    res.status(500).json({ error: 'Failed to start link check' });
+    console.error('[CheckLinks] ❌ Error starting link check:', error.message);
+    res.status(500).json({ error: 'Failed to start link check', details: error.message });
   }
 };
+
+// DEPRECATED: Старый код с analysisQueue.push() удален
+// Теперь используется BullMQ через addLinkAnalysisJobs()
 
 const getAnalysisStatus = async (req, res) => {
   const { projectId } = req.params;
@@ -889,7 +885,6 @@ const computeStatsForLinks = (links) => {
   const statuses = {
     active: 0,
     broken: 0,
-    suspectedCaptcha: 0,
     timeout: 0,
     pending: 0,
     checking: 0,
@@ -897,7 +892,6 @@ const computeStatsForLinks = (links) => {
   links.forEach(link => {
     if (link.status === 'active') statuses.active++;
     else if (link.status === 'broken') statuses.broken++;
-    else if (link.status === 'suspected-captcha') statuses.suspectedCaptcha++;
     else if (link.status === 'timeout') statuses.timeout++;
     else if (link.status === 'pending') statuses.pending++;
     else if (link.status === 'checking') statuses.checking++;

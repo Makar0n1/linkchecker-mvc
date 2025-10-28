@@ -23,6 +23,8 @@ const ManualLinks = ({
   handleAddLinks,
   domainSummary,
   avgLoadTime,
+  isAnalyzingManual,
+  setIsAnalyzingManual,
 }) => {
   const [copiedField, setCopiedField] = useState(null);
   const [checkingLinks, setCheckingLinks] = useState(new Set());
@@ -98,16 +100,47 @@ const ManualLinks = ({
     ? `wss://api.link-check-pro.top`
     : `ws://localhost:${import.meta.env.VITE_BACKEND_PORT}`;
 
+  const [isFetching, setIsFetching] = React.useState(false);
+  
   const fetchLinks = async () => {
+    // Защита от одновременных запросов
+    if (isFetching) {
+      console.log('[ManualLinks] Fetch already in progress, skipping...');
+      return;
+    }
+    
     const token = localStorage.getItem('token');
     try {
+      setIsFetching(true);
       const response = await axios.get(`${apiBaseUrl}/${projectId}/links`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 
+          Authorization: `Bearer ${token}`,
+        },
       });
-      setLinks(Array.isArray(response.data) ? response.data : []);
+      const newLinks = Array.isArray(response.data) ? response.data : [];
+      console.log('[ManualLinks] Fetched links:', newLinks.length, 'links');
+      
+      // Логируем первую ссылку для дебага (только если есть изменения)
+      if (newLinks.length > 0 && newLinks[0].lastChecked) {
+        console.log('[ManualLinks] Sample link data:', {
+          url: newLinks[0].url.substring(0, 50),
+          status: newLinks[0].status,
+          responseCode: newLinks[0].responseCode,
+          isIndexable: newLinks[0].isIndexable,
+          rel: newLinks[0].rel,
+          linkType: newLinks[0].linkType,
+        });
+      }
+      
+      setLinks(newLinks);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to fetch links');
-      setLinks([]);
+      console.error('[ManualLinks] Error fetching links:', err.message);
+      // Не показываем ошибку если это просто таймаут или сетевая ошибка
+      if (err.code !== 'ECONNABORTED' && err.code !== 'ERR_NETWORK') {
+        setError(err.response?.data?.error || 'Failed to fetch links');
+      }
+    } finally {
+      setIsFetching(false);
     }
   };
 
@@ -115,24 +148,61 @@ const ManualLinks = ({
     const ws = new WebSocket(wsBaseUrl);
 
     ws.onopen = () => {
+      console.log('[ManualLinks] WebSocket connected');
       ws.send(JSON.stringify({ type: 'subscribe', projectId }));
     };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === 'analysisComplete' && data.projectId === projectId) {
+      console.log('[ManualLinks] WebSocket message received:', data.type);
+      
+      // Обработка начала анализа
+      if (data.type === 'analysisStarted' && data.projectId === projectId) {
+        console.log('[ManualLinks] Analysis started!');
+        setIsAnalyzingManual(true);
+        setLoading(true);
+        const linkIds = links.map(link => link._id);
+        setCheckingLinks(new Set(linkIds));
+      }
+      
+      // Обработка обновлений прогресса
+      if (data.type === 'progress' && data.data && data.data.projectId === projectId) {
+        console.log('[ManualLinks] Progress update:', {
+          progress: data.data.progress,
+          processedLinks: data.data.processedLinks,
+          totalLinks: data.data.totalLinks
+        });
+        // Немедленно обновляем ссылки при каждом прогрессе
         fetchLinks();
+      }
+      
+      // Обработка завершения анализа
+      if (data.type === 'analysisComplete' && data.projectId === projectId) {
+        console.log('[ManualLinks] ✅ Analysis complete! Unlocking buttons...');
+        console.log('[ManualLinks] Setting isAnalyzingManual to FALSE');
+        setIsAnalyzingManual(false);
+        console.log('[ManualLinks] Setting loading to FALSE');
         setLoading(false);
+        console.log('[ManualLinks] Clearing checkingLinks');
         setCheckingLinks(new Set());
+        console.log('[ManualLinks] Fetching final links...');
+        fetchLinks();
+        
+        // Дополнительное обновление через 2 секунды для уверенности
+        setTimeout(() => {
+          console.log('[ManualLinks] Final fetch after completion');
+          fetchLinks();
+        }, 2000);
       }
     };
 
     ws.onclose = () => {
-      setTimeout(connectWebSocket, 5000);
+      console.log('[ManualLinks] WebSocket closed, reconnecting in 3s...');
+      setTimeout(connectWebSocket, 3000);
     };
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error('[ManualLinks] WebSocket error:', error);
       ws.close();
     };
 
@@ -182,10 +252,21 @@ const ManualLinks = ({
 
     const ws = connectWebSocket();
 
+    // Polling для обновления во время анализа (умеренная частота)
+    const pollingInterval = setInterval(() => {
+      // Проверяем, идет ли анализ
+      const isCurrentlyAnalyzing = loading || checkingLinks.size > 0;
+      if (isCurrentlyAnalyzing && !isFetching) {
+        console.log('[ManualLinks] Polling: Fetching links during analysis...');
+        fetchLinks();
+      }
+    }, 3000); // Каждые 3 секунды (баланс между скоростью и нагрузкой)
+
     return () => {
       ws.close();
+      clearInterval(pollingInterval);
     };
-  }, [projectId]);
+  }, [projectId, loading, checkingLinks.size]);
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
@@ -193,17 +274,26 @@ const ManualLinks = ({
   };
 
   const getStatus = (link) => {
-    if (checkingLinks.has(link._id)) return 'Checking';
+    // Проверяем статус из базы данных, а не из checkingLinks Set
+    // Это позволяет видеть реальный статус каждой ссылки
     if (!link.status || link.status === 'pending') return 'Not checked yet...';
     if (link.status === 'checking') return 'Checking';
+    
+    // Если ссылка имеет lastChecked, значит она уже проанализирована
+    if (link.lastChecked) {
+      const isOk =
+        link.responseCode === '200' &&
+        link.isIndexable === true &&
+        link.rel !== 'not found' &&
+        (link.linkType === 'dofollow' || link.linkType === 'nofollow');
 
-    const isOk =
-      link.responseCode === '200' &&
-      link.isIndexable === true &&
-      link.rel !== 'not found' &&
-      (link.linkType === 'dofollow' || link.linkType === 'nofollow');
-
-    return isOk ? 'OK' : 'Problem';
+      return isOk ? 'OK' : 'Problem';
+    }
+    
+    // Если checkingLinks содержит эту ссылку, но lastChecked нет, значит она в процессе
+    if (checkingLinks.has(link._id)) return 'Checking';
+    
+    return 'Not checked yet...';
   };
 
   const copyToClipboard = (key) => {
@@ -222,14 +312,38 @@ const ManualLinks = ({
     const linkIds = links.map(link => link._id);
     setCheckingLinks(new Set(linkIds));
     setLoading(true);
+    setIsAnalyzingManual(true); // Устанавливаем флаг анализа
+    
+    // Обнуляем данные в таблице
+    setLinks(prevLinks => prevLinks.map(link => ({
+      ...link,
+      status: 'pending',
+      responseCode: null,
+      isIndexable: null,
+      indexabilityStatus: null,
+      rel: null,
+      linkType: null,
+      anchorText: null,
+      canonicalUrl: null,
+      redirectUrl: null,
+      overallStatus: null,
+      errorDetails: null,
+      lastChecked: null,
+      loadTime: null,
+    })));
+    
     try {
       await handleCheckLinks(projectId);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to check links');
       setLoading(false);
+      setIsAnalyzingManual(false);
       setCheckingLinks(new Set());
     }
   };
+
+  // Проверяем есть ли проанализированные ссылки (для Export to Excel)
+  const hasAnalyzedLinks = links.some(link => link.lastChecked);
 
   const handleMouseEnterLink = (linkId) => {
     setHoveredLinkId(linkId);
@@ -259,28 +373,29 @@ const ManualLinks = ({
         <div className="sm:hidden flex overflow-x-auto gap-3">
           <button
             onClick={() => wrappedHandleCheckLinks(projectId)}
-            disabled={loading}
-            className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm whitespace-nowrap"
+            disabled={isAnalyzingManual || links.length === 0}
+            className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed transition-colors shadow-md text-sm whitespace-nowrap"
           >
-            {loading ? 'Checking...' : 'Check All'}
+            {isAnalyzingManual ? 'Checking...' : 'Check All'}
           </button>
           <button
             onClick={() => handleDeleteAllLinks(projectId)}
-            disabled={loading || links.length === 0}
-            className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm whitespace-nowrap"
+            disabled={isAnalyzingManual || links.length === 0}
+            className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 disabled:cursor-not-allowed transition-colors shadow-md text-sm whitespace-nowrap"
           >
-            {loading ? 'Deleting...' : 'Delete All'}
+            {isAnalyzingManual ? 'Deleting...' : 'Delete All'}
           </button>
           <button
             onClick={handleExportLinks}
-            disabled={loading || links.length === 0}
-            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 disabled:bg-blue-300 transition-colors shadow-md text-sm whitespace-nowrap"
+            disabled={isAnalyzingManual || !hasAnalyzedLinks}
+            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed transition-colors shadow-md text-sm whitespace-nowrap"
           >
             Export to Excel
           </button>
           <button
             onClick={() => setIsAddLinksModalOpen(true)}
-            className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 transition-colors shadow-md"
+            disabled={isAnalyzingManual}
+            className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed transition-colors shadow-md"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
@@ -293,22 +408,22 @@ const ManualLinks = ({
           <div className="flex gap-4">
             <button
               onClick={() => wrappedHandleCheckLinks(projectId)}
-              disabled={loading}
-              className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
+              disabled={isAnalyzingManual || links.length === 0}
+              className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed transition-colors shadow-md text-sm sm:text-base"
             >
-              {loading ? 'Checking...' : 'Check All Links'}
+              {isAnalyzingManual ? 'Checking...' : 'Check All Links'}
             </button>
             <button
               onClick={() => handleDeleteAllLinks(projectId)}
-              disabled={loading || links.length === 0}
-              className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors shadow-md text-sm sm:text-base"
+              disabled={isAnalyzingManual || links.length === 0}
+              className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-red-600 disabled:bg-red-300 disabled:cursor-not-allowed transition-colors shadow-md text-sm sm:text-base"
             >
-              {loading ? 'Deleting...' : 'Delete All Links'}
+              {isAnalyzingManual ? 'Deleting...' : 'Delete All Links'}
             </button>
             <button
               onClick={handleExportLinks}
-              disabled={loading || links.length === 0}
-              className="bg-blue-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-blue-600 disabled:bg-blue-300 transition-colors shadow-md text-sm sm:text-base"
+              disabled={isAnalyzingManual || !hasAnalyzedLinks}
+              className="bg-blue-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed transition-colors shadow-md text-sm sm:text-base"
             >
               Export to Excel
             </button>
@@ -329,7 +444,8 @@ const ManualLinks = ({
             <div className="flex overflow-x-auto gap-3 my-2">
               <button
                 onClick={() => setIsAddLinksModalOpen(true)}
-                className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 transition-colors shadow-md"
+                disabled={isAnalyzingManual}
+                className="bg-green-500 text-white p-2 rounded-full hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed transition-colors shadow-md"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
@@ -491,8 +607,8 @@ const ManualLinks = ({
                     <td className="p-2 sm:p-3 whitespace-nowrap">
                       <button
                         onClick={() => handleDeleteLink(link._id, projectId)}
-                        disabled={loading}
-                        className="bg-red-500 text-white px-2 sm:px-3 py-1 rounded-lg hover:bg-red-600 disabled:bg-red-300 transition-colors text-xs sm:text-sm"
+                        disabled={isAnalyzingManual}
+                        className="bg-red-500 text-white px-2 sm:px-3 py-1 rounded-lg hover:bg-red-600 disabled:bg-red-300 disabled:cursor-not-allowed transition-colors text-xs sm:text-sm"
                       >
                         Delete
                       </button>
@@ -508,8 +624,8 @@ const ManualLinks = ({
         {hasMoreLinks && (
           <button
             onClick={handleLoadMore}
-            disabled={loading}
-            className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 transition-colors shadow-md text-sm sm:text-base"
+            disabled={isAnalyzingManual}
+            className="bg-green-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed transition-colors shadow-md text-sm sm:text-base"
           >
             Load More
           </button>
@@ -517,8 +633,8 @@ const ManualLinks = ({
         {currentPage > 1 && (
           <button
             onClick={handleCollapse}
-            disabled={loading}
-            className="bg-gray-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-gray-600 disabled:bg-gray-300 transition-colors shadow-md text-sm sm:text-base"
+            disabled={isAnalyzingManual}
+            className="bg-gray-500 text-white px-4 sm:px-6 py-2 rounded-lg hover:bg-gray-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors shadow-md text-sm sm:text-base"
           >
             Collapse
           </button>

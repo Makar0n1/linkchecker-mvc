@@ -12,6 +12,7 @@ const {
   refreshToken,
   getUserTasks,
   updatePassword,
+  logoutUser,
 } = require('./userController');
 const {
   createProject,
@@ -204,6 +205,7 @@ module.exports = {
   registerUser,
   exportLinksToExcel,
   loginUser: loginUserWithRememberMe,
+  logoutUser: [authMiddleware, logoutUser],
   updatePassword,
   getUserInfo: [authMiddleware, getUserInfo],
   createProject: [authMiddleware, createProject],

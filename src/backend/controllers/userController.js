@@ -251,6 +251,29 @@ const updatePassword = async (req, res) => {
   }
 };
 
+const logoutUser = async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    // Находим пользователя и очищаем токены Remember Me
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Очищаем rememberMeToken и refreshToken
+    user.rememberMeToken = null;
+    user.refreshToken = null;
+    await user.save();
+    
+    console.log(`logoutUser: User ${userId} logged out successfully`);
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('logoutUser: Error during logout', error);
+    res.status(500).json({ error: 'Failed to logout' });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
@@ -263,4 +286,5 @@ module.exports = {
   refreshToken,
   getUserTasks,
   updatePassword,
+  logoutUser,
 };

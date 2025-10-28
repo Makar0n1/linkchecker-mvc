@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import ManualLinks from './ManualLinks';
 import GoogleSheets from './GoogleSheets';
+import PingStatus from './PingStatus';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 
@@ -128,11 +129,29 @@ const ProjectDetails = () => {
     fetchProject();
     fetchAnalysisStatus();
     fetchStats('manual', setManualStats);
-    fetchStats('google_sheets', setSpreadsheetStats); // Убедимся, что используем правильный source
+    fetchStats('google_sheets', setSpreadsheetStats);
     fetchDomainSummary();
-    const interval = setInterval(fetchAnalysisStatus, 10000);
-    return () => clearInterval(interval);
-  }, [projectId, navigate]);
+    
+    // Периодическая проверка статуса анализа
+    const statusInterval = setInterval(fetchAnalysisStatus, 10000);
+    
+    // Периодическое обновление статистики во время анализа
+    const statsInterval = setInterval(() => {
+      if (isAnalyzingManual) {
+        console.log('[ProjectDetails] Polling: Updating manual stats during analysis...');
+        fetchStats('manual', setManualStats);
+      }
+      if (isAnalyzingSpreadsheet) {
+        console.log('[ProjectDetails] Polling: Updating spreadsheet stats during analysis...');
+        fetchStats('google_sheets', setSpreadsheetStats);
+      }
+    }, 10000); // Каждые 10 секунд
+    
+    return () => {
+      clearInterval(statusInterval);
+      clearInterval(statsInterval);
+    };
+  }, [projectId, navigate, isAnalyzingManual, isAnalyzingSpreadsheet]);
 
   useEffect(() => {
     if (isStatsModalOpen || isAddLinksModalOpen) {
@@ -226,6 +245,18 @@ const ProjectDetails = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       setLinks([]);
+      
+      // Сбрасываем domainSummary и avgLoadTime
+      setDomainSummary({ uniqueDomains: 0, totalLinks: 0 });
+      setManualStats(prev => prev ? { 
+        ...prev, 
+        averageLoadTime: 0,
+        linkTypes: { dofollow: 0, nofollow: 0 },
+        statuses: { total: 0 },
+        responseCodes: {},
+        indexability: { indexable: 0, nonIndexable: 0 }
+      } : null);
+      
       setError(null);
       setIsServerBusy(false);
     } catch (err) {
@@ -243,7 +274,7 @@ const ProjectDetails = () => {
   useEffect(() => {
     // Восстановить activeTab из localStorage для текущего projectId при монтировании
     const savedTab = localStorage.getItem(`activeTab_${projectId}`);
-    if (savedTab && ['manual', 'sheets'].includes(savedTab)) {
+    if (savedTab && ['manual', 'sheets', 'ping'].includes(savedTab)) {
       setActiveTab(savedTab);
       activeTabRef.current = savedTab;
     }
@@ -406,6 +437,16 @@ const ProjectDetails = () => {
           >
             Google Sheets
           </button>
+          <button
+            onClick={() => setActiveTab('ping')}
+            className={`py-2 px-4 text-sm bg-gray-100 font-medium rounded-t-lg transition-colors duration-200 ${
+              activeTab === 'ping'
+                ? 'bg-green-500 text-white border-b-2 border-green-500'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'
+            }`}
+          >
+            Ping Status
+          </button>
         </nav>
       </div>
 
@@ -499,6 +540,8 @@ const ProjectDetails = () => {
             handleAddLinks={handleAddLinks}
             domainSummary={domainSummary}
             avgLoadTime={manualStats?.averageLoadTime || 0}
+            isAnalyzingManual={isAnalyzingManual}
+            setIsAnalyzingManual={setIsAnalyzingManual}
           />
         )}
 
@@ -514,6 +557,13 @@ const ProjectDetails = () => {
             isAnalyzing={isAnalyzingSpreadsheet}
             stats={spreadsheetStats}
             renderStatsContent={renderStatsContent}
+          />
+        )}
+
+        {activeTab === 'ping' && (
+          <PingStatus
+            projectId={projectId}
+            setLoading={setLoading}
           />
         )}
       </div>

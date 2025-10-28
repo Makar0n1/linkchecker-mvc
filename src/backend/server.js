@@ -34,11 +34,18 @@ const port = process.env.BACKEND_PORT || 3000;
 // Инициализация очереди
 initQueue();
 
+// Импорт Agenda планировщика
+const { startAgenda } = require('./schedulers/agendaScheduler');
+
 // Настройка подключения к MongoDB
 mongoose.set('strictQuery', true);
 mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
   .then(async () => {
     console.log('server.js: Connected to MongoDB');
+    
+    // Запускаем Agenda планировщик после подключения к MongoDB
+    await startAgenda();
+    console.log('server.js: Agenda scheduler started');
 
     // Проверка коллекций
     console.log('server.js: Checking database for missing userId in Spreadsheets and Projects...');
@@ -165,6 +172,70 @@ app.use((req, res, next) => {
   next();
 });
 
+// Инициализация WebSocket broadcast утилит
+const { 
+  initializeWebSocket, 
+  broadcastProgress: broadcastProgressUtil 
+} = require('./utils/websocketBroadcast');
+
+// Инициализируем WebSocket после создания wss
+initializeWebSocket(wss);
+
+// Слушатель событий BullMQ для WebSocket обновлений
+const { linkAnalysisQueue } = require('./queues/linkQueue');
+const AnalysisTask = require('./models/AnalysisTask');
+
+// Функция для отправки обновления прогресса через WebSocket
+const broadcastProgress = async (taskId, projectId) => {
+  try {
+    const task = await AnalysisTask.findById(taskId);
+    if (!task) return;
+    
+    const progressData = {
+      taskId: task._id.toString(),
+      projectId: projectId,
+      status: task.status,
+      progress: task.progress,
+      processedLinks: task.processedLinks,
+      totalLinks: task.totalLinks,
+      estimatedTimeRemaining: task.estimatedTimeRemaining || 0,
+    };
+    
+    // Используем утилиту для отправки
+    broadcastProgressUtil(projectId, progressData);
+  } catch (error) {
+    console.error('[WebSocket] Error broadcasting progress:', error.message);
+  }
+};
+
+// Слушаем события completed для отправки финальных обновлений
+linkAnalysisQueue.on('completed', async (job, result) => {
+  const { taskId, projectId } = job.data;
+  if (taskId && projectId) {
+    await broadcastProgress(taskId, projectId);
+  }
+});
+
+// Периодический мониторинг активных задач для WebSocket обновлений
+setInterval(async () => {
+  try {
+    const activeTasks = await AnalysisTask.find({ 
+      status: { $in: ['pending', 'processing'] } 
+    });
+    
+    if (activeTasks.length > 0) {
+      console.log(`[WebSocket] Broadcasting progress for ${activeTasks.length} active tasks`);
+      for (const task of activeTasks) {
+        await broadcastProgress(task._id.toString(), task.projectId.toString());
+      }
+    }
+  } catch (error) {
+    console.error('[WebSocket] Error in periodic progress broadcast:', error.message);
+  }
+}, 2000); // Каждые 2 секунды (баланс между real-time и нагрузкой)
+
+console.log('[WebSocket] Real-time progress broadcasting initialized');
+
 // Обработка ошибок
 app.use((err, req, res, next) => {
   console.error(`server.js: Server error: ${err.message}`);
@@ -181,4 +252,7 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('server.js: Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-module.exports = { app, wss };
+module.exports = { 
+  app, 
+  wss
+};

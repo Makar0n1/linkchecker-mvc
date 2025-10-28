@@ -5,6 +5,7 @@ const spreadsheetController = require('../controllers/spreadsheetController');
 
 router.post('/register', linkController.registerUser);
 router.post('/login', linkController.loginUser);
+router.post('/logout', linkController.logoutUser);
 router.post('/encrypt-password', linkController.encryptPassword);
 router.post('/decrypt-password', linkController.decryptPassword);
 router.post('/verify-remember-me', linkController.verifyRememberMeToken);
@@ -38,6 +39,14 @@ router.get('/:projectId/spreadsheets', spreadsheetController.getSpreadsheets);
 router.post('/:projectId/spreadsheets/:spreadsheetId/run', spreadsheetController.runSpreadsheetAnalysis);
 router.delete('/:projectId/spreadsheets/:spreadsheetId', spreadsheetController.deleteSpreadsheet);
 router.post('/:projectId/spreadsheets/:spreadsheetId/cancel', spreadsheetController.cancelSpreadsheetAnalysis);
+
+// Ping Status (в рамках проекта)
+const pingController = require('../controllers/pingController');
+router.post('/:projectId/ping-spreadsheets', pingController.addPingSpreadsheet);
+router.get('/:projectId/ping-spreadsheets', pingController.getPingSpreadsheets);
+router.put('/:projectId/ping-spreadsheets/:pingSpreadsheetId', pingController.editPingSpreadsheet);
+router.delete('/:projectId/ping-spreadsheets/:pingSpreadsheetId', pingController.deletePingSpreadsheet);
+router.post('/:projectId/ping-spreadsheets/:pingSpreadsheetId/run', pingController.runPingAnalysis);
 
 // Профиль и подписка
 router.post('/select-plan', linkController.selectPlan);

@@ -61,8 +61,27 @@ const Dashboard = () => {
     fetchUser();
   }, [navigate]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const token = localStorage.getItem('token');
+    
+    // Отправляем запрос на сервер для инвалидации токенов в БД
+    try {
+      await axios.post(`${apiBaseUrl}/logout`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      console.log('Dashboard: Logout successful on server');
+    } catch (err) {
+      console.error('Dashboard: Error during logout request:', err);
+      // Продолжаем выход даже при ошибке
+    }
+    
+    // Удаляем все токены и данные Remember Me из localStorage
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('rememberMeToken');
+    localStorage.removeItem('encryptedPassword');
+    localStorage.removeItem('username');
+    
     navigate('/');
   };
 

@@ -662,9 +662,19 @@ const GoogleSheets = ({
   useEffect(() => {
     fetchSpreadsheets();
     fetchActiveTasks();
-    const statusInterval = setInterval(fetchActiveTasks, 10000);
+    
+    // Периодическая проверка активных задач
+    const statusInterval = setInterval(fetchActiveTasks, 10000); // Каждые 10 секунд
+    
+    // Периодическое обновление spreadsheets для актуализации статусов
+    const spreadsheetsInterval = setInterval(() => {
+      console.log('[GoogleSheets] Polling: Fetching spreadsheets to update statuses...');
+      fetchSpreadsheets();
+    }, 15000); // Каждые 15 секунд
+    
     return () => {
       clearInterval(statusInterval);
+      clearInterval(spreadsheetsInterval);
     };
   }, [projectId]);
 
