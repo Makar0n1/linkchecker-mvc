@@ -35,39 +35,114 @@ const normalizeUrl = (url) => {
   return `https://${url}`;
 };
 
-// Функция для пинга одного URL
+// User agents для ротации
+const userAgents = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+];
+
+// Функция для пинга одного URL с множественными стратегиями
 const pingUrl = async (url) => {
-  try {
-    // Нормализуем URL перед пингом
-    const normalizedUrl = normalizeUrl(url);
-    console.log(`[PingController] Pinging URL: ${normalizedUrl} (original: ${url})`);
+  const normalizedUrl = normalizeUrl(url);
+  console.log(`[PingController] 🔍 Pinging URL: ${normalizedUrl} (original: ${url})`);
+  
+  // Стратегии пинга (от быстрой к медленной)
+  const strategies = [
+    { timeout: 10000, name: 'Fast' },
+    { timeout: 20000, name: 'Medium' },
+    { timeout: 30000, name: 'Slow' },
+  ];
+  
+  let lastError = null;
+  
+  // Пробуем каждую стратегию
+  for (let i = 0; i < strategies.length; i++) {
+    const strategy = strategies[i];
+    const userAgent = userAgents[i % userAgents.length];
+    const startTime = Date.now(); // Выносим за пределы try
     
-    const startTime = Date.now();
-    const response = await axios.get(normalizedUrl, {
-      timeout: 30000,
-      validateStatus: () => true, // Принимаем любой статус код
-      maxRedirects: 5,
-    });
-    const loadTime = Date.now() - startTime;
-    
-    console.log(`[PingController] URL ${normalizedUrl} responded with status: ${response.status}, time: ${loadTime}ms`);
-    
-    return {
-      url: normalizedUrl,
-      status: response.status,
-      loadTime,
-      success: response.status >= 200 && response.status < 400,
-    };
-  } catch (error) {
-    console.error(`[PingController] Error pinging ${url}:`, error.message);
-    return {
-      url: normalizeUrl(url),
-      status: error.code || 'Error',
-      loadTime: 0,
-      success: false,
-      error: error.message,
-    };
+    try {
+      console.log(`[PingController] Attempt ${i + 1}/${strategies.length} (${strategy.name}, timeout: ${strategy.timeout}ms)`);
+      
+      const response = await axios.get(normalizedUrl, {
+        timeout: strategy.timeout,
+        validateStatus: () => true, // Принимаем любой статус код
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': userAgent,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache',
+        },
+      });
+      const loadTime = Date.now() - startTime;
+      
+      console.log(`[PingController] ✅ URL ${normalizedUrl} responded with status: ${response.status}, time: ${loadTime}ms`);
+      
+      return {
+        url: normalizedUrl,
+        status: response.status,
+        loadTime,
+        success: response.status >= 200 && response.status < 400,
+      };
+    } catch (error) {
+      const loadTime = Date.now() - startTime;
+      lastError = error;
+      console.warn(`[PingController] ⚠️ Attempt ${i + 1} failed for ${normalizedUrl}: ${error.code || error.message}`);
+      
+      // Если получили response в ошибке (например, 404, 500), возвращаем его
+      if (error.response) {
+        console.log(`[PingController] ⚡ Got error response with status: ${error.response.status}`);
+        
+        return {
+          url: normalizedUrl,
+          status: error.response.status,
+          loadTime,
+          success: error.response.status >= 200 && error.response.status < 400,
+        };
+      }
+      
+      // Если это не последняя стратегия, пробуем следующую
+      if (i < strategies.length - 1) {
+        console.log(`[PingController] 🔄 Trying next strategy...`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Задержка между попытками
+        continue;
+      }
+    }
   }
+  
+  // Все стратегии провалились
+  console.error(`[PingController] ❌ All strategies failed for ${normalizedUrl}:`, lastError?.code || lastError?.message);
+  
+  // Определяем статус ошибки
+  let errorStatus = 'Error';
+  if (lastError) {
+    if (lastError.code === 'ECONNABORTED' || lastError.code === 'ETIMEDOUT') {
+      errorStatus = 'Timeout';
+    } else if (lastError.code === 'ENOTFOUND' || lastError.code === 'EAI_AGAIN') {
+      errorStatus = 'DNS Error';
+    } else if (lastError.code === 'ECONNREFUSED') {
+      errorStatus = 'Connection Refused';
+    } else if (lastError.code === 'ECONNRESET') {
+      errorStatus = 'Connection Reset';
+    } else if (lastError.message.includes('certificate') || lastError.message.includes('SSL') || lastError.code === 'CERT_HAS_EXPIRED') {
+      errorStatus = 'SSL Error';
+    } else {
+      errorStatus = lastError.code || 'Error';
+    }
+  }
+  
+  return {
+    url: normalizedUrl,
+    status: errorStatus,
+    loadTime: 0,
+    success: false,
+    error: lastError?.message || 'Unknown error',
+  };
 };
 
 // Функция для импорта URLs из Google Sheets
@@ -235,7 +310,7 @@ const formatPingStatusColumn = async (spreadsheetId, gid, statusColumn, maxRows)
           index: 1,
         },
       },
-      // Условное форматирование: 4xx, 5xx, Error, Timeout -> Красный фон
+      // Условное форматирование: 4xx, 5xx, Error, Timeout, DNS Error, SSL Error и т.д. -> Красный фон
       {
         addConditionalFormatRule: {
           rule: {
@@ -250,7 +325,7 @@ const formatPingStatusColumn = async (spreadsheetId, gid, statusColumn, maxRows)
               condition: {
                 type: 'CUSTOM_FORMULA',
                 values: [{ 
-                  userEnteredValue: `=OR(LEFT(${String.fromCharCode(65 + columnIndex)}2,1)="4",LEFT(${String.fromCharCode(65 + columnIndex)}2,1)="5",${String.fromCharCode(65 + columnIndex)}2="Error",${String.fromCharCode(65 + columnIndex)}2="Timeout")` 
+                  userEnteredValue: `=OR(LEFT(${String.fromCharCode(65 + columnIndex)}2,1)="4",LEFT(${String.fromCharCode(65 + columnIndex)}2,1)="5",${String.fromCharCode(65 + columnIndex)}2="Error",${String.fromCharCode(65 + columnIndex)}2="Timeout",${String.fromCharCode(65 + columnIndex)}2="DNS Error",${String.fromCharCode(65 + columnIndex)}2="SSL Error",${String.fromCharCode(65 + columnIndex)}2="Connection Refused",${String.fromCharCode(65 + columnIndex)}2="Connection Reset",ISNUMBER(SEARCH("Error",${String.fromCharCode(65 + columnIndex)}2)))` 
                 }],
               },
               format: {
@@ -518,16 +593,25 @@ const executePingAnalysis = async (pingSpreadsheetId) => {
     
     console.log(`[PingController] Pinging ${urlsWithRows.length} URLs`);
     
-    // Пингуем все URLs и сохраняем rowIndex
+    // Пингуем URLs с ограничением параллельности (максимум 10 одновременно)
+    const { default: pLimitModule } = await import('p-limit');
+    const pLimit = pLimitModule;
+    const limit = pLimit(10); // Максимум 10 параллельных пингов
+    
     const results = await Promise.all(
-      urlsWithRows.map(async (urlData) => {
-        const pingResult = await pingUrl(urlData.url);
-        return {
-          ...pingResult,
-          rowIndex: urlData.rowIndex, // Сохраняем индекс строки
-        };
-      })
+      urlsWithRows.map((urlData) => 
+        limit(async () => {
+          console.log(`[PingController] Processing ${urlData.url} (row ${urlData.rowIndex})`);
+          const pingResult = await pingUrl(urlData.url);
+          return {
+            ...pingResult,
+            rowIndex: urlData.rowIndex, // Сохраняем индекс строки
+          };
+        })
+      )
     );
+    
+    console.log(`[PingController] Completed pinging ${results.length} URLs`);
     
     // Экспортируем результаты
     await exportResultsToSheet(
